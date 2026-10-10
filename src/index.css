@@ -1,0 +1,150 @@
+/* WaveMint design tokens + base styles.
+   Component styles live in App.css and consume these variables. */
+
+:root {
+  /* Surfaces */
+  --wm-bg-base: #080d24;
+  --wm-bg-raised: #0b1534;
+  --wm-surface: #0f1a3a;
+  --wm-surface-2: #121d3b;
+  --wm-surface-input: #0a1230;
+  --wm-surface-hover: #172447;
+
+  /* Borders */
+  --wm-border: #22305a;
+  --wm-border-subtle: rgba(41, 55, 90, 0.6);
+  --wm-border-strong: #33446f;
+
+  /* Brand accents */
+  --wm-cyan: #1fc8ff;
+  --wm-azure: #4a8dff;
+  --wm-violet: #8a5cff;
+  --wm-accent: var(--wm-azure);
+  --wm-gradient: linear-gradient(135deg, #3f8bff 0%, #6a6cff 55%, #8a5cff 100%);
+  --wm-gradient-progress: linear-gradient(90deg, var(--wm-cyan), var(--wm-azure) 55%, var(--wm-violet));
+  --wm-accent-soft: rgba(74, 141, 255, 0.14);
+  --wm-focus-ring: 0 0 0 3px rgba(74, 141, 255, 0.32);
+
+  /* Text */
+  --wm-text: #f4f7ff;
+  --wm-text-muted: #a6b4d1;
+  --wm-text-subtle: #7684a6;
+  --wm-text-on-accent: #ffffff;
+
+  /* Semantic */
+  --wm-success: #5ee0a8;
+  --wm-success-bg: rgba(46, 196, 132, 0.12);
+  --wm-success-border: rgba(94, 224, 168, 0.28);
+  --wm-danger: #ff9bb3;
+  --wm-danger-bg: rgba(255, 92, 132, 0.1);
+  --wm-danger-border: rgba(255, 120, 155, 0.3);
+
+  /* Typography */
+  --wm-font: "Poppins", "Segoe UI", system-ui, sans-serif;
+  --wm-text-xs: 12px;
+  --wm-text-sm: 13px;
+  --wm-text-base: 14px;
+  --wm-text-md: 16px;
+  --wm-text-lg: 20px;
+  --wm-text-xl: 24px;
+
+  /* Spacing (4px scale) */
+  --wm-space-1: 4px;
+  --wm-space-2: 8px;
+  --wm-space-3: 12px;
+  --wm-space-4: 16px;
+  --wm-space-5: 20px;
+  --wm-space-6: 24px;
+  --wm-space-8: 32px;
+  --wm-space-10: 40px;
+
+  /* Shape */
+  --wm-radius-sm: 8px;
+  --wm-radius-md: 10px;
+  --wm-radius-lg: 14px;
+  --wm-radius-xl: 18px;
+  --wm-control-h: 40px;
+  --wm-control-h-sm: 32px;
+  --wm-shadow-panel: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 12px 32px rgba(2, 5, 18, 0.35);
+
+  /* Motion */
+  --wm-ease: cubic-bezier(0.2, 0, 0, 1);
+  --wm-dur: 160ms;
+
+  color-scheme: dark;
+  font-family: var(--wm-font);
+  font-size: var(--wm-text-base);
+  line-height: 1.5;
+  color: var(--wm-text);
+  background: var(--wm-bg-base);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(1200px 520px at 85% -10%, rgba(138, 92, 255, 0.07), transparent 70%),
+    radial-gradient(900px 480px at 0% -5%, rgba(31, 200, 255, 0.05), transparent 70%),
+    linear-gradient(180deg, var(--wm-bg-raised) 0%, var(--wm-bg-base) 480px);
+  background-attachment: fixed;
+  background-color: var(--wm-bg-base);
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+img {
+  max-width: 100%;
+}
+
+::selection {
+  background: rgba(74, 141, 255, 0.35);
+}
+
+/* Quiet, on-brand scrollbars (Chromium/Electron). */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--wm-border);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--wm-border-strong);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
