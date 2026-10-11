@@ -211,6 +211,13 @@ WaveMint already tried the safe alternatives automatically. YouTube changes ofte
 </details>
 
 <details>
+<summary><b>Saving straight into iTunes</b></summary>
+
+You can choose iTunes' **Automatically Add to iTunes** folder (usually `MusiciTunesiTunes MediaAutomatically Add to iTunes`) as the output folder. WaveMint only places the finished, tagged MP3 there, iTunes imports it right away, and WaveMint shows "added to iTunes automatically".
+
+</details>
+
+<details>
 <summary><b>"WaveMint couldn't connect to YouTube"</b></summary>
 
 WaveMint retries brief connection problems by itself. If you still see this, check your internet connection (and any VPN or proxy), then click **Retry**.

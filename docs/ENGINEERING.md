@@ -61,6 +61,12 @@ Artwork cropping, FFmpeg image processing and metadata embedding were not
 changed. Their error messages are now short ("FFmpeg couldn't process the
 file.") with the FFmpeg output kept in diagnostics.
 
+### Work folders
+
+Each extraction runs in its own folder under `%TEMP%WaveMint<token>`: yt-dlp's download, `.info.json`, the MP3 conversion, artwork and the tagged result all stay there. Only the finished, tagged MP3 is moved into the output folder (`electron/outputFiles.cjs`: a rename on the same drive, otherwise a non-overwriting copy), and the work folder is always removed. Leftovers from a crash are removed at startup after 24 hours.
+
+This fixed a real failure: with iTunes' **Automatically Add to iTunes** folder as the output folder, iTunes moved yt-dlp's temporary `.webm` into `Not Added` before FFprobe could read it ("unable to obtain file audio codec with ffprobe"), and would otherwise have imported an untagged temporary MP3. When the output folder is an iTunes/Music auto-add folder, WaveMint now reports "added to iTunes automatically" instead of offering **Open in iTunes** for a file iTunes has already moved.
+
 ### Progress phases
 
 The main process sends `{ phase, percent?, reason? }`; the renderer maps phases

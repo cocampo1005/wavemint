@@ -931,8 +931,15 @@ function App() {
         },
       });
 
-      setStatusMessage("MP3 extracted successfully");
       setLastDownloadedFile(response.filePath || "");
+      if (response.autoImported) {
+        // Saved into iTunes' "Automatically Add" folder: iTunes takes it
+        // from there, so there is nothing left to open.
+        setStatusMessage("MP3 added to iTunes automatically");
+        setItunesOpened(true);
+      } else {
+        setStatusMessage("MP3 extracted successfully");
+      }
     } catch (err) {
       showError(err, "Download failed");
     } finally {
@@ -1070,6 +1077,7 @@ function App() {
       .map((entry) => entry.extractedFilePath);
     const pendingEntries = selectedEntries.filter((entry) => !entry.extractedFilePath);
     const skipped = [];
+    let autoImported = false;
 
     try {
       for (let index = 0; index < pendingEntries.length; index += 1) {
@@ -1096,6 +1104,7 @@ function App() {
 
           if (response?.filePath) {
             completedFiles.push(response.filePath);
+            autoImported = autoImported || !!response.autoImported;
             setEntries((currentEntries) =>
               currentEntries.map((item) =>
                 item.id === entry.id && item.webpage_url === entry.webpage_url
@@ -1127,10 +1136,11 @@ function App() {
       }
 
       setStatusMessage(
-        `${completedFiles.length} song${
-          completedFiles.length === 1 ? "" : "s"
-        } extracted successfully`,
+        `${completedFiles.length} song${completedFiles.length === 1 ? "" : "s"} ${
+          autoImported ? "added to iTunes automatically" : "extracted successfully"
+        }`,
       );
+      if (autoImported && completedFiles.length) setItunesOpened(true);
     } catch (err) {
       showError(err, "Batch download failed");
     } finally {

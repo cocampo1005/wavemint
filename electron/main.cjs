@@ -32,6 +32,7 @@ const {
 const { createDiagnosticsStore, formatDiagnostics } = require("./diagnostics.cjs");
 const { createExtractionManager } = require("./extraction.cjs");
 const { CHANNELS, createEngineStore, createEngineUpdater } = require("./engine.cjs");
+const { isAutoImportFolder, moveIntoOutputFolder } = require("./outputFiles.cjs");
 
 const APP_USER_MODEL_ID = "com.wavemint.app";
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL || "http://localhost:5173";
@@ -280,6 +281,7 @@ app.whenReady().then(async () => {
   }
   applyEngineOverride();
 
+  removeStaleWorkFolders();
   getDependencyStatus();
   createWindow();
   scheduleEngineAutoCheck();
@@ -1300,6 +1302,49 @@ async function generateSquareCropPreview(thumbnailUrl) {
   }
 }
 
+// Every extraction works in its own private folder under %TEMP%WaveMint;
+// see electron/outputFiles.cjs for why only the finished MP3 is moved into
+// the output folder.
+const WORK_ROOT_NAME = "WaveMint";
+const STALE_WORK_FOLDER_MS = 24 * 60 * 60 * 1000;
+
+function getWorkRoot() {
+  return path.join(app.getPath("temp"), WORK_ROOT_NAME);
+}
+
+function createWorkFolder(name) {
+  const folder = path.join(getWorkRoot(), name);
+  fs.mkdirSync(folder, { recursive: true });
+  return folder;
+}
+
+function removeFolderQuietly(folder) {
+  try {
+    fs.rmSync(folder, { recursive: true, force: true });
+  } catch {}
+}
+
+// Leftovers from a crash or forced quit; never touches recent folders that
+// another WaveMint window could still be using.
+function removeStaleWorkFolders() {
+  let entries = [];
+  try {
+    entries = fs.readdirSync(getWorkRoot(), { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith("wavemint-temp-")) continue;
+    const folder = path.join(getWorkRoot(), entry.name);
+    try {
+      if (Date.now() - fs.statSync(folder).mtimeMs > STALE_WORK_FOLDER_MS) {
+        removeFolderQuietly(folder);
+      }
+    } catch {}
+  }
+}
+
 // Post-processing failures (artwork, tagging) keep their technical output in
 // diagnostics; the UI gets a short explanation.
 function createPostProcessingError(message, error, url) {
@@ -1343,8 +1388,10 @@ ipcMain.handle("download-mp3", async (event, payload) => {
   const progressTitle =
     normalizeMetadataText(submittedMetadata.title) || "Track";
   const tempBaseName = createTempToken("wavemint-temp");
-  const tempOutputTemplate = path.join(outputFolder, `${tempBaseName}.%(ext)s`);
-  const tempMp3Path = path.join(outputFolder, `${tempBaseName}.mp3`);
+  const workFolder = createWorkFolder(tempBaseName);
+  const tempOutputTemplate = path.join(workFolder, `${tempBaseName}.%(ext)s`);
+  const tempMp3Path = path.join(workFolder, `${tempBaseName}.mp3`);
+  const taggedMp3Path = path.join(workFolder, `${tempBaseName}-tagged.mp3`);
 
   const artworkMode = normalizeArtworkMode(artwork?.mode);
   const customArtworkPath = artwork?.customFilePath || "";
@@ -1362,7 +1409,7 @@ ipcMain.handle("download-mp3", async (event, payload) => {
       signal: operation.signal,
       onStatus: sendProgress,
       // Remove partial audio and metadata files before another attempt.
-      onBeforeRetry: () => cleanupMatchingTempFiles(outputFolder, tempBaseName),
+      onBeforeRetry: () => cleanupMatchingTempFiles(workFolder, tempBaseName),
     });
 
     if (!fileExists(tempMp3Path)) {
@@ -1375,15 +1422,12 @@ ipcMain.handle("download-mp3", async (event, payload) => {
 
     // --write-info-json uses metadata from the same full extraction that
     // downloaded the audio. It does not add a separate per-track yt-dlp probe.
-    const extractedInfo = readInfoJson(outputFolder, tempBaseName);
+    const extractedInfo = readInfoJson(workFolder, tempBaseName);
     const finalMetadata = resolveFinalMetadata(
       submittedMetadata,
       extractedInfo,
     );
     const finalFileName = buildFinalFileName(finalMetadata);
-    const finalOutputPath = getUniqueFilePath(
-      path.join(outputFolder, finalFileName),
-    );
     const thumbnailCandidates = getArtworkThumbnailCandidates(
       extractedInfo,
       thumbnail,
@@ -1397,7 +1441,7 @@ ipcMain.handle("download-mp3", async (event, payload) => {
         artworkMode,
         customArtworkPath,
         thumbnailCandidates,
-        outputFolder,
+        outputFolder: workFolder,
         tempBaseName,
       });
     } catch (artworkError) {
@@ -1444,7 +1488,7 @@ ipcMain.handle("download-mp3", async (event, payload) => {
           "title=Album cover",
           "-metadata:s:v",
           "comment=Cover (front)",
-          finalOutputPath,
+          taggedMp3Path,
         ]
       : [
           "-y",
@@ -1464,7 +1508,7 @@ ipcMain.handle("download-mp3", async (event, payload) => {
           `album=${finalMetadata.album}`,
           "-metadata",
           `genre=${finalMetadata.genre}`,
-          finalOutputPath,
+          taggedMp3Path,
         ];
 
     try {
@@ -1478,12 +1522,20 @@ ipcMain.handle("download-mp3", async (event, payload) => {
       );
     }
 
-    if (fileExists(tempMp3Path)) {
-      fs.unlinkSync(tempMp3Path);
+    // The finished file is the only thing that ever reaches the output folder.
+    const finalOutputPath = getUniqueFilePath(path.join(outputFolder, finalFileName));
+    try {
+      moveIntoOutputFolder(taggedMp3Path, finalOutputPath);
+    } catch (saveError) {
+      throw createPostProcessingError(
+        "WaveMint couldn't save the MP3 to the output folder. Check that the folder still exists and that you can save files there, then try again.",
+        saveError,
+        url,
+      );
     }
 
-    cleanupMatchingTempFiles(outputFolder, tempBaseName);
     producedFiles.add(normalizeApprovedPath(finalOutputPath));
+    const autoImported = isAutoImportFolder(outputFolder);
 
     sendProgress({ phase: "complete", title: finalMetadata.title || progressTitle });
 
@@ -1495,18 +1547,11 @@ ipcMain.handle("download-mp3", async (event, payload) => {
       fileName: path.basename(finalOutputPath),
       metadata: finalMetadata,
       artworkMode,
+      // iTunes/Music takes the file from this folder by itself.
+      autoImported,
     };
-  } catch (error) {
-    if (fileExists(tempMp3Path)) {
-      try {
-        fs.unlinkSync(tempMp3Path);
-      } catch {}
-    }
-
-    cleanupMatchingTempFiles(outputFolder, tempBaseName);
-
-    throw error;
   } finally {
+    removeFolderQuietly(workFolder);
     operation.end();
   }
 });
@@ -1528,6 +1573,12 @@ ipcMain.handle("open-file", async (_, filePath) => {
   // Only MP3s that WaveMint itself created can be opened from the UI.
   if (!producedFiles.has(normalizeApprovedPath(filePath))) {
     throw new Error("Only files extracted by WaveMint can be opened");
+  }
+
+  if (!fileExists(filePath)) {
+    throw new Error(
+      "This MP3 is no longer where WaveMint saved it. Another app (such as iTunes) may have already moved it into its library.",
+    );
   }
 
   const openError = await shell.openPath(filePath);
