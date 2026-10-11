@@ -1131,6 +1131,164 @@ select.field.is-empty {
   color: var(--wm-warning);
 }
 
+/* ---------- Progress: cancel + indeterminate ---------- */
+
+.progress__end {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--wm-space-3);
+  flex-shrink: 0;
+}
+
+.progress__cancel {
+  font-size: var(--wm-text-xs);
+}
+
+/* Shown when no real percentage is known: a soft sweep, never a number. */
+.progress__track.is-indeterminate .progress__fill {
+  width: 35%;
+  animation: wm-progress-sweep 1.4s var(--wm-ease) infinite;
+}
+
+@keyframes wm-progress-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(290%);
+  }
+}
+
+/* ---------- Error alert with actions + details ---------- */
+
+.alert--stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--wm-space-3);
+}
+
+.alert__row {
+  display: flex;
+  align-items: center;
+  gap: var(--wm-space-3);
+}
+
+.alert__actions {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--wm-space-2);
+  flex-shrink: 0;
+}
+
+.alert__details-toggle {
+  font-size: var(--wm-text-xs);
+}
+
+.alert__details {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--wm-space-2);
+  padding-left: calc(18px + var(--wm-space-3));
+}
+
+.alert__details-text {
+  width: 100%;
+  max-height: 220px;
+  margin: 0;
+  padding: var(--wm-space-3);
+  overflow: auto;
+  border-radius: var(--wm-radius-md);
+  border: 1px solid var(--wm-border-subtle);
+  background: var(--wm-surface-input);
+  color: var(--wm-text-muted);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.header-settings__dot.is-update {
+  background: var(--wm-cyan);
+}
+
+/* ---------- Settings: advanced auth + engine ---------- */
+
+.auth-status + .disclosure {
+  margin-top: var(--wm-space-4);
+}
+
+.disclosure {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--wm-text-muted);
+  font-size: var(--wm-text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: color var(--wm-dur) var(--wm-ease);
+}
+
+.disclosure:hover {
+  color: var(--wm-text);
+}
+
+.disclosure:focus-visible {
+  outline: none;
+  border-radius: var(--wm-radius-sm);
+  box-shadow: var(--wm-focus-ring);
+}
+
+.disclosure__chevron {
+  transition: transform var(--wm-dur) var(--wm-ease);
+}
+
+.disclosure__chevron.is-open {
+  transform: rotate(90deg);
+}
+
+.settings-advanced {
+  margin-top: var(--wm-space-3);
+  padding-left: var(--wm-space-4);
+  border-left: 2px solid var(--wm-border-subtle);
+}
+
+.settings-remove {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--wm-space-3);
+  margin-top: var(--wm-space-4);
+}
+
+.settings-engine-options {
+  align-items: end;
+  margin-top: var(--wm-space-4);
+}
+
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--wm-space-2);
+  min-height: var(--wm-control-h);
+  color: var(--wm-text-muted);
+  font-size: var(--wm-text-sm);
+  cursor: pointer;
+}
+
+.settings-toggle input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--wm-azure);
+}
+
 /* ---------- Responsive ---------- */
 
 @media (max-width: 860px) {

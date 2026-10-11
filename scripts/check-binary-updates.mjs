@@ -12,12 +12,23 @@
 // Set GITHUB_TOKEN to avoid GitHub API rate limits.
 
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+const require = createRequire(import.meta.url);
+const { verifyDetachedSignature } = require("../electron/pgp.cjs");
+const { YT_DLP_SIGNING_KEY_FINGERPRINT } = require("../electron/engine.cjs");
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MANIFEST_PATH = path.join(ROOT, "scripts", "binaries.manifest.json");
 const write = process.argv.includes("--write");
+
+async function fetchBuffer(url) {
+  const response = await fetch(url, { headers: { "User-Agent": "WaveMint-build" }, redirect: "follow" });
+  if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
+  return Buffer.from(await response.arrayBuffer());
+}
 
 async function fetchText(url) {
   const headers = { "User-Agent": "WaveMint-build" };
@@ -49,10 +60,21 @@ async function latestYtDlp() {
   const release = await fetchJson("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest");
   const tag = release.tag_name;
   const sumsUrl = `https://github.com/yt-dlp/yt-dlp/releases/download/${tag}/SHA2-256SUMS`;
+  const sums = await fetchBuffer(sumsUrl);
+
+  // The checksum list must be signed by yt-dlp's release key (the same
+  // pinned key the in-app engine updater uses).
+  verifyDetachedSignature({
+    document: sums,
+    signature: await fetchBuffer(`${sumsUrl}.sig`),
+    publicKey: fs.readFileSync(path.join(ROOT, "electron", "trust", "yt-dlp-signing-key.asc"), "utf8"),
+    expectedFingerprint: YT_DLP_SIGNING_KEY_FINGERPRINT,
+  });
+
   return {
     version: tag,
     url: `https://github.com/yt-dlp/yt-dlp/releases/download/${tag}/yt-dlp.exe`,
-    sha256: hashFromSumsFile(await fetchText(sumsUrl), "yt-dlp.exe"),
+    sha256: hashFromSumsFile(sums.toString("utf8"), "yt-dlp.exe"),
     checksumSource: sumsUrl,
     replace: (text, current) => text.replaceAll(current.version, tag),
   };

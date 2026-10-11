@@ -65,7 +65,7 @@ test("invalid or unexpected values are discarded on load", () => {
     somethingElse: true,
   });
 
-  assert.deepEqual(Object.keys(settings), ["version", "auth"]);
+  assert.deepEqual(Object.keys(settings), ["version", "auth", "engine"]);
   assert.equal(settings.auth.mode, "none");
   assert.equal(settings.auth.browser, "");
   assert.equal(settings.auth.browserProfile, "");
@@ -81,4 +81,22 @@ test("a profile is dropped when no valid browser is configured", () => {
   });
 
   assert.equal(settings.auth.browserProfile, "");
+});
+
+test("engine preferences default to stable with background checks", (t) => {
+  const store = createSettingsStore(path.join(makeTempDir(t), "settings.json"));
+  assert.deepEqual(store.load().engine, { channel: "stable", autoCheck: true });
+});
+
+test("engine preferences persist and invalid values are discarded", (t) => {
+  const filePath = path.join(makeTempDir(t), "settings.json");
+  createSettingsStore(filePath).updateEngine({ channel: "nightly", autoCheck: false });
+
+  const reloaded = createSettingsStore(filePath).load();
+  assert.deepEqual(reloaded.engine, { channel: "nightly", autoCheck: false });
+  // Changing engine preferences never touches authentication.
+  assert.equal(reloaded.auth.mode, "none");
+
+  const sanitized = sanitizeSettings({ engine: { channel: "experimental", autoCheck: "yes" } });
+  assert.deepEqual(sanitized.engine, { channel: "stable", autoCheck: true });
 });

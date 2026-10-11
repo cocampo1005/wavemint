@@ -77,3 +77,28 @@ test("timeouts stop the process", async () => {
   assert.equal(result.timedOut, true);
   assert.ok(Date.now() - started < 20000);
 });
+
+test("an aborted signal stops the process and reports cancellation", async () => {
+  const controller = new AbortController();
+  const started = Date.now();
+  const pending = runCommand(node, ["-e", "setTimeout(() => {}, 60000)"], {
+    signal: controller.signal,
+  });
+
+  setTimeout(() => controller.abort(), 200);
+  const result = await pending;
+
+  assert.equal(result.cancelled, true);
+  assert.equal(result.timedOut, false);
+  assert.ok(Date.now() - started < 20000);
+});
+
+test("an already-aborted signal never starts the process", async () => {
+  const controller = new AbortController();
+  controller.abort();
+
+  const result = await runCommand("wavemint-definitely-missing-tool.exe", [], {
+    signal: controller.signal,
+  });
+  assert.equal(result.cancelled, true);
+});

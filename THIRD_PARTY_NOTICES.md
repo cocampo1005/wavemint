@@ -17,6 +17,11 @@ WaveMint does not modify any of these components.
 - License: The Unlicense (`licenses\yt-dlp-LICENSE.txt`). The executable also
   bundles Python, yt-dlp-ejs and other libraries under their own licenses,
   compiled by the yt-dlp project in `licenses\yt-dlp-THIRD_PARTY_LICENSES.txt`.
+- In-app updates: WaveMint can download newer official `yt-dlp.exe` releases
+  (Settings → Extraction Engine) into `%APPDATA%\WaveMint\engine\`. They are
+  unmodified upstream files under the same licenses, verified against yt-dlp's
+  signed checksums using yt-dlp's public release signing key
+  (`electron\trust\yt-dlp-signing-key.asc`, from the yt-dlp repository).
 
 ### Deno 2.9.7
 

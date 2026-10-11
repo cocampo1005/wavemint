@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import "./App.css";
 import { GENRE_OPTIONS } from "./constants/genres";
-import { parseIpcError } from "./ipcErrors";
+import { getErrorActions, isSkippableInBatch, parseIpcError } from "./ipcErrors";
 import { SettingsDialog } from "./SettingsDialog";
 import horizontalLogo from "./assets/Horizontal Logo.png";
 import logomark from "./assets/Logomark.png";
@@ -89,28 +89,193 @@ function describeComponentProblems(problems, isPackaged) {
   }Reinstall WaveMint to repair them.`;
 }
 
-function ProgressBar({ value, label }) {
-  const percent = Math.max(0, Math.min(100, Number(value) || 0));
+// Plain-language labels for the phases reported by the main process. Only
+// phases the extraction pipeline really goes through are listed.
+const PHASE_LABELS = {
+  analyzing: "Analyzing video…",
+  "loading-playlist": "Loading playlist…",
+  waiting: "Pausing briefly to avoid YouTube limits…",
+  preparing: "Preparing audio…",
+  downloading: "Downloading audio…",
+  converting: "Extracting audio…",
+  artwork: "Processing artwork…",
+  metadata: "Writing metadata…",
+  complete: "Complete",
+};
+
+function describeProgress(status, fallback) {
+  if (!status?.phase) return fallback;
+
+  if (status.phase === "retrying") {
+    return status.reason === "network"
+      ? "Connection interrupted. Retrying…"
+      : "Trying another way…";
+  }
+
+  return PHASE_LABELS[status.phase] || fallback;
+}
+
+// Determinate only while yt-dlp reports a real download percentage;
+// otherwise an indeterminate bar, so no progress is ever invented.
+function ProgressBar({ value = null, label, onCancel, cancelling = false }) {
+  const determinate = typeof value === "number" && Number.isFinite(value);
+  const percent = determinate ? Math.max(0, Math.min(100, value)) : 0;
 
   return (
     <div className="progress">
       <div className="progress__meta">
-        <span className="progress__label">{label}</span>
-        <span className="progress__value">{Math.round(percent)}%</span>
+        <span className="progress__label" aria-live="polite">
+          {label}
+        </span>
+        <span className="progress__end">
+          {determinate && (
+            <span className="progress__value">{Math.round(percent)}%</span>
+          )}
+          {onCancel && (
+            <button
+              type="button"
+              className="btn btn--link progress__cancel"
+              onClick={onCancel}
+              disabled={cancelling}
+            >
+              {cancelling ? "Cancelling…" : "Cancel"}
+            </button>
+          )}
+        </span>
       </div>
       <div
-        className="progress__track"
+        className={`progress__track ${determinate ? "" : "is-indeterminate"}`}
         role="progressbar"
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-valuenow={Math.round(percent)}
+        aria-valuenow={determinate ? Math.round(percent) : undefined}
         aria-label={label || "Progress"}
       >
-        <div className="progress__fill" style={{ width: `${percent}%` }} />
+        <div
+          className="progress__fill"
+          style={determinate ? { width: `${percent}%` } : undefined}
+        />
       </div>
     </div>
   );
 }
+
+function ErrorAlert({ error, onRetry, onOpenSettings, retryDisabled }) {
+  const [details, setDetails] = useState("");
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const actions = getErrorActions(error.code);
+
+  const toggleDetails = async () => {
+    if (detailsOpen) {
+      setDetailsOpen(false);
+      return;
+    }
+
+    if (!details) {
+      try {
+        setDetails(
+          (await window.waveMintAPI.getErrorDetails(error.diagnosticsId)) ||
+            "No technical details were recorded for this problem.",
+        );
+      } catch {
+        setDetails("Technical details are no longer available.");
+      }
+    }
+
+    setDetailsOpen(true);
+  };
+
+  const copyDetails = async () => {
+    try {
+      const result = await window.waveMintAPI.copyErrorDetails(error.diagnosticsId);
+      setCopied(!!result?.copied);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <div className="alert alert--stacked" role="alert">
+      <div className="alert__row">
+        <AlertIcon className="alert__icon" />
+        <span className="alert__text">{error.message}</span>
+        <span className="alert__actions">
+          {actions.includes("retry") && onRetry && (
+            <button
+              type="button"
+              className="btn btn--secondary btn--sm"
+              onClick={onRetry}
+              disabled={retryDisabled}
+            >
+              Retry
+            </button>
+          )}
+          {actions.includes("settings") && (
+            <button
+              type="button"
+              className="btn btn--secondary btn--sm"
+              onClick={() => onOpenSettings("access")}
+            >
+              YouTube Access
+            </button>
+          )}
+          {actions.includes("updates") && (
+            <button
+              type="button"
+              className="btn btn--secondary btn--sm"
+              onClick={() => onOpenSettings("engine")}
+            >
+              Check for Updates
+            </button>
+          )}
+          {error.diagnosticsId && (
+            <button
+              type="button"
+              className="btn btn--link alert__details-toggle"
+              onClick={toggleDetails}
+              aria-expanded={detailsOpen}
+            >
+              {detailsOpen ? "Hide details" : "Details"}
+            </button>
+          )}
+        </span>
+      </div>
+
+      {detailsOpen && (
+        <div className="alert__details">
+          <pre className="alert__details-text">{details}</pre>
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm"
+            onClick={copyDetails}
+          >
+            {copied ? "Copied" : "Copy Error Details"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Runs async work over items with limited parallelism.
+async function mapWithConcurrency(items, limit, worker) {
+  const results = new Array(items.length);
+  let next = 0;
+
+  async function run() {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      results[index] = await worker(items[index], index);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run));
+  return results;
+}
+
+const PREVIEW_CONCURRENCY = 4;
 
 function InlineStatus({ message }) {
   if (!message) return null;
@@ -309,18 +474,35 @@ function App() {
   const [downloadedFiles, setDownloadedFiles] = useState([]);
   const [itunesOpened, setItunesOpened] = useState(false);
   const [batchProgressText, setBatchProgressText] = useState("");
-  const [analyzeProgress, setAnalyzeProgress] = useState(0);
-  const [downloadProgress, setDownloadProgress] = useState(0);
-  const [downloadLabel, setDownloadLabel] = useState("");
+  const [analyzeStatus, setAnalyzeStatus] = useState(null);
+  const [downloadStatus, setDownloadStatus] = useState(null);
+  const [cancelling, setCancelling] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState("");
   const [authState, setAuthState] = useState(null);
   const [appStatus, setAppStatus] = useState(null);
+  const [engineStatus, setEngineStatus] = useState(null);
   const [checkingComponents, setCheckingComponents] = useState(false);
+  // The last operation that can be retried from an error message.
+  const lastActionRef = useRef(null);
 
   const error = errorState.message;
-  const setError = (message) => setErrorState({ message, code: "" });
-  const showError = (err, fallback) =>
-    setErrorState(parseIpcError(err, fallback));
+  const setError = (message) =>
+    setErrorState({ message, code: "", diagnosticsId: "" });
+  const showError = (err, fallback) => {
+    const parsed = parseIpcError(err, fallback);
+    // A cancellation the user asked for isn't an error.
+    if (parsed.code === "cancelled") {
+      setErrorState({ message: "", code: "", diagnosticsId: "" });
+      return;
+    }
+    setErrorState(parsed);
+  };
+
+  const openSettings = (section = "") => {
+    setSettingsSection(section);
+    setSettingsOpen(true);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -335,23 +517,28 @@ function App() {
       .then((status) => !cancelled && setAppStatus(status))
       .catch(() => {});
 
+    window.waveMintAPI
+      .getEngineStatus()
+      .then((status) => !cancelled && setEngineStatus(status))
+      .catch(() => {});
+
+    const removeEngineListener = window.waveMintAPI.onEngineStatusChanged(
+      (status) => !cancelled && setEngineStatus(status),
+    );
+
     return () => {
       cancelled = true;
+      removeEngineListener?.();
     };
   }, []);
 
   useEffect(() => {
     const removeAnalyzeProgress = window.waveMintAPI.onAnalyzeProgress(
-      (data) => {
-        setAnalyzeProgress(data.percent || 0);
-      },
+      (data) => setAnalyzeStatus(data),
     );
 
     const removeDownloadProgress = window.waveMintAPI.onDownloadProgress(
-      (data) => {
-        setDownloadProgress(data.percent || 0);
-        setDownloadLabel(data.label || "");
-      },
+      (data) => setDownloadStatus(data),
     );
 
     return () => {
@@ -360,10 +547,21 @@ function App() {
     };
   }, []);
 
+  const handleCancel = async () => {
+    setCancelling(true);
+    try {
+      await window.waveMintAPI.cancelOperations();
+    } catch {
+      setCancelling(false);
+    }
+  };
+
   const handleAnalyze = async () => {
     if (!url.trim()) return;
 
+    lastActionRef.current = "analyze";
     setLoading(true);
+    setCancelling(false);
     setError("");
     setStatusMessage("");
     setResult(null);
@@ -375,9 +573,8 @@ function App() {
     setDownloadedFiles([]);
     setItunesOpened(false);
     setBatchProgressText("");
-    setAnalyzeProgress(0);
-    setDownloadProgress(0);
-    setDownloadLabel("");
+    setAnalyzeStatus(null);
+    setDownloadStatus(null);
 
     try {
       const data = await window.waveMintAPI.analyzeUrl({ url, mode });
@@ -387,8 +584,12 @@ function App() {
         setResult(data);
         setEntries(normalizedEntries);
 
-        const entriesWithPreviews = await Promise.all(
-          normalizedEntries.map(async (entry) => {
+        // Previews are generated a few at a time so a long playlist doesn't
+        // start dozens of downloads and FFmpeg processes at once.
+        const entriesWithPreviews = await mapWithConcurrency(
+          normalizedEntries,
+          PREVIEW_CONCURRENCY,
+          async (entry) => {
             try {
               const squarePreviewUrl = await generateSquareCropPreview(entry);
 
@@ -416,7 +617,7 @@ function App() {
                   ).message,
               };
             }
-          }),
+          },
         );
 
         setEntries(entriesWithPreviews);
@@ -452,6 +653,7 @@ function App() {
       showError(err, "Something went wrong");
     } finally {
       setLoading(false);
+      setCancelling(false);
     }
   };
 
@@ -708,12 +910,13 @@ function App() {
       return;
     }
 
+    lastActionRef.current = "download-single";
     setDownloading(true);
+    setCancelling(false);
     setError("");
     setStatusMessage("");
     setLastDownloadedFile("");
-    setDownloadProgress(0);
-    setDownloadLabel("");
+    setDownloadStatus(null);
 
     try {
       const response = await window.waveMintAPI.downloadMp3({
@@ -734,6 +937,7 @@ function App() {
       showError(err, "Download failed");
     } finally {
       setDownloading(false);
+      setCancelling(false);
     }
   };
 
@@ -850,55 +1054,99 @@ function App() {
       return;
     }
 
+    lastActionRef.current = "download-batch";
     setBatchDownloading(true);
+    setCancelling(false);
     setError("");
     setStatusMessage("");
     setDownloadedFiles([]);
     setBatchProgressText("");
+    setDownloadStatus(null);
 
-    const completedFiles = [];
+    // Tracks finished by an earlier, interrupted run are not extracted again
+    // (Retry continues where the batch stopped).
+    const completedFiles = selectedEntries
+      .filter((entry) => entry.extractedFilePath)
+      .map((entry) => entry.extractedFilePath);
+    const pendingEntries = selectedEntries.filter((entry) => !entry.extractedFilePath);
+    const skipped = [];
 
     try {
-      setDownloadProgress(0);
-      setDownloadLabel("");
+      for (let index = 0; index < pendingEntries.length; index += 1) {
+        const entry = pendingEntries[index];
+        const title = entry.metadata?.title || entry.title;
 
-      for (let index = 0; index < selectedEntries.length; index += 1) {
-        const entry = selectedEntries[index];
-
+        setDownloadStatus(null);
         setBatchProgressText(
-          `Extracting ${index + 1} of ${selectedEntries.length}: ${
-            entry.metadata?.title || entry.title
-          }`,
+          `Extracting ${completedFiles.length + skipped.length + 1} of ${selectedEntries.length}: ${title}`,
         );
 
-        const response = await window.waveMintAPI.downloadMp3({
-          url: entry.webpage_url,
-          outputFolder,
-          metadata: entry.metadata,
-          thumbnail: entry.thumbnail,
-          duration: entry.duration,
-          artwork: {
-            mode: entry.artworkMode || "square_crop",
-            customFilePath: entry.customArtworkPath || "",
-          },
-        });
+        try {
+          const response = await window.waveMintAPI.downloadMp3({
+            url: entry.webpage_url,
+            outputFolder,
+            metadata: entry.metadata,
+            thumbnail: entry.thumbnail,
+            duration: entry.duration,
+            artwork: {
+              mode: entry.artworkMode || "square_crop",
+              customFilePath: entry.customArtworkPath || "",
+            },
+          });
 
-        if (response?.filePath) completedFiles.push(response.filePath);
+          if (response?.filePath) {
+            completedFiles.push(response.filePath);
+            setEntries((currentEntries) =>
+              currentEntries.map((item) =>
+                item.id === entry.id && item.webpage_url === entry.webpage_url
+                  ? { ...item, extractedFilePath: response.filePath }
+                  : item,
+              ),
+            );
+          }
+        } catch (trackError) {
+          // A problem with one video (removed, private, region-locked…)
+          // skips that track. Problems that would hit every remaining track
+          // (connection, rate limit, sign-in, cancel) stop the batch.
+          const parsed = parseIpcError(trackError, "This track couldn't be extracted");
+          if (!isSkippableInBatch(parsed.code)) throw trackError;
+          skipped.push({ title, ...parsed });
+        }
       }
 
-      setDownloadedFiles(completedFiles);
+      if (skipped.length) {
+        const first = skipped[0];
+        setErrorState({
+          code: "",
+          diagnosticsId: first.diagnosticsId,
+          message: `${skipped.length} song${skipped.length === 1 ? " was" : "s were"} skipped. ${skipped
+            .slice(0, 3)
+            .map((item) => `"${item.title}": ${item.message}`)
+            .join(" ")}${skipped.length > 3 ? " …" : ""}`,
+        });
+      }
+
       setStatusMessage(
         `${completedFiles.length} song${
           completedFiles.length === 1 ? "" : "s"
         } extracted successfully`,
       );
-      setBatchProgressText("");
     } catch (err) {
       showError(err, "Batch download failed");
-      setBatchProgressText("");
     } finally {
+      // Songs that finished before a problem can still be opened.
+      setDownloadedFiles(completedFiles);
+      setBatchProgressText("");
       setBatchDownloading(false);
+      setCancelling(false);
     }
+  };
+
+  const handleRetry = () => {
+    const action = lastActionRef.current;
+    if (action === "analyze") handleAnalyze();
+    else if (action === "download-single") handleDownloadSingle();
+    else if (action === "download-batch") handleDownloadSelected();
   };
 
   const handleRecheckComponents = async () => {
@@ -914,6 +1162,10 @@ function App() {
   };
 
   const selectedEntryCount = entries.filter((entry) => entry.selected).length;
+  // After an interrupted batch, selected tracks that weren't extracted yet.
+  const hasPendingSelection =
+    downloadedFiles.length > 0 &&
+    entries.some((entry) => entry.selected && !entry.extractedFilePath);
   const canApplyMasterMetadata =
     !batchDownloading &&
     !!(masterArtist.trim() || masterAlbum.trim() || masterGenre);
@@ -925,6 +1177,14 @@ function App() {
         ? "success"
         : "warning"
       : "";
+  const engineUpdateAvailable = engineStatus?.lastCheck?.status === "available";
+  const settingsIndicator =
+    authIndicator === "warning"
+      ? "warning"
+      : engineUpdateAvailable
+        ? "update"
+        : authIndicator;
+  const busy = loading || downloading || batchDownloading;
 
   return (
     <div className="app">
@@ -943,14 +1203,19 @@ function App() {
             <button
               type="button"
               className="btn btn--ghost btn--sm header-settings"
-              onClick={() => setSettingsOpen(true)}
-              title={describeAuthState(authState)}
+              onClick={() => openSettings(engineUpdateAvailable ? "engine" : "")}
+              title={[
+                describeAuthState(authState),
+                engineUpdateAvailable && "An extraction engine update is available",
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             >
               <GearIcon className="header-settings__icon" />
               Settings
-              {authIndicator && (
+              {settingsIndicator && (
                 <span
-                  className={`header-settings__dot is-${authIndicator}`}
+                  className={`header-settings__dot is-${settingsIndicator}`}
                   aria-hidden="true"
                 />
               )}
@@ -961,9 +1226,18 @@ function App() {
 
       <SettingsDialog
         open={settingsOpen}
+        initialSection={settingsSection}
         onClose={() => setSettingsOpen(false)}
-        busy={loading || downloading || batchDownloading}
+        busy={busy}
         onAuthStateChange={setAuthState}
+        onEngineStatusChange={(status) => {
+          setEngineStatus(status);
+          // A different engine changes what the startup check reports.
+          window.waveMintAPI
+            .getAppStatus()
+            .then(setAppStatus)
+            .catch(() => {});
+        }}
       />
 
       <main className="app-main">
@@ -1038,7 +1312,14 @@ function App() {
             </div>
 
             {loading && (
-              <ProgressBar value={analyzeProgress} label="Analyzing…" />
+              <ProgressBar
+                label={describeProgress(
+                  analyzeStatus,
+                  mode === "playlist" ? "Loading playlist…" : "Analyzing video…",
+                )}
+                onCancel={handleCancel}
+                cancelling={cancelling}
+              />
             )}
           </div>
 
@@ -1065,19 +1346,13 @@ function App() {
         </section>
 
         {error && (
-          <div className="alert" role="alert">
-            <AlertIcon className="alert__icon" />
-            <span className="alert__text">{error}</span>
-            {errorState.code === "auth" && (
-              <button
-                type="button"
-                className="btn btn--secondary btn--sm alert__action"
-                onClick={() => setSettingsOpen(true)}
-              >
-                Open Settings
-              </button>
-            )}
-          </div>
+          <ErrorAlert
+            key={`${errorState.code}:${errorState.diagnosticsId}:${error}`}
+            error={errorState}
+            onRetry={lastActionRef.current ? handleRetry : null}
+            retryDisabled={busy}
+            onOpenSettings={openSettings}
+          />
         )}
 
         {!result && !loading && (
@@ -1224,8 +1499,14 @@ function App() {
 
                     {downloading && (
                       <ProgressBar
-                        value={downloadProgress}
-                        label={downloadLabel || "Extracting…"}
+                        value={
+                          downloadStatus?.phase === "downloading"
+                            ? downloadStatus.percent
+                            : null
+                        }
+                        label={describeProgress(downloadStatus, "Preparing audio…")}
+                        onCancel={handleCancel}
+                        cancelling={cancelling}
                       />
                     )}
                   </div>
@@ -1269,18 +1550,20 @@ function App() {
                   <div className="playlist-toolbar__group">
                     <InlineStatus message={statusMessage} />
 
-                    {downloadedFiles.length === 0 && (
+                    {(downloadedFiles.length === 0 || hasPendingSelection) && (
                       <button
                         type="button"
-                        className={`btn btn--primary ${
-                          batchDownloading ? "is-loading" : ""
-                        }`}
+                        className={`btn ${
+                          downloadedFiles.length ? "btn--secondary" : "btn--primary"
+                        } ${batchDownloading ? "is-loading" : ""}`}
                         onClick={handleDownloadSelected}
                         disabled={batchDownloading}
                       >
                         {batchDownloading
                           ? "Extracting Selected…"
-                          : "Extract Selected"}
+                          : downloadedFiles.length
+                            ? "Extract Remaining"
+                            : "Extract Selected"}
                       </button>
                     )}
 
@@ -1298,8 +1581,17 @@ function App() {
 
                 {batchDownloading && (
                   <ProgressBar
-                    value={downloadProgress}
-                    label={batchProgressText}
+                    value={
+                      downloadStatus?.phase === "downloading"
+                        ? downloadStatus.percent
+                        : null
+                    }
+                    label={`${batchProgressText} · ${describeProgress(
+                      downloadStatus,
+                      "Preparing audio…",
+                    )}`}
+                    onCancel={handleCancel}
+                    cancelling={cancelling}
                   />
                 )}
 

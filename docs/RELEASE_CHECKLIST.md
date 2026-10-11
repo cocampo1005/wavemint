@@ -36,14 +36,40 @@ Record the WaveMint version, Windows version (10 or 11) and date.
 - [ ] **Open in iTunes** / **Open All in iTunes** opens the files in the default
       MP3 player.
 - [ ] Analyzing a new URL clears the previous result.
-- [ ] Unplug the network: Analyze shows a readable error, not a crash.
+- [ ] Settings → YouTube Access shows "Automatic · no sign-in" and Advanced
+      Authentication is collapsed on a fresh install.
+- [ ] Progress shows plain phases (Analyzing video… / Preparing audio… /
+      Downloading audio… with a real % / Extracting audio… / Processing
+      artwork… / Writing metadata…) and no invented percentages.
+- [ ] **Cancel** during an extraction: it stops, no error appears, and no
+      `wavemint-temp-*` files are left in the output folder.
+- [ ] Unplug the network: Analyze shows "WaveMint couldn't connect to
+      YouTube…" with **Retry** and **Details**, within about 30 seconds.
+- [ ] An unavailable video (e.g. `https://www.youtube.com/watch?v=aaaaaaaaaaa`)
+      shows "This video isn't available for extraction." without a Retry
+      button. **Details → Copy Error Details** copies a report that contains no
+      cookies, tokens or `C:\Users\<name>` paths.
+
+## Extraction engine
+
+- [ ] Settings → Extraction Engine shows the bundled yt-dlp version as
+      "built-in". **Check for Updates** reports Up to date (or an update).
+- [ ] Switch the channel to **Nightly**, **Check for Updates**, **Install**.
+      The stages run (signature, download, test) and the version shows
+      "updated (nightly)". A video still analyzes and extracts.
+- [ ] Restart WaveMint: the updated engine is still active (About line and
+      Settings agree).
+- [ ] **Use Built-in Version** switches back; **Use <version>** switches to the
+      update again. Set the channel back to **Stable**.
+- [ ] Offline: **Check for Updates** shows "Unable to check" and extraction of
+      already-analyzed content is unaffected.
 
 ## Authentication
 
 For each browser installed on the test PC (Chrome, Edge, Firefox, Brave,
 Opera, Vivaldi, Chromium), with a profile that is signed in to YouTube:
 
-- [ ] Settings → Browser Cookies lists the browser as **Detected** and shows its
+- [ ] Settings → YouTube Access → Advanced Authentication → Browser Cookies lists the browser as **Detected** and shows its
       profiles. Uninstalled browsers show **Not found**.
 - [ ] With the browser **open**, Test Authentication. Chromium-based browsers are
       expected to report that cookies could not be accessed (database locked).
@@ -60,8 +86,9 @@ Cookies file:
       request).
 - [ ] JSON export is rejected with "The cookie file format is invalid".
 - [ ] Rename/delete the selected file → Analyze shows "The selected cookie file was
-      not found" with an **Open Settings** button.
-- [ ] **Remove** switches back to No Authentication and leaves the file on disk.
+      not found" with a **YouTube Access** button.
+- [ ] **Remove** switches back to Off and leaves the file on disk. **Remove
+      Authentication** turns sign-in off and forgets browser, profile and file.
 - [ ] Restart WaveMint: authentication settings are kept.
 
 ## Uninstall

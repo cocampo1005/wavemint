@@ -24,7 +24,8 @@ Paste a link, review the metadata, pick your cover art, and extract. WaveMint ha
 - [Features](#features)
 - [Download and install](#download-and-install)
 - [Using WaveMint](#using-wavemint)
-- [Optional: YouTube sign-in](#optional-youtube-sign-in)
+- [Keeping extraction working](#keeping-extraction-working)
+- [YouTube Access and optional sign-in](#youtube-access-and-optional-sign-in)
 - [Troubleshooting](#troubleshooting)
 - [Uninstalling](#uninstalling)
 
@@ -32,6 +33,7 @@ Paste a link, review the metadata, pick your cover art, and extract. WaveMint ha
 
 - [Development setup](#development-setup)
 - [Project structure](#project-structure)
+- [How extraction works](#how-extraction-works)
 - [Scripts](#scripts)
 - [Building the Windows installer](#building-the-windows-installer)
 - [Bundled tools](#bundled-tools)
@@ -51,9 +53,12 @@ Paste a link, review the metadata, pick your cover art, and extract. WaveMint ha
 | 📚 **Bulk editing** | Apply an artist, album, genre, or cover image to every track in a playlist at once. |
 | 🎧 **High-quality MP3s** | Best available audio, encoded to MP3 with ID3v2.3 tags and embedded cover art. |
 | ▶️ **Straight to your library** | Open finished files in your default player (e.g. iTunes) with one click, individually or all at once. |
-| 🔐 **Optional YouTube sign-in** | Use cookies from your browser or a `cookies.txt` file for videos that need a signed-in account. |
+| 🚀 **No setup for public videos** | Install, paste a link, extract. No account, cookies or configuration needed. |
+| 🔄 **Self-updating engine** | Install newer, signature-verified versions of the YouTube extraction engine from Settings, without reinstalling. |
+| 💬 **Clear messages** | Problems are explained in plain language with a next step (Retry, YouTube Access, Check for Updates). Technical details are one click away. |
+| 🔐 **Optional YouTube sign-in** | For videos that need a signed-in account, use cookies from your browser or a `cookies.txt` file. |
 | 📦 **Nothing else to install** | yt-dlp, FFmpeg and everything they need are built in. |
-| 🛡️ **Rate-limit aware** | Requests are paced automatically, and WaveMint pauses itself if YouTube rate-limits the session. |
+| 🛡️ **Rate-limit aware** | Requests are paced automatically, brief connection problems are retried, and WaveMint pauses itself if YouTube rate-limits the session. |
 
 ---
 
@@ -84,6 +89,8 @@ That's it. You don't need Node.js, Python, FFmpeg, yt-dlp, or a terminal.
    - *Playlist:* tick the tracks you want (use **Select All** / **Clear All**), optionally fill in **Apply to all tracks**, then click **Extract Selected**.
 7. **Open your music.** When extraction finishes, click **Open in iTunes** (or **Open All in iTunes** for playlists). Files open in whichever app is your default for MP3s.
 
+You can **Cancel** an analysis or extraction from its progress bar. If a playlist track can't be extracted (for example, it was removed or is private), WaveMint skips it, finishes the others and tells you which ones were skipped.
+
 > [!TIP]
 > Analyzing a new URL resets the previous results, so you can work through links one after another.
 
@@ -92,15 +99,32 @@ That's it. You don't need Node.js, Python, FFmpeg, yt-dlp, or a terminal.
 
 ---
 
-## Optional: YouTube sign-in
+## Keeping extraction working
 
-Public videos and playlists work without signing in. Some videos (age-restricted, members-only, or private videos shared with you) need a signed-in YouTube account. Signing in can help with those. It doesn't guarantee access, and it doesn't remove YouTube's rate limits.
+YouTube changes often, and sometimes an update to WaveMint's extraction engine (yt-dlp) is needed. You don't have to reinstall WaveMint for that:
 
-Open **Settings** (top right) → **YouTube Authentication** and pick a method:
+1. Open **Settings** → **Extraction Engine** and click **Check for Updates**.
+2. If a newer version is available, click **Install**. WaveMint downloads it from yt-dlp's official releases, checks its signature and tests it before using it.
+3. If anything goes wrong, **Use Built-in Version** switches back to the version that came with WaveMint.
+
+By default WaveMint also checks quietly in the background, at most once a day. It never installs anything until you click **Install**, and nothing stops working when you're offline. **Stable** is the default channel; **Nightly** gets fixes sooner but is less tested.
+
+> [!NOTE]
+> YouTube access is never guaranteed. YouTube can change or restrict access at any time, and a fix may take a few days to appear.
+
+---
+
+## YouTube Access and optional sign-in
+
+WaveMint automatically connects to YouTube for publicly accessible videos. **No account setup is required**, and most people never need to open this part of Settings.
+
+Some videos (age-restricted, members-only, or private videos shared with you) need a signed-in YouTube account. WaveMint tells you when that's the case and offers a **YouTube Access** button. Signing in can help with those videos. It doesn't guarantee access, and it doesn't remove YouTube's rate limits.
+
+Open **Settings** (top right) → **YouTube Access** → **Advanced Authentication** and pick a method:
 
 | Method | How it works |
 |---|---|
-| **No Authentication** (default) | No cookies are used. |
+| **Off** (default) | Automatic access. No cookies are used. |
 | **Browser Cookies** | WaveMint asks yt-dlp to read your YouTube sign-in from a browser profile on this PC. Choose the browser and the profile you use for YouTube. |
 | **Cookies File** | Use a `cookies.txt` file you exported from your browser. |
 
@@ -124,7 +148,12 @@ WaveMint supports the browsers yt-dlp supports on Windows: **Chrome, Edge, Firef
 
 1. In your browser, sign in to youtube.com.
 2. Export cookies for youtube.com in **Netscape `cookies.txt` format** with a cookie-export extension you trust (for example *"Get cookies.txt LOCALLY"*). JSON exports won't work.
-3. In WaveMint, choose **Settings → Cookies File → Choose cookies.txt…**, then **Test Authentication**.
+3. In WaveMint, choose **Settings → YouTube Access → Advanced Authentication → Cookies File → Import Cookies File…**, then **Test Authentication**.
+
+> [!TIP]
+> Export from a private (InPrivate/Incognito) window and close it right after exporting. YouTube keeps refreshing the cookies of open browser tabs, which can invalidate an exported file.
+
+**Remove Authentication** turns sign-in off and makes WaveMint forget the browser, profile and file location you chose. It never deletes files.
 
 WaveMint uses the file where you saved it and does not copy it. yt-dlp may update the file with refreshed cookies from YouTube. If YouTube signs the session out, the test tells you to export a fresh file. **Remove** only makes WaveMint forget the file; it doesn't delete it.
 
@@ -175,16 +204,30 @@ YouTube has throttled requests from your connection. WaveMint pauses itself for 
 </details>
 
 <details>
-<summary><b>Downloads fail with HTTP 403 / "Forbidden"</b></summary>
+<summary><b>"YouTube refused to send the audio" / "extraction components may need an update"</b></summary>
 
-WaveMint already retries with different strategies automatically. YouTube changes often, so make sure you're on the [latest WaveMint release](https://github.com/cocampo1005/wavemint/releases/latest), which includes the newest yt-dlp.
+WaveMint already tried the safe alternatives automatically. YouTube changes often: click **Check for Updates** in the message (or open **Settings → Extraction Engine**), install the newest engine, then try again.
+
+</details>
+
+<details>
+<summary><b>"WaveMint couldn't connect to YouTube"</b></summary>
+
+WaveMint retries brief connection problems by itself. If you still see this, check your internet connection (and any VPN or proxy), then click **Retry**.
+
+</details>
+
+<details>
+<summary><b>Reporting a problem</b></summary>
+
+Click **Details** in the error message, then **Copy Error Details**, and paste that into your report. Cookies, sign-in tokens and your Windows user folder are removed from these details.
 
 </details>
 
 <details>
 <summary><b>Private or age-restricted videos won't work</b></summary>
 
-Set up [YouTube sign-in](#optional-youtube-sign-in) with an account that has access, and use **Test Authentication** to confirm YouTube accepts it.
+Set up [YouTube sign-in](#youtube-access-and-optional-sign-in) with an account that has access, and use **Test Authentication** to confirm YouTube accepts it.
 
 </details>
 
@@ -213,7 +256,7 @@ npm start                # Vite dev server + Electron
 **How development differs from the installed app**
 
 - **Tools:** development uses the binaries fetched into `resources/bin/win32-x64/`. If you haven't fetched them, it falls back to `yt-dlp`, `ffmpeg`, `ffprobe` and `deno` on your `PATH`, which was the original setup. Set `WAVEMINT_USE_SYSTEM_BINARIES=1` to force your `PATH` copies.
-- **Settings:** development keeps its settings in `%APPDATA%\WaveMint-Dev`, separate from an installed copy (`%APPDATA%\WaveMint`). To use a personal `cookies.txt` while developing, select it in **Settings → Cookies File** once. Nothing personal is ever stored in the repository.
+- **Settings:** development keeps its settings in `%APPDATA%\WaveMint-Dev`, separate from an installed copy (`%APPDATA%\WaveMint`). To use a personal `cookies.txt` while developing, select it in **Settings → YouTube Access → Advanced Authentication → Cookies File** once. In-app engine updates made while developing go to `%APPDATA%\WaveMint-Dev\engine`. Nothing personal is ever stored in the repository.
 - **Built UI:** set `WAVEMINT_RENDERER=dist` to make development Electron load the built `dist/` instead of the dev server.
 
 ---
@@ -228,11 +271,18 @@ wavemint/
 │   ├── binaries.cjs      # Resolves bundled yt-dlp/FFmpeg/FFprobe/Deno; startup dependency check
 │   ├── processes.cjs     # Runs child processes (argument arrays, no shell, timeouts, cleanup)
 │   ├── auth.cjs          # YouTube auth: browser/profile discovery, cookies.txt checks, yt-dlp args
+│   ├── extraction.cjs    # Extraction manager: yt-dlp commands, retries, rate limits, cancel, progress
+│   ├── errors.cjs        # Failure categories and plain-language messages
+│   ├── diagnostics.cjs   # Sanitized technical details for "Copy Error Details"
+│   ├── engine.cjs        # In-app yt-dlp updates: verify, test, activate, roll back
+│   ├── pgp.cjs           # OpenPGP signature check for yt-dlp releases (Node crypto only)
+│   ├── trust/            # yt-dlp's release signing key (pinned by fingerprint)
 │   ├── settings.cjs      # Per-user settings (validated JSON in %APPDATA%)
 │   └── assets/icon.png   # Window icon in development
 ├── src/
 │   ├── App.jsx           # The main interface (single-video + playlist flows)
-│   ├── SettingsDialog.jsx# Settings → YouTube Authentication
+│   ├── SettingsDialog.jsx# Settings: YouTube Access, Extraction Engine, About
+│   ├── ipcErrors.js      # Reads error categories and diagnostics ids from main-process errors
 │   ├── App.css / index.css
 │   └── assets/           # WaveMint logos
 ├── build/
@@ -244,12 +294,26 @@ wavemint/
 │   ├── check-binary-updates.mjs# Finds newer upstream releases
 │   ├── check-release.cjs       # Release safety checks (also electron-builder afterPack)
 │   └── generate-icon.cjs
-├── tests/                # node --test unit and integration tests
+├── docs/                 # ENGINEERING.md (architecture, evaluations), release checklist
+├── tests/                # node --test unit and integration tests (+ fixtures/)
 ├── electron-builder.yml  # Packaging configuration
 └── .github/workflows/release.yml
 ```
 
 The UI never touches the file system or runs commands directly. Everything goes through `window.waveMintAPI` (defined in `preload.cjs`), which calls narrowly scoped handlers in `main.cjs`. Paths for cookies files, profiles, output folders and artwork are chosen through main-process dialogs. The UI can only open MP3s that WaveMint created.
+
+---
+
+## How extraction works
+
+All yt-dlp runs go through one **extraction manager** (`electron/extraction.cjs`). It builds the command (bundled Deno and FFmpeg, no user config or plugins, optional sign-in), runs it with cancellation, classifies failures into categories such as *network-timeout*, *unavailable*, *auth-required* or *extractor-outdated*, and decides conservatively whether another attempt is worthwhile:
+
+- brief connection problems: up to two retries with backoff;
+- HTTP 403 on the audio stream: the existing ladder (without cookies if sign-in is configured, then yt-dlp's `mweb` client), each step once;
+- YouTube rate limits: stop and pause the session for an hour;
+- everything else (private, removed, region-locked, sign-in needed…): stop immediately with a clear message.
+
+Technical details stay in the main process, sanitized, and are shown only on request. See [`docs/ENGINEERING.md`](docs/ENGINEERING.md) for the full design, the in-app engine updater's trust model, and the measured evaluations of PO Token providers and YouTube.js (both evaluated and deliberately not integrated).
 
 ---
 
@@ -302,12 +366,14 @@ Only `dist/`, `electron/` and `package.json` go into `app.asar`. No `node_module
 
 Pins live in [`scripts/binaries.manifest.json`](scripts/binaries.manifest.json). Every hash there comes from the upstream project's own checksum file, and `fetch-binaries` rejects any download that doesn't match. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for licensing details.
 
-**How WaveMint finds them at runtime** (`electron/binaries.cjs`): the installed app always uses `<install dir>\resources\bin\` and never your `PATH`. Every yt-dlp call gets `--ignore-config`, `--no-js-runtimes --js-runtimes deno:<bundled deno.exe>` and `--ffmpeg-location <bundled bin>`, so yt-dlp solves YouTube's JavaScript challenges with the bundled Deno and converts audio with the bundled FFmpeg. At startup WaveMint runs each tool once in the background to confirm it works, and shows a clear message if one is missing or blocked.
+**How WaveMint finds them at runtime** (`electron/binaries.cjs`): the installed app always uses `<install dir>\resources\bin\` and never your `PATH`. Every yt-dlp call gets `--ignore-config`, `--no-js-runtimes --js-runtimes deno:<bundled deno.exe>` and `--ffmpeg-location <bundled bin>`, so yt-dlp solves YouTube's JavaScript challenges with the bundled Deno and converts audio with the bundled FFmpeg. At startup WaveMint runs each tool once in the background to confirm it works (for yt-dlp, that it can use the bundled Deno and its built-in EJS challenge solver), and shows a clear message if one is missing or blocked.
+
+**In-app engine updates** are stored per user in `%APPDATA%\WaveMint\engine\versions\<version>\` and take priority over the bundled yt-dlp once verified; the bundled copy is always the fallback. See [docs/ENGINEERING.md](docs/ENGINEERING.md#extraction-engine-updates).
 
 **Updating the tools.** YouTube changes often, so expect to refresh yt-dlp regularly, independently of app changes:
 
 ```powershell
-npm run binaries:check-updates            # see what's new
+npm run binaries:check-updates            # see what's new (yt-dlp: also verifies the release signature)
 npm run binaries:check-updates -- --write # update pins (URLs + official hashes)
 npm run binaries:fetch -- --force
 npm test
@@ -359,7 +425,7 @@ The packaging is ready for [electron-updater](https://www.electron.build/auto-up
 3. In `main.cjs`, call `autoUpdater.checkForUpdatesAndNotify()` after the window opens, only when `app.isPackaged`.
 4. Sign releases first. Unsigned auto-updates trigger SmartScreen on every update.
 
-Bundled yt-dlp updates then reach users through regular WaveMint releases.
+The extraction engine (yt-dlp) already updates independently from inside the app (Settings → Extraction Engine); app updates would cover WaveMint itself, Deno and FFmpeg.
 
 ---
 

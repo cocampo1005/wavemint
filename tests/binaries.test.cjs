@@ -58,6 +58,7 @@ test("yt-dlp is pointed at the bundled Deno and FFmpeg and ignores user config",
 
   assert.deepEqual(resolver.getYtDlpRuntimeArgs(), [
     "--ignore-config",
+    "--no-plugin-dirs",
     "--no-js-runtimes",
     "--js-runtimes",
     `deno:${path.join(binDir, "deno.exe")}`,
@@ -80,7 +81,7 @@ test("system tools in development get no bundled-runtime arguments", (t) => {
     arch: "x64",
   });
 
-  assert.deepEqual(resolver.getYtDlpRuntimeArgs(), ["--ignore-config"]);
+  assert.deepEqual(resolver.getYtDlpRuntimeArgs(), ["--ignore-config", "--no-plugin-dirs"]);
 });
 
 test("dependency check reports missing bundled tools clearly", async (t) => {

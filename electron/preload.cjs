@@ -1,5 +1,11 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
+function subscribe(channel, callback) {
+  const listener = (_, data) => callback(data);
+  ipcRenderer.on(channel, listener);
+  return () => ipcRenderer.removeListener(channel, listener);
+}
+
 contextBridge.exposeInMainWorld("waveMintAPI", {
   analyzeUrl: (payload) => ipcRenderer.invoke("analyze-url", payload),
   chooseOutputFolder: () => ipcRenderer.invoke("choose-output-folder"),
@@ -7,10 +13,23 @@ contextBridge.exposeInMainWorld("waveMintAPI", {
   generateSquareCropPreview: (payload) =>
     ipcRenderer.invoke("generate-square-crop-preview", payload),
   downloadMp3: (payload) => ipcRenderer.invoke("download-mp3", payload),
+  cancelOperations: () => ipcRenderer.invoke("cancel-operations"),
   openFile: (filePath) => ipcRenderer.invoke("open-file", filePath),
   openFolder: (folderPath) => ipcRenderer.invoke("open-folder", folderPath),
 
   getAppStatus: (options) => ipcRenderer.invoke("get-app-status", options),
+
+  // Sanitized technical details for a failed operation, by diagnostics id.
+  getErrorDetails: (id) => ipcRenderer.invoke("get-error-details", id),
+  copyErrorDetails: (id) => ipcRenderer.invoke("copy-error-details", id),
+
+  // Extraction engine (yt-dlp) status and verified updates.
+  getEngineStatus: () => ipcRenderer.invoke("engine-get-status"),
+  checkEngineUpdate: () => ipcRenderer.invoke("engine-check"),
+  installEngineUpdate: () => ipcRenderer.invoke("engine-install"),
+  useBundledEngine: () => ipcRenderer.invoke("engine-use-bundled"),
+  rollbackEngine: () => ipcRenderer.invoke("engine-rollback"),
+  setEnginePreferences: (payload) => ipcRenderer.invoke("engine-set-preferences", payload),
 
   // YouTube authentication. File and folder paths are always chosen through
   // main-process dialogs; cookie contents never cross this bridge.
@@ -22,17 +41,11 @@ contextBridge.exposeInMainWorld("waveMintAPI", {
     ipcRenderer.invoke("auth-choose-profile-folder", browserId),
   chooseCookiesFile: () => ipcRenderer.invoke("auth-choose-cookies-file"),
   removeCookiesFile: () => ipcRenderer.invoke("auth-remove-cookies-file"),
+  removeAuthentication: () => ipcRenderer.invoke("auth-remove"),
   testAuthentication: () => ipcRenderer.invoke("auth-test"),
 
-  onAnalyzeProgress: (callback) => {
-    const listener = (_, data) => callback(data);
-    ipcRenderer.on("analyze-progress", listener);
-    return () => ipcRenderer.removeListener("analyze-progress", listener);
-  },
-
-  onDownloadProgress: (callback) => {
-    const listener = (_, data) => callback(data);
-    ipcRenderer.on("download-progress", listener);
-    return () => ipcRenderer.removeListener("download-progress", listener);
-  },
+  onAnalyzeProgress: (callback) => subscribe("analyze-progress", callback),
+  onDownloadProgress: (callback) => subscribe("download-progress", callback),
+  onEngineProgress: (callback) => subscribe("engine-progress", callback),
+  onEngineStatusChanged: (callback) => subscribe("engine-status-changed", callback),
 });

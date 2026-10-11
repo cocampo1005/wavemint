@@ -90,19 +90,25 @@ function killAllChildren() {
 }
 
 /**
- * Runs a command and resolves with { code, stdout, stderr, timedOut } once it
- * exits, whatever the exit code. Rejects only if the process cannot start.
+ * Runs a command and resolves with { code, stdout, stderr, timedOut,
+ * cancelled } once it exits, whatever the exit code. Rejects only if the
+ * process cannot start. An aborted `signal` stops the whole process tree.
  */
 function runCommand(command, args, options = {}) {
   const {
     label = command,
     env,
     timeoutMs = 0,
+    signal,
     onStdoutData,
     onStderrData,
     onStdoutLine,
     onStderrLine,
   } = options;
+
+  if (signal?.aborted) {
+    return Promise.resolve({ code: null, stdout: "", stderr: "", timedOut: false, cancelled: true });
+  }
 
   return new Promise((resolve, reject) => {
     let child;
@@ -124,6 +130,7 @@ function runCommand(command, args, options = {}) {
     let stdout = "";
     let stderr = "";
     let timedOut = false;
+    let cancelled = false;
     let settled = false;
     let timer = null;
 
@@ -136,6 +143,17 @@ function runCommand(command, args, options = {}) {
         killProcessTree(child);
       }, timeoutMs);
     }
+
+    const onAbort = () => {
+      cancelled = true;
+      killProcessTree(child);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      activeChildren.delete(child);
+    };
 
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
@@ -155,19 +173,17 @@ function runCommand(command, args, options = {}) {
     child.on("error", (error) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
-      activeChildren.delete(child);
+      cleanup();
       reject(describeSpawnError(label, error));
     });
 
     child.on("close", (code) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
-      activeChildren.delete(child);
+      cleanup();
       stdoutLines?.flush();
       stderrLines?.flush();
-      resolve({ code, stdout, stderr, timedOut });
+      resolve({ code, stdout, stderr, timedOut, cancelled });
     });
   });
 }

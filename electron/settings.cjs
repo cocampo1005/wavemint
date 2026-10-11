@@ -1,7 +1,8 @@
 // Persistent user settings stored as JSON in Electron's per-user data
 // directory (never the install folder). Only configuration lives here: the
-// authentication mode, the chosen browser/profile, and the *path* of a
-// user-selected cookies file. Cookie values are never written to settings.
+// authentication mode, the chosen browser/profile, the *path* of a
+// user-selected cookies file, and extraction-engine update preferences.
+// Cookie values are never written to settings.
 
 const fs = require("fs");
 const path = require("path");
@@ -9,6 +10,7 @@ const { AUTH_MODES, isSupportedBrowser, sanitizeProfileValue } = require("./auth
 
 const SETTINGS_VERSION = 1;
 const MAX_MESSAGE_LENGTH = 400;
+const ENGINE_CHANNELS = ["stable", "nightly"];
 
 function createDefaultSettings() {
   return {
@@ -19,6 +21,12 @@ function createDefaultSettings() {
       browserProfile: "",
       cookiesFilePath: "",
       lastTest: null,
+    },
+    engine: {
+      // "nightly" is opt-in only; WaveMint never switches channels by itself.
+      channel: "stable",
+      // A lightweight background check (at most daily, after startup).
+      autoCheck: true,
     },
   };
 }
@@ -49,6 +57,7 @@ function sanitizeLastTest(value) {
 function sanitizeSettings(raw) {
   const defaults = createDefaultSettings();
   const auth = raw && typeof raw === "object" ? raw.auth || {} : {};
+  const engine = raw && typeof raw === "object" ? raw.engine || {} : {};
 
   const mode = AUTH_MODES.includes(auth.mode) ? auth.mode : defaults.auth.mode;
   const browser = isSupportedBrowser(auth.browser) ? auth.browser : "";
@@ -63,6 +72,10 @@ function sanitizeSettings(raw) {
       cookiesFilePath:
         cookiesFilePath && path.isAbsolute(cookiesFilePath) ? cookiesFilePath : "",
       lastTest: sanitizeLastTest(auth.lastTest),
+    },
+    engine: {
+      channel: ENGINE_CHANNELS.includes(engine.channel) ? engine.channel : defaults.engine.channel,
+      autoCheck: typeof engine.autoCheck === "boolean" ? engine.autoCheck : defaults.engine.autoCheck,
     },
   };
 }
@@ -117,10 +130,16 @@ function createSettingsStore(filePath, { logger = console } = {}) {
     return save({ ...settings, auth: { ...settings.auth, ...patch } });
   }
 
-  return { filePath, load, get, save, updateAuth };
+  function updateEngine(patch) {
+    const settings = get();
+    return save({ ...settings, engine: { ...settings.engine, ...patch } });
+  }
+
+  return { filePath, load, get, save, updateAuth, updateEngine };
 }
 
 module.exports = {
+  ENGINE_CHANNELS,
   SETTINGS_VERSION,
   createDefaultSettings,
   createSettingsStore,
