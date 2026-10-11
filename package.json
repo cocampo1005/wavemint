@@ -1,7 +1,13 @@
 {
   "name": "wavemint",
+  "productName": "WaveMint",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "Turn YouTube videos and playlists into clean, tagged MP3s.",
+  "author": {
+    "name": "Christian Ocampo"
+  },
+  "homepage": "https://github.com/cocampo1005/wavemint",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -10,24 +16,33 @@
     "start": "concurrently \"npm run dev\" \"npm run electron\"",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
-  },
-  "dependencies": {
-    "@fontsource/poppins": "^5.3.0",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "test": "node --test \"tests/*.test.*\"",
+    "preview": "vite preview",
+    "icon": "electron scripts/generate-icon.cjs",
+    "binaries:fetch": "node scripts/fetch-binaries.mjs",
+    "binaries:verify": "node scripts/fetch-binaries.mjs --verify",
+    "binaries:check-updates": "node scripts/check-binary-updates.mjs",
+    "check:release": "node scripts/check-release.cjs",
+    "release:prepare": "npm run build && npm run binaries:fetch && npm run check:release",
+    "pack:win": "npm run release:prepare && electron-builder --win --x64 --dir --publish never",
+    "dist:win": "npm run release:prepare && electron-builder --win --x64 --publish never"
   },
   "devDependencies": {
+    "@electron/asar": "^4.3.1",
     "@eslint/js": "^9.39.4",
+    "@fontsource/poppins": "^5.3.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
     "concurrently": "^9.2.1",
     "electron": "^41.1.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.4.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
     "vite": "^8.0.1"
   }
 }

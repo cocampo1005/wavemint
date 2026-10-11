@@ -4,36 +4,42 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-WaveMint is an Electron + React (Vite) desktop app for Windows. It analyzes YouTube video/playlist URLs, lets the user edit ID3 metadata (title/artist/album/genre) and pick artwork, then extracts audio to MP3 with embedded cover art and tags.
+WaveMint is an Electron + React (Vite) desktop app for Windows, distributed as a standalone NSIS installer. It analyzes YouTube video/playlist URLs, lets the user edit ID3 metadata (title/artist/album/genre) and pick artwork, then extracts audio to MP3 with embedded cover art and tags. yt-dlp, Deno (yt-dlp's JavaScript runtime for YouTube challenges), FFmpeg and FFprobe are bundled with the installer.
 
 ## Commands
 
-- `npm run dev` — start the Vite dev server on `http://localhost:5173` (renderer only).
-- `npm run electron` — launch Electron, which loads `http://localhost:5173` (requires the dev server to already be running).
-- `npm start` — runs both of the above concurrently; this is the normal way to run the app locally.
-- `npm run build` — production build of the renderer via `vite build` (there is no electron-builder/packaging step configured).
-- `npm run lint` — ESLint over the whole repo.
-- There is no test suite/framework configured in this repo.
+- `npm start`: Vite dev server (`http://localhost:5173`) + Electron. The normal way to run locally.
+- `npm run dev` / `npm run electron`: the two halves separately.
+- `npm run build`: renderer production build into `dist/`.
+- `npm run lint`: ESLint (renderer, `electron/*.cjs`, scripts, tests).
+- `npm test`: `node --test "tests/*.test.*"`. No extra test framework. The binaries integration test is skipped unless the tools have been fetched.
+- `npm run binaries:fetch`: downloads the pinned yt-dlp/Deno/FFmpeg from `scripts/binaries.manifest.json` into `resources/bin/win32-x64/` (gitignored), verifying SHA-256.
+- `npm run pack:win` / `npm run dist:win`: unpacked app / NSIS installer in `release/<version>/`. Both run build → binaries:fetch → check:release first.
 
-### External binaries required on PATH
-
-The Electron main process shells out to `yt-dlp`, `ffmpeg`, and `ffprobe` via `child_process.spawn`. These are not bundled — they must be installed and on the system `PATH` for analyze/download features to work at all.
-
-`electron/main.cjs` also hardcodes a YouTube cookies file path (`YT_DLP_COOKIES_PATH = "D:\\yt-dlp\\cookies.txt"`) used for authenticated `yt-dlp` requests when present; it's optional (falls back to unauthenticated requests) but affects age-restricted/private video handling.
+Electron must not run with `ELECTRON_RUN_AS_NODE` set (some tool environments set it); unset it when launching Electron from scripts.
 
 ## Architecture
 
-This is a two-process Electron app with a hard split between privileged logic and UI:
+Two-process Electron app with a hard split between privileged logic and UI:
 
-- **`electron/main.cjs`** — the Electron main process. This is where essentially all business logic lives: spawning `yt-dlp`/`ffmpeg`/`ffprobe`, parsing yt-dlp's JSON output, resolving/merging metadata, downloading and preparing artwork, and writing the final tagged MP3. It's a single large file organized by IPC handler at the bottom (`analyze-url`, `download-mp3`, `choose-output-folder`, `choose-artwork-file`, `generate-square-crop-preview`, `open-file`, `open-folder`), with plain helper functions above.
-- **`electron/preload.cjs`** — the only bridge between renderer and main. Uses `contextBridge`/`ipcRenderer` (context isolation is on, node integration is off) to expose a single `window.waveMintAPI` object with the methods above plus `onAnalyzeProgress`/`onDownloadProgress` event subscriptions. If you add a new main-process capability, it must be wired through here before the renderer can call it.
-- **`src/App.jsx`** — the entire renderer UI in one component tree (no router, no state library — plain `useState`/`useEffect`). Styling is inline style objects, not CSS classes (`src/App.css`/`index.css` are unused Vite template leftovers). Handles both the single-video flow and the playlist flow (an array of `entries`, each with its own metadata/artwork state) in the same component.
+- **`electron/main.cjs`**: main process and IPC handlers (`analyze-url`, `download-mp3`, `choose-output-folder`, `choose-artwork-file`, `generate-square-crop-preview`, `open-file`, `open-folder`, `get-app-status`, `auth-*`). Metadata/artwork helpers live above the handlers. Loads the dev server when unpacked, `dist/index.html` when `app.isPackaged`.
+- **`electron/binaries.cjs`**: the only place tool paths are decided. Packaged: always `process.resourcesPath/bin`. Dev: `resources/bin/<platform>-<arch>` if fetched, else PATH (`WAVEMINT_USE_SYSTEM_BINARIES=1` forces PATH). `getYtDlpRuntimeArgs()` adds `--ignore-config`, the bundled Deno (`--no-js-runtimes --js-runtimes deno:<path>`) and `--ffmpeg-location`. Also the startup dependency check.
+- **`electron/processes.cjs`**: `runCommand()` spawns with argument arrays (never a shell), hidden windows, line-buffered output, timeouts, and process-tree cleanup on quit. `main.cjs`'s `runProcess(tool, args)` wraps it with yt-dlp error normalization and rate-limit tracking.
+- **`electron/auth.cjs`**: YouTube auth modes (`none` | `browser` | `cookies_file`), browser allowlist and profile discovery, `cookies.txt` validation (never returns cookie values), `buildYtDlpAuthArgs()`, error classification for yt-dlp cookie failures, and `redactSensitiveText()` for any tool output before it's logged or shown.
+- **`electron/settings.cjs`**: validated JSON settings in `userData/settings.json` (`%APPDATA%\WaveMint`; dev uses `WaveMint-Dev`). Stores paths and choices only, never cookie values.
+- **`electron/preload.cjs`**: the only renderer bridge (`window.waveMintAPI`). New main-process capabilities must be wired here. Cookies-file/profile/output-folder paths are always chosen via main-process dialogs.
+- **`src/App.jsx`**: the main UI (no router/state library). Styles are CSS classes in `src/App.css` with tokens in `src/index.css`. **`src/SettingsDialog.jsx`**: Settings → YouTube Authentication. **`src/ipcErrors.js`**: strips Electron's IPC error wrapper and reads WaveMint's `[auth]`/`[rate-limit]`/`[dependency]` error tags (created by `createUserError` in `main.cjs`).
 
-### Key flows to understand together (span both processes)
+### Key flows (span both processes)
 
-1. **Analyze**: renderer calls `waveMintAPI.analyzeUrl({ url, mode })` → main spawns `yt-dlp --dump-single-json` (playlist mode uses `--flat-playlist` to avoid resolving every entry) → main extracts/normalizes metadata (see `getExtractedMetadata`, `extractYouTubeMusicDescriptionMetadata` which parses the "Provided to YouTube by" description format used by YouTube Music uploads) → returns a video or playlist shape to the renderer, which stores it as `result` (single) or `entries` (playlist).
-2. **Artwork**: three modes — `original_thumbnail`, `square_crop`, `custom_file` (see `ARTWORK_OPTIONS` in App.jsx / `ARTWORK_MODES` in main.cjs, which must stay in sync). Square crop and custom-file previews are generated on demand in main via `ffmpeg` and returned as data URLs (`generate-square-crop-preview`, `choose-artwork-file`) so the renderer never touches the filesystem directly.
-3. **Download**: `download-mp3` re-runs `yt-dlp` (this time fully, with `--write-info-json` to capture final authoritative metadata) into a temp file, resolves final metadata by merging what the user edited with freshly-extracted info (`resolveFinalMetadata` — user edits win, provisional/auto-filled fields get overwritten by better extracted data), downloads/prepares artwork, then muxes audio + artwork + ID3 tags into the final MP3 with `ffmpeg`. Progress for both analyze and download is streamed back via `analyze-progress`/`download-progress` IPC events parsed from yt-dlp's stdout/stderr.
-4. **YouTube rate limiting**: main tracks a module-level `youtubeRateLimitedUntil` cooldown and blocks new `analyze-url`/`download-mp3` calls with a friendly error until it expires (`assertYouTubeSessionIsAvailable`). Pacing flags (`--sleep-requests`, `--sleep-interval`) are always passed to `yt-dlp` to reduce the chance of hitting this. The `download-mp3` handler also has a fallback ladder on HTTP 403 (authenticated → unauthenticated → `mweb` player client).
+1. **Analyze**: `waveMintAPI.analyzeUrl({ url, mode })` → `yt-dlp --dump-single-json` (playlists use `--flat-playlist`) → `getExtractedMetadata` / `extractYouTubeMusicDescriptionMetadata` → video or playlist shape.
+2. **Artwork**: `original_thumbnail`, `square_crop`, `custom_file` (`ARTWORK_OPTIONS` in App.jsx and `ARTWORK_MODES` in main.cjs must stay in sync). Previews come back as data URLs from FFmpeg in main.
+3. **Download**: `download-mp3` runs yt-dlp with `--write-info-json`, merges user edits with extracted info (`resolveFinalMetadata`), prepares artwork, then tags with FFmpeg. On HTTP 403 the fallback ladder is: configured auth → (only if auth configured) no auth → `mweb` client.
+4. **Authentication**: `getYtDlpAuthArgs()` in main.cjs is the single source of auth args for analyze, download and retries. Misconfiguration throws an `[auth]` error instead of silently dropping auth. The Settings "Test Authentication" probe requests the Watch Later list (`--flat-playlist --playlist-items 1`), which only resolves for a signed-in session. Note that yt-dlp rewrites a `--cookies` file in place after each run.
+5. **Rate limiting**: module-level `youtubeRateLimitedUntil` cooldown; `assertYouTubeSessionIsAvailable` blocks analyze/download/auth-test. Pacing flags are always passed.
 
-When changing metadata or artwork logic, prefer editing the helper functions in `main.cjs` rather than duplicating logic in the renderer — the renderer treats `metadata`/artwork fields as mostly opaque state it collects and hands back over IPC.
+Prefer editing helper functions in `main.cjs` over duplicating metadata/artwork logic in the renderer. Artwork cropping, FFmpeg processing and metadata embedding have been debugged extensively; change them only for a concrete reason.
+
+### Packaging
+
+`electron-builder.yml`: only `dist/`, `electron/`, `package.json` go into `app.asar`. Bundled tools are `extraResources` → `resources/bin`. `afterPack` runs `scripts/check-release.cjs`, which fails the build on credential-like files/contents or unpinned/modified tools. `build/installer.nsh` adds the optional desktop-shortcut checkbox and cleans up on uninstall. Never add cookie files or personal paths to the repo; the release check will fail the build.

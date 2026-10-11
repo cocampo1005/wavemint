@@ -38,6 +38,7 @@
   --wm-danger: #ff9bb3;
   --wm-danger-bg: rgba(255, 92, 132, 0.1);
   --wm-danger-border: rgba(255, 120, 155, 0.3);
+  --wm-warning: #f5c26b;
 
   /* Typography */
   --wm-font: "Poppins", "Segoe UI", system-ui, sans-serif;

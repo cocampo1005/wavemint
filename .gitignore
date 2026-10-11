@@ -12,6 +12,31 @@ dist
 dist-ssr
 *.local
 
+# Packaging output and downloaded third-party binaries
+# (re-create with `npm run binaries:fetch` / `npm run dist:win`)
+release/
+resources/bin/
+*.staging/
+
+# Credentials and personal configuration: never commit these.
+# Cookie exports, browser credential stores, signing keys, local env files.
+cookies.txt
+*cookies*.txt
+*cookie*.json
+*.cookies
+Cookies
+Login Data
+Local State
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+settings.json
+settings.json.*
+WaveMint-Dev/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

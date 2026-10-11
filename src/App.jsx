@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import "./App.css";
 import { GENRE_OPTIONS } from "./constants/genres";
+import { parseIpcError } from "./ipcErrors";
+import { SettingsDialog } from "./SettingsDialog";
 import horizontalLogo from "./assets/Horizontal Logo.png";
 import logomark from "./assets/Logomark.png";
 
@@ -41,6 +43,50 @@ function AlertIcon({ className }) {
       <circle cx="10" cy="13.75" r="1" fill="currentColor" />
     </svg>
   );
+}
+
+function GearIcon({ className }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 20 20"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path
+        d="M8.6 2.5h2.8l.45 2.1c.5.2.96.47 1.38.8l2.04-.68 1.4 2.43-1.6 1.43a5.6 5.6 0 0 1 0 1.6l1.6 1.43-1.4 2.43-2.04-.68c-.42.33-.88.6-1.38.8l-.45 2.1H8.6l-.45-2.1a5.6 5.6 0 0 1-1.38-.8l-2.04.68-1.4-2.43 1.6-1.43a5.6 5.6 0 0 1 0-1.6l-1.6-1.43 1.4-2.43 2.04.68c.42-.33.88-.6 1.38-.8l.45-2.1Z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+      <circle cx="10" cy="10" r="2.4" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
+function describeAuthState(authState) {
+  if (!authState || authState.mode === "none") {
+    return "YouTube authentication: off";
+  }
+
+  const verified = authState.lastTest?.status === "authenticated";
+  const method =
+    authState.mode === "browser" ? "browser cookies" : "cookies file";
+
+  return `YouTube authentication: ${method} (${verified ? "verified" : "not verified"})`;
+}
+
+function describeComponentProblems(problems, isPackaged) {
+  const names = problems.map((tool) => tool.label).join(", ");
+
+  if (!isPackaged) {
+    return `These tools are not available: ${names}. Run "npm run binaries:fetch", or install them on PATH.`;
+  }
+
+  const blocked = problems.some((tool) => tool.problem === "blocked");
+  return `Some of WaveMint's built-in components could not be started: ${names}. ${
+    blocked ? "Your antivirus may have quarantined them. " : ""
+  }Reinstall WaveMint to repair them.`;
 }
 
 function ProgressBar({ value, label }) {
@@ -155,9 +201,6 @@ function ArtworkPanel({
   disabled = false,
   compact = false,
 }) {
-  const isSquareThumbnailFallback =
-    mode === "square_crop" && !squareCropPreview;
-
   const previewSource =
     mode === "custom_file"
       ? customPreview
@@ -252,7 +295,7 @@ function App() {
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  const [error, setError] = useState("");
+  const [errorState, setErrorState] = useState({ message: "", code: "" });
   const [result, setResult] = useState(null);
   const [outputFolder, setOutputFolder] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
@@ -269,6 +312,33 @@ function App() {
   const [analyzeProgress, setAnalyzeProgress] = useState(0);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloadLabel, setDownloadLabel] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [authState, setAuthState] = useState(null);
+  const [appStatus, setAppStatus] = useState(null);
+  const [checkingComponents, setCheckingComponents] = useState(false);
+
+  const error = errorState.message;
+  const setError = (message) => setErrorState({ message, code: "" });
+  const showError = (err, fallback) =>
+    setErrorState(parseIpcError(err, fallback));
+
+  useEffect(() => {
+    let cancelled = false;
+
+    window.waveMintAPI
+      .getAuthState()
+      .then((state) => !cancelled && setAuthState(state))
+      .catch(() => {});
+
+    window.waveMintAPI
+      .getAppStatus()
+      .then((status) => !cancelled && setAppStatus(status))
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const removeAnalyzeProgress = window.waveMintAPI.onAnalyzeProgress(
@@ -340,8 +410,10 @@ function App() {
               return {
                 ...entry,
                 artworkPreviewError:
-                  previewError?.message ||
-                  "Failed to generate the square artwork preview",
+                  parseIpcError(
+                    previewError,
+                    "Failed to generate the square artwork preview",
+                  ).message,
               };
             }
           }),
@@ -367,15 +439,17 @@ function App() {
           );
 
           nextResult.artworkPreviewError =
-            previewError?.message ||
-            "Failed to generate the square artwork preview";
+            parseIpcError(
+              previewError,
+              "Failed to generate the square artwork preview",
+            ).message;
         }
 
         setResult(nextResult);
         setEntries([]);
       }
     } catch (err) {
-      setError(err.message || "Something went wrong");
+      showError(err, "Something went wrong");
     } finally {
       setLoading(false);
     }
@@ -386,7 +460,7 @@ function App() {
       const folder = await window.waveMintAPI.chooseOutputFolder();
       if (folder) setOutputFolder(folder);
     } catch (err) {
-      setError(err.message || "Failed to choose folder");
+      showError(err, "Failed to choose folder");
     }
   };
 
@@ -402,7 +476,7 @@ function App() {
 
       return selection;
     } catch (err) {
-      setError(err.message || "Failed to choose artwork file");
+      showError(err, "Failed to choose artwork file");
       return null;
     }
   };
@@ -480,7 +554,8 @@ function App() {
           ...current,
           artworkPreviewLoading: false,
           artworkPreviewError:
-            err.message || "Failed to generate the square artwork preview",
+            parseIpcError(err, "Failed to generate the square artwork preview")
+              .message,
         }));
       }
 
@@ -573,7 +648,8 @@ function App() {
         updateEntry(index, {
           artworkPreviewLoading: false,
           artworkPreviewError:
-            err.message || "Failed to generate the square artwork preview",
+            parseIpcError(err, "Failed to generate the square artwork preview")
+              .message,
         });
       }
 
@@ -655,7 +731,7 @@ function App() {
       setStatusMessage("MP3 extracted successfully");
       setLastDownloadedFile(response.filePath || "");
     } catch (err) {
-      setError(err.message || "Download failed");
+      showError(err, "Download failed");
     } finally {
       setDownloading(false);
     }
@@ -670,7 +746,7 @@ function App() {
       setItunesOpened(true);
       setStatusMessage("Opened in iTunes");
     } catch (err) {
-      setError(err.message || "Failed to open the file in iTunes");
+      showError(err, "Failed to open the file in iTunes");
     }
   };
 
@@ -687,7 +763,7 @@ function App() {
       setItunesOpened(true);
       setStatusMessage("Opened all in iTunes");
     } catch (err) {
-      setError(err.message || "Failed to open the files in iTunes");
+      showError(err, "Failed to open the files in iTunes");
     }
   };
 
@@ -818,10 +894,22 @@ function App() {
       );
       setBatchProgressText("");
     } catch (err) {
-      setError(err.message || "Batch download failed");
+      showError(err, "Batch download failed");
       setBatchProgressText("");
     } finally {
       setBatchDownloading(false);
+    }
+  };
+
+  const handleRecheckComponents = async () => {
+    setCheckingComponents(true);
+
+    try {
+      setAppStatus(await window.waveMintAPI.getAppStatus({ refresh: true }));
+    } catch (err) {
+      showError(err, "Could not check WaveMint's components");
+    } finally {
+      setCheckingComponents(false);
     }
   };
 
@@ -829,6 +917,14 @@ function App() {
   const canApplyMasterMetadata =
     !batchDownloading &&
     !!(masterArtist.trim() || masterAlbum.trim() || masterGenre);
+  const componentProblems =
+    appStatus?.dependencies?.tools?.filter((tool) => !tool.ok) || [];
+  const authIndicator =
+    authState && authState.mode !== "none"
+      ? authState.lastTest?.status === "authenticated"
+        ? "success"
+        : "warning"
+      : "";
 
   return (
     <div className="app">
@@ -840,13 +936,56 @@ function App() {
             alt="WaveMint"
             draggable={false}
           />
-          <span className="app-header__tagline">
-            YouTube audio to tagged MP3
-          </span>
+          <div className="app-header__actions">
+            <span className="app-header__tagline">
+              YouTube audio to tagged MP3
+            </span>
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm header-settings"
+              onClick={() => setSettingsOpen(true)}
+              title={describeAuthState(authState)}
+            >
+              <GearIcon className="header-settings__icon" />
+              Settings
+              {authIndicator && (
+                <span
+                  className={`header-settings__dot is-${authIndicator}`}
+                  aria-hidden="true"
+                />
+              )}
+            </button>
+          </div>
         </div>
       </header>
 
+      <SettingsDialog
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        busy={loading || downloading || batchDownloading}
+        onAuthStateChange={setAuthState}
+      />
+
       <main className="app-main">
+        {componentProblems.length > 0 && (
+          <div className="alert" role="alert">
+            <AlertIcon className="alert__icon" />
+            <span className="alert__text">
+              {describeComponentProblems(componentProblems, appStatus?.isPackaged)}
+            </span>
+            <button
+              type="button"
+              className={`btn btn--secondary btn--sm alert__action ${
+                checkingComponents ? "is-loading" : ""
+              }`}
+              onClick={handleRecheckComponents}
+              disabled={checkingComponents}
+            >
+              Check Again
+            </button>
+          </div>
+        )}
+
         <section className="panel" aria-label="Source and output">
           <div className="panel__section">
             <div className="source-top">
@@ -928,7 +1067,16 @@ function App() {
         {error && (
           <div className="alert" role="alert">
             <AlertIcon className="alert__icon" />
-            <span>{error}</span>
+            <span className="alert__text">{error}</span>
+            {errorState.code === "auth" && (
+              <button
+                type="button"
+                className="btn btn--secondary btn--sm alert__action"
+                onClick={() => setSettingsOpen(true)}
+              >
+                Open Settings
+              </button>
+            )}
           </div>
         )}
 

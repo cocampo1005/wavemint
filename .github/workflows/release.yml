@@ -1,0 +1,130 @@
+name: Windows release
+
+# Builds the Windows installer on a version tag (v1.2.3) or on demand.
+# Tag builds create a DRAFT GitHub Release; nothing is published publicly
+# until a maintainer reviews the draft, tests the installer, and publishes it.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match package.json version ${version}" >&2
+            exit 1
+          fi
+
+      - name: Cache bundled binaries
+        uses: actions/cache@v4
+        with:
+          path: resources/bin
+          key: wavemint-binaries-${{ hashFiles('scripts/binaries.manifest.json') }}
+
+      # Downloads (or re-verifies cached) pinned yt-dlp, Deno and FFmpeg builds
+      # against the SHA-256 values committed in scripts/binaries.manifest.json.
+      - name: Fetch and verify bundled binaries
+        run: |
+          npm run binaries:fetch
+          npm run binaries:verify
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      # Builds the renderer, re-runs the release safety checks, packages the
+      # app (the afterPack hook scans the packaged files for credentials), and
+      # creates the NSIS installer. No code-signing secrets are used, so the
+      # installer is unsigned; see README "Code signing".
+      - name: Build installer
+        run: npm run dist:win
+
+      - name: Collect release files
+        shell: pwsh
+        run: |
+          $out = New-Item -ItemType Directory -Force release-upload
+          $installer = Get-ChildItem release/*/WaveMint-Setup-*.exe | Select-Object -First 1
+          Copy-Item $installer.FullName $out
+          Copy-Item "$($installer.FullName).blockmap" $out
+          $hash = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLower()
+          "$hash  $($installer.Name)" | Out-File -Encoding ascii "$out/SHA256SUMS.txt"
+
+          # FFmpeg is LGPLv3; ship its corresponding source next to the binary.
+          $manifest = Get-Content scripts/binaries.manifest.json -Raw | ConvertFrom-Json
+          $ffmpeg = $manifest.binaries | Where-Object id -eq 'ffmpeg'
+          $commit = [regex]::Match($ffmpeg.version, '-g([0-9a-f]+)').Groups[1].Value
+          Invoke-WebRequest "https://github.com/FFmpeg/FFmpeg/archive/$commit.tar.gz" -OutFile "$out/FFmpeg-source-$commit.tar.gz"
+          Get-ChildItem $out | Format-Table Name, Length
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WaveMint-windows-x64
+          path: release-upload/
+          if-no-files-found: error
+          retention-days: 30
+
+  draft-release:
+    needs: build-windows
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: WaveMint-windows-x64
+          path: release-upload
+
+      - name: Create draft GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<'NOTES'
+          ## Download
+
+          Download **WaveMint-Setup-x.y.z.exe** below and run it. No other software is required.
+
+          Windows may show a SmartScreen warning ("Windows protected your PC") because this
+          build is not code-signed yet. Choose **More info**, then **Run anyway**.
+          You can verify the download with the SHA-256 value in `SHA256SUMS.txt`.
+
+          The FFmpeg source archive is provided to satisfy FFmpeg's LGPL license; you don't need it to use WaveMint.
+          NOTES
+          gh release create "${GITHUB_REF_NAME}" release-upload/* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --draft \
+            --verify-tag \
+            --title "WaveMint ${GITHUB_REF_NAME#v}" \
+            --notes-file notes.md

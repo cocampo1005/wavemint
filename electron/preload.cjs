@@ -10,6 +10,20 @@ contextBridge.exposeInMainWorld("waveMintAPI", {
   openFile: (filePath) => ipcRenderer.invoke("open-file", filePath),
   openFolder: (folderPath) => ipcRenderer.invoke("open-folder", folderPath),
 
+  getAppStatus: (options) => ipcRenderer.invoke("get-app-status", options),
+
+  // YouTube authentication. File and folder paths are always chosen through
+  // main-process dialogs; cookie contents never cross this bridge.
+  getAuthState: () => ipcRenderer.invoke("auth-get-state"),
+  setAuthMode: (mode) => ipcRenderer.invoke("auth-set-mode", mode),
+  detectBrowsers: () => ipcRenderer.invoke("auth-detect-browsers"),
+  setAuthBrowser: (payload) => ipcRenderer.invoke("auth-set-browser", payload),
+  chooseBrowserProfileFolder: (browserId) =>
+    ipcRenderer.invoke("auth-choose-profile-folder", browserId),
+  chooseCookiesFile: () => ipcRenderer.invoke("auth-choose-cookies-file"),
+  removeCookiesFile: () => ipcRenderer.invoke("auth-remove-cookies-file"),
+  testAuthentication: () => ipcRenderer.invoke("auth-test"),
+
   onAnalyzeProgress: (callback) => {
     const listener = (_, data) => callback(data);
     ipcRenderer.on("analyze-progress", listener);

@@ -3,9 +3,62 @@ const path = require("path");
 const fs = require("fs");
 const http = require("http");
 const https = require("https");
-const { spawn } = require("child_process");
+const { createBinaryResolver, verifyDependencies } = require("./binaries.cjs");
+const { killAllChildren, runCommand } = require("./processes.cjs");
+const { createSettingsStore } = require("./settings.cjs");
+const {
+  AUTH_PROBE_URL,
+  AuthError,
+  buildYtDlpAuthArgs,
+  classifyAuthFailure,
+  detectBrowsers,
+  getAuthFingerprint,
+  getBrowser,
+  inspectCookiesFile,
+  interpretAuthProbe,
+  isSupportedBrowser,
+  redactSensitiveText,
+  sanitizeProfileValue,
+  validateCustomProfileFolder,
+} = require("./auth.cjs");
 
-const YT_DLP_COOKIES_PATH = "D:\\yt-dlp\\cookies.txt";
+const APP_USER_MODEL_ID = "com.wavemint.app";
+const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL || "http://localhost:5173";
+
+// Development runs keep their own settings so experimenting never touches an
+// installed copy's configuration. Must run before the app is ready.
+if (!app.isPackaged) {
+  app.setPath("userData", path.join(app.getPath("appData"), "WaveMint-Dev"));
+}
+
+const binaries = createBinaryResolver({
+  isPackaged: app.isPackaged,
+  resourcesPath: process.resourcesPath,
+  appRoot: path.join(__dirname, ".."),
+  cacheDir: path.join(app.getPath("userData"), "yt-dlp-cache"),
+});
+
+let settingsStore = null;
+
+function getSettingsStore() {
+  if (!settingsStore) {
+    settingsStore = createSettingsStore(
+      path.join(app.getPath("userData"), "settings.json"),
+    );
+  }
+
+  return settingsStore;
+}
+
+function getAuthSettings() {
+  return getSettingsStore().get().auth;
+}
+
+// Errors that the renderer should treat specially carry a short "[code]"
+// prefix, which the UI strips before display (see parseIpcError in App.jsx).
+function createUserError(code, message) {
+  return new Error(`[${code}] ${message}`);
+}
 
 // Explicit pacing options are used instead of yt-dlp's `-t sleep` preset so
 // this file remains compatible with older yt-dlp builds that may not support
@@ -60,17 +113,66 @@ function assertYouTubeSessionIsAvailable() {
   }
 
   const remainingMinutes = Math.max(1, Math.ceil(remainingMs / 60000));
-  throw new Error(
+  throw createUserError(
+    "rate-limit",
     `YouTube temporarily rate-limited this WaveMint session. Wait about ${remainingMinutes} more minute${remainingMinutes === 1 ? "" : "s"} before analyzing or extracting again.`,
   );
 }
 
+// The single source of yt-dlp authentication arguments, used by analysis,
+// extraction, retries and the authentication test alike.
 function getYtDlpAuthArgs() {
-  if (YT_DLP_COOKIES_PATH && fs.existsSync(YT_DLP_COOKIES_PATH)) {
-    return ["--cookies", YT_DLP_COOKIES_PATH];
+  try {
+    return buildYtDlpAuthArgs(getAuthSettings());
+  } catch (error) {
+    if (error instanceof AuthError) {
+      throw createUserError("auth", error.message);
+    }
+
+    throw error;
+  }
+}
+
+let activeYtDlpJobs = 0;
+let dependencyStatusPromise = null;
+
+function getDependencyStatus({ refresh = false } = {}) {
+  if (!dependencyStatusPromise || refresh) {
+    dependencyStatusPromise = verifyDependencies(binaries).then((status) => {
+      for (const tool of status.tools) {
+        if (tool.ok) {
+          console.log(`[dependencies] ${tool.label}: ${tool.version}`);
+        } else {
+          console.error(`[dependencies] ${tool.label}: ${tool.message}`);
+        }
+      }
+
+      return status;
+    });
   }
 
-  return [];
+  return dependencyStatusPromise;
+}
+
+// Cheap per-operation guard (a file-exists check, no process launch) so a
+// missing bundled tool produces a clear message instead of a spawn error.
+function assertBundledToolsPresent() {
+  for (const tool of ["yt-dlp", "ffmpeg", "ffprobe", "deno"]) {
+    const resolved = binaries.resolve(tool);
+
+    if (resolved.bundled && !fileExists(resolved.command)) {
+      throw createUserError(
+        "dependency",
+        `WaveMint's ${resolved.label} component is missing. Reinstall WaveMint to restore it.`,
+      );
+    }
+  }
+}
+
+function sendToRenderer(sender, channel, data) {
+  if (sender && !sender.isDestroyed()) {
+    sender.send(channel, data);
+  }
 }
 
 function createWindow() {
@@ -80,20 +182,37 @@ function createWindow() {
     minWidth: 720,
     minHeight: 560,
     title: "WaveMint",
-    icon: path.join(__dirname, "assets", "icon.png"),
+    // Packaged builds use the multi-resolution icon embedded in WaveMint.exe.
+    ...(app.isPackaged ? {} : { icon: path.join(__dirname, "assets", "icon.png") }),
     // Matches --wm-bg-base in src/index.css so there's no white flash on load.
     backgroundColor: "#080D24",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
     },
   });
 
-  win.loadURL("http://localhost:5173");
+  // The UI is a single local page: never navigate away or open new windows.
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  win.webContents.on("will-navigate", (event, targetUrl) => {
+    if (targetUrl !== win.webContents.getURL()) {
+      event.preventDefault();
+    }
+  });
+
+  if (app.isPackaged || process.env.WAVEMINT_RENDERER === "dist") {
+    win.loadFile(path.join(__dirname, "..", "dist", "index.html"));
+  } else {
+    win.loadURL(DEV_SERVER_URL);
+  }
 }
 
 app.whenReady().then(() => {
+  app.setAppUserModelId(app.isPackaged ? APP_USER_MODEL_ID : process.execPath);
+  getSettingsStore().load();
+  getDependencyStatus();
   createWindow();
 
   app.on("activate", () => {
@@ -105,8 +224,13 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
+app.on("before-quit", () => {
+  killAllChildren();
+});
+
 function sanitizeFileName(value) {
   return (value || "")
+    // eslint-disable-next-line no-control-regex -- strips control characters
     .replace(/[<>:"/\\|?*\x00-\x1F]/g, "")
     .replace(/\s+/g, " ")
     .trim();
@@ -617,18 +741,6 @@ function removeFileQuietly(filePath) {
   } catch {}
 }
 
-function findMatchingTempFile(folderPath, filePrefix) {
-  try {
-    const matchingFile = fs
-      .readdirSync(folderPath)
-      .find((fileName) => fileName.startsWith(filePrefix));
-
-    return matchingFile ? path.join(folderPath, matchingFile) : null;
-  } catch {
-    return null;
-  }
-}
-
 async function convertImageToJpeg(inputPath, outputPath, videoFilter = null) {
   const args = ["-y", "-i", inputPath];
 
@@ -802,47 +914,92 @@ async function prepareArtwork({
   return preparedArtworkPath;
 }
 
+// Reduces yt-dlp's stderr to its final "ERROR:" line, without the
+// "[extractor] id:" prefix, instead of showing raw command-line output.
+function summarizeYtDlpError(text) {
+  const errorLines = String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => /^ERROR:/i.test(line));
+  const lastError = errorLines[errorLines.length - 1];
+
+  if (!lastError) {
+    return "yt-dlp could not process this URL.";
+  }
+
+  const summary = lastError
+    .replace(/^ERROR:\s*/i, "")
+    .replace(/^\[[^\]]+\]\s*[^:\s]+:\s*/, "")
+    .trim();
+
+  return summary.length > 300 ? `${summary.slice(0, 297)}…` : summary;
+}
+
 function normalizeYtDlpError(message) {
   const text = String(message || "");
+  const authSettings = getAuthSettings();
+  const usingAuth = authSettings.mode !== "none";
 
   if (isYouTubeRateLimitMessage(text)) {
-    return "YouTube has temporarily rate-limited the current session. Stop analyzing and extracting for up to one hour, then try again. WaveMint now spaces requests and uses lightweight playlist analysis to reduce future rate limits.";
+    return createUserError(
+      "rate-limit",
+      "YouTube has temporarily rate-limited the current session. Stop analyzing and extracting for up to one hour, then try again. WaveMint now spaces requests and uses lightweight playlist analysis to reduce future rate limits.",
+    ).message;
+  }
+
+  const authProblem = classifyAuthFailure(text, authSettings);
+  if (authProblem) {
+    return createUserError("auth", authProblem.message).message;
   }
 
   if (
     text.includes("This video is private") ||
     text.includes("Private video")
   ) {
-    return "This video is private and the current YouTube account in cookies.txt does not have access to it.";
+    return createUserError(
+      "auth",
+      usingAuth
+        ? "This video is private and the YouTube account WaveMint is using does not have access to it."
+        : "This video is private. If your YouTube account has access, set up YouTube authentication in Settings.",
+    ).message;
   }
 
   if (
     text.includes("Sign in to confirm your age") ||
     text.includes("age-restricted")
   ) {
-    return "This video requires YouTube authentication. Make sure cookies.txt is current and exported from the correct signed-in Edge account.";
+    return createUserError(
+      "auth",
+      usingAuth
+        ? "This video requires a signed-in YouTube account, and YouTube did not accept the current session. Your cookies may have expired. Use Test Authentication in Settings."
+        : "This video requires a signed-in YouTube account. Set up YouTube authentication in Settings.",
+    ).message;
   }
 
   if (
     text.includes("Sign in to confirm you’re not a bot") ||
     text.includes("Sign in to confirm you're not a bot")
   ) {
-    return "YouTube is requiring authentication for this video. Refresh your cookies.txt file from Edge and try again.";
+    return createUserError(
+      "auth",
+      usingAuth
+        ? "YouTube is asking for a signed-in session for this video and did not accept the current one. Refresh your YouTube authentication in Settings and try again."
+        : "YouTube is requiring authentication for this video. Set up YouTube authentication in Settings and try again.",
+    ).message;
+  }
+
+  if (/members-only content|Join this channel to get access/i.test(text)) {
+    return createUserError(
+      "auth",
+      "This video is for channel members only. It requires authentication from an account with access.",
+    ).message;
   }
 
   if (text.includes("HTTP Error 403") || text.includes("403: Forbidden")) {
     return "YouTube rejected the media stream with HTTP 403. WaveMint tried the available download methods, but this video may require a different YouTube player client or a Proof-of-Origin token.";
   }
 
-  if (
-    text.includes("Could not copy Chrome cookie database") ||
-    text.includes("Permission denied") ||
-    text.includes("cookies")
-  ) {
-    return "There was a problem using browser authentication or cookies.txt. Make sure the cookies file exists and was exported from the correct signed-in Edge account.";
-  }
-
-  return text || "yt-dlp failed";
+  return summarizeYtDlpError(text);
 }
 
 function isHttp403Error(error) {
@@ -858,70 +1015,61 @@ function isYtDlpSleepLine(line) {
   return /\bSleeping\s+\d+(?:\.\d+)?\s+seconds/i.test(String(line || ""));
 }
 
-function runProcess(command, args, options = {}) {
-  const { onStdoutLine, onStderrLine } = options;
+// Runs one of WaveMint's tools ("yt-dlp", "ffmpeg", "ffprobe") through the
+// shared resolver and process runner. yt-dlp invocations automatically get
+// WaveMint's runtime options (bundled Deno/FFmpeg, no user config files).
+async function runProcess(tool, args, options = {}) {
+  const resolved = binaries.resolve(tool);
+  const isYtDlp = tool === "yt-dlp";
+  const finalArgs = isYtDlp ? [...binaries.getYtDlpRuntimeArgs(), ...args] : args;
 
-  return new Promise((resolve, reject) => {
-    console.log(`[runProcess] Starting: ${command}`, args);
+  console.log(`[runProcess] Starting: ${tool}`, finalArgs);
 
-    const child = spawn(command, args, { windowsHide: true });
+  if (isYtDlp) activeYtDlpJobs += 1;
 
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout.on("data", (data) => {
-      const text = data.toString();
-      stdout += text;
-
-      if (onStdoutLine) {
-        text.split(/\r?\n/).forEach((line) => {
-          if (line.trim()) onStdoutLine(line);
-        });
-      }
+  let result;
+  try {
+    result = await runCommand(resolved.command, finalArgs, {
+      ...options,
+      label: resolved.label,
+      env: binaries.getChildEnv(),
     });
+  } catch (error) {
+    console.error(`[runProcess] Failed to start ${tool}:`, error.message);
+    throw createUserError("dependency", error.message);
+  } finally {
+    if (isYtDlp) activeYtDlpJobs -= 1;
+  }
 
-    child.stderr.on("data", (data) => {
-      const text = data.toString();
-      stderr += text;
+  if (result.timedOut) {
+    throw new Error(`${resolved.label} took too long to respond and was stopped.`);
+  }
 
-      if (onStderrLine) {
-        text.split(/\r?\n/).forEach((line) => {
-          if (line.trim()) onStderrLine(line);
-        });
-      }
-    });
+  if (result.code !== 0) {
+    // Redacted before anything is logged or shown, since tool output can
+    // echo cookie-file lines.
+    const rawMessage = redactSensitiveText(
+      result.stderr || result.stdout || `${tool} failed`,
+    );
 
-    child.on("close", (code) => {
-      if (code !== 0) {
-        const rawMessage = stderr || stdout || `${command} failed`;
+    if (isYtDlp && isYouTubeRateLimitMessage(rawMessage)) {
+      markYouTubeRateLimited();
+    }
 
-        if (command === "yt-dlp" && isYouTubeRateLimitMessage(rawMessage)) {
-          markYouTubeRateLimited();
-        }
+    const finalMessage = isYtDlp ? normalizeYtDlpError(rawMessage) : rawMessage;
 
-        const finalMessage =
-          command === "yt-dlp" ? normalizeYtDlpError(rawMessage) : rawMessage;
+    console.error(`[runProcess] ${tool} exited with code ${result.code}`);
+    console.error(rawMessage);
 
-        console.error(`[runProcess] ${command} exited with code ${code}`);
-        console.error(rawMessage);
+    const processError = new Error(finalMessage);
+    processError.rawMessage = rawMessage;
+    processError.exitCode = result.code;
 
-        const processError = new Error(finalMessage);
-        processError.rawMessage = rawMessage;
-        processError.exitCode = code;
+    throw processError;
+  }
 
-        reject(processError);
-        return;
-      }
-
-      console.log(`[runProcess] Completed: ${command}`);
-      resolve({ stdout, stderr });
-    });
-
-    child.on("error", (err) => {
-      console.error(`[runProcess] Failed to start ${command}:`, err);
-      reject(new Error(`Failed to start ${command}: ${err.message}`));
-    });
-  });
+  console.log(`[runProcess] Completed: ${tool}`);
+  return { stdout: result.stdout, stderr: result.stderr };
 }
 
 function cleanupMatchingTempFiles(folderPath, tempBaseName) {
@@ -940,167 +1088,156 @@ function cleanupMatchingTempFiles(folderPath, tempBaseName) {
 }
 
 ipcMain.handle("analyze-url", async (event, payload) => {
-  return new Promise((resolve, reject) => {
-    const { url, mode } = payload || {};
+  const { url, mode } = payload || {};
 
-    try {
-      assertYouTubeSessionIsAvailable();
-    } catch (error) {
-      reject(error);
-      return;
-    }
+  assertYouTubeSessionIsAvailable();
 
-    if (!url || !url.trim()) {
-      reject(new Error("No URL provided"));
-      return;
-    }
+  if (!url || !url.trim()) {
+    throw new Error("No URL provided");
+  }
 
-    event.sender.send("analyze-progress", {
-      percent: 10,
-      label: "Starting analysis...",
-    });
+  assertBundledToolsPresent();
+  const authArgs = getYtDlpAuthArgs();
 
-    const args = [
-      ...getYtDlpAuthArgs(),
-      ...getYtDlpPacingArgs(),
-      "--dump-single-json",
-      "--no-warnings",
-    ];
+  sendToRenderer(event.sender, "analyze-progress", {
+    percent: 10,
+    label: "Starting analysis...",
+  });
 
-    if (mode === "video") {
-      args.push("--no-playlist");
-    } else {
-      // Listing a playlist should not fully resolve every video before the
-      // user has selected tracks. This dramatically reduces YouTube requests.
-      args.push("--flat-playlist");
-    }
+  const args = [
+    ...authArgs,
+    ...getYtDlpPacingArgs(),
+    "--dump-single-json",
+    "--no-warnings",
+  ];
 
-    args.push(url);
+  if (mode === "video") {
+    args.push("--no-playlist");
+  } else {
+    // Listing a playlist should not fully resolve every video before the
+    // user has selected tracks. This dramatically reduces YouTube requests.
+    args.push("--flat-playlist");
+  }
 
-    const ytDlp = spawn("yt-dlp", args, { windowsHide: true });
+  // "--" ends option parsing so a URL can never be read as a yt-dlp option.
+  args.push("--", url.trim());
 
-    let stdout = "";
-    let stderr = "";
-
-    ytDlp.stdout.on("data", (data) => {
-      stdout += data.toString();
-
-      event.sender.send("analyze-progress", {
+  const { stdout } = await runProcess("yt-dlp", args, {
+    onStdoutData: () => {
+      sendToRenderer(event.sender, "analyze-progress", {
         percent: 60,
         label: "Fetching metadata...",
       });
-    });
-
-    ytDlp.stderr.on("data", (data) => {
-      const text = data.toString();
-      stderr += text;
-
+    },
+    onStderrData: (text) => {
       const isPacingRequest = isYtDlpSleepLine(text);
-      event.sender.send("analyze-progress", {
+      sendToRenderer(event.sender, "analyze-progress", {
         percent: isPacingRequest ? 30 : 75,
         label: isPacingRequest
           ? "Pacing YouTube requests to avoid rate limits..."
           : "Parsing response...",
       });
-    });
-
-    ytDlp.on("close", (code) => {
-      if (code !== 0) {
-        const rawMessage = stderr || stdout || "yt-dlp failed";
-
-        if (isYouTubeRateLimitMessage(rawMessage)) {
-          markYouTubeRateLimited();
-        }
-
-        reject(new Error(normalizeYtDlpError(rawMessage)));
-        return;
-      }
-
-      try {
-        const parsed = JSON.parse(stdout);
-
-        event.sender.send("analyze-progress", {
-          percent: 100,
-          label: "Analysis complete",
-        });
-
-        const topDescriptionMetadata =
-          extractYouTubeMusicDescriptionMetadata(parsed);
-        const topMetadataValues = getExtractedMetadata(parsed, {
-          album: parsed.playlist_title || parsed.title || "",
-        });
-        const topMetadata = createEditableMetadata(topMetadataValues, {
-          title: !parsed.track && !topDescriptionMetadata.title,
-          artist:
-            !parsed.artist &&
-            !parsed.album_artist &&
-            !topDescriptionMetadata.artist,
-          album: !parsed.album && !topDescriptionMetadata.album,
-          genre: !getUsefulGenre(parsed.genre),
-        });
-
-        const entries = parsed.entries
-          ? parsed.entries.map((entry) => {
-              const entryDescriptionMetadata =
-                extractYouTubeMusicDescriptionMetadata(entry);
-              const entryArtistFallback =
-                entry.artist ||
-                entry.album_artist ||
-                entry.uploader ||
-                parsed.uploader ||
-                parsed.channel ||
-                "";
-              const playlistAlbumFallback = cleanAlbumName(
-                parsed.title || parsed.playlist_title || "",
-                entryArtistFallback,
-              );
-              const entryMetadataValues = getExtractedMetadata(entry, {
-                artist: entryArtistFallback,
-                album: playlistAlbumFallback,
-              });
-
-              return {
-                id: entry.id,
-                title: entry.title,
-                uploader: entry.uploader || parsed.uploader,
-                duration: entry.duration,
-                thumbnail: getBestThumbnailUrl(entry),
-                webpage_url: getYouTubeEntryUrl(entry),
-                selected: true,
-                metadata: createEditableMetadata(entryMetadataValues, {
-                  title: !entry.track && !entryDescriptionMetadata.title,
-                  artist:
-                    !entry.artist &&
-                    !entry.album_artist &&
-                    !entryDescriptionMetadata.artist,
-                  album: !entry.album && !entryDescriptionMetadata.album,
-                  genre: !getUsefulGenre(entry.genre),
-                }),
-              };
-            })
-          : [];
-
-        resolve({
-          id: parsed.id,
-          title: parsed.title,
-          uploader: parsed.uploader,
-          duration: parsed.duration,
-          thumbnail: getBestThumbnailUrl(parsed),
-          webpage_url: parsed.webpage_url,
-          isPlaylist: !!parsed.entries,
-          metadata: topMetadata,
-          entries,
-        });
-      } catch {
-        reject(new Error("Failed to parse yt-dlp response"));
-      }
-    });
-
-    ytDlp.on("error", (err) => {
-      reject(new Error(`Failed to start yt-dlp: ${err.message}`));
-    });
+    },
   });
+
+  let parsed;
+
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    throw new Error("Failed to parse yt-dlp response");
+  }
+
+  try {
+    const topDescriptionMetadata =
+      extractYouTubeMusicDescriptionMetadata(parsed);
+    const topMetadataValues = getExtractedMetadata(parsed, {
+      album: parsed.playlist_title || parsed.title || "",
+    });
+    const topMetadata = createEditableMetadata(topMetadataValues, {
+      title: !parsed.track && !topDescriptionMetadata.title,
+      artist:
+        !parsed.artist &&
+        !parsed.album_artist &&
+        !topDescriptionMetadata.artist,
+      album: !parsed.album && !topDescriptionMetadata.album,
+      genre: !getUsefulGenre(parsed.genre),
+    });
+
+    const entries = parsed.entries
+      ? parsed.entries.map((entry) => {
+          const entryDescriptionMetadata =
+            extractYouTubeMusicDescriptionMetadata(entry);
+          const entryArtistFallback =
+            entry.artist ||
+            entry.album_artist ||
+            entry.uploader ||
+            parsed.uploader ||
+            parsed.channel ||
+            "";
+          const playlistAlbumFallback = cleanAlbumName(
+            parsed.title || parsed.playlist_title || "",
+            entryArtistFallback,
+          );
+          const entryMetadataValues = getExtractedMetadata(entry, {
+            artist: entryArtistFallback,
+            album: playlistAlbumFallback,
+          });
+
+          return {
+            id: entry.id,
+            title: entry.title,
+            uploader: entry.uploader || parsed.uploader,
+            duration: entry.duration,
+            thumbnail: getBestThumbnailUrl(entry),
+            webpage_url: getYouTubeEntryUrl(entry),
+            selected: true,
+            metadata: createEditableMetadata(entryMetadataValues, {
+              title: !entry.track && !entryDescriptionMetadata.title,
+              artist:
+                !entry.artist &&
+                !entry.album_artist &&
+                !entryDescriptionMetadata.artist,
+              album: !entry.album && !entryDescriptionMetadata.album,
+              genre: !getUsefulGenre(entry.genre),
+            }),
+          };
+        })
+      : [];
+
+    sendToRenderer(event.sender, "analyze-progress", {
+      percent: 100,
+      label: "Analysis complete",
+    });
+
+    return {
+      id: parsed.id,
+      title: parsed.title,
+      uploader: parsed.uploader,
+      duration: parsed.duration,
+      thumbnail: getBestThumbnailUrl(parsed),
+      webpage_url: parsed.webpage_url,
+      isPlaylist: !!parsed.entries,
+      metadata: topMetadata,
+      entries,
+    };
+  } catch {
+    throw new Error("Failed to parse yt-dlp response");
+  }
 });
+
+// Paths the renderer may hand back to the main process. They can only enter
+// these sets through main-process dialogs or WaveMint's own output, so the UI
+// can never direct writes, reads or shell.openPath at arbitrary locations.
+const approvedOutputFolders = new Set();
+const approvedArtworkFiles = new Set();
+const producedFiles = new Set();
+
+function normalizeApprovedPath(value) {
+  return typeof value === "string" && value.trim()
+    ? path.resolve(value.trim())
+    : "";
+}
 
 ipcMain.handle("choose-output-folder", async () => {
   const result = await dialog.showOpenDialog({
@@ -1111,6 +1248,7 @@ ipcMain.handle("choose-output-folder", async () => {
     return null;
   }
 
+  approvedOutputFolders.add(normalizeApprovedPath(result.filePaths[0]));
   return result.filePaths[0];
 });
 
@@ -1130,6 +1268,7 @@ ipcMain.handle("choose-artwork-file", async () => {
   }
 
   const filePath = result.filePaths[0];
+  approvedArtworkFiles.add(normalizeApprovedPath(filePath));
   const tempFolder = app.getPath("temp");
   const tempBaseName = createTempToken("wavemint-custom-preview");
   const previewPath = path.join(tempFolder, `${tempBaseName}.jpg`);
@@ -1187,8 +1326,7 @@ ipcMain.handle("generate-square-crop-preview", async (_event, payload) => {
 });
 
 ipcMain.handle("download-mp3", async (event, payload) => {
-  const { url, outputFolder, metadata, thumbnail, duration, artwork } =
-    payload || {};
+  const { url, outputFolder, metadata, thumbnail, artwork } = payload || {};
 
   assertYouTubeSessionIsAvailable();
 
@@ -1199,6 +1337,20 @@ ipcMain.handle("download-mp3", async (event, payload) => {
   if (!outputFolder || !outputFolder.trim()) {
     throw new Error("No output folder selected");
   }
+
+  if (!approvedOutputFolders.has(normalizeApprovedPath(outputFolder))) {
+    throw new Error("Choose the output folder again before extracting");
+  }
+
+  if (
+    artwork?.mode === "custom_file" &&
+    !approvedArtworkFiles.has(normalizeApprovedPath(artwork?.customFilePath))
+  ) {
+    throw new Error("Choose the custom artwork image again before extracting");
+  }
+
+  assertBundledToolsPresent();
+  const authArgs = getYtDlpAuthArgs();
 
   const submittedMetadata = metadata || {};
   const progressTitle =
@@ -1227,7 +1379,9 @@ ipcMain.handle("download-mp3", async (event, payload) => {
       tempOutputTemplate,
     ];
 
-    const commonYtDlpArgs = [...baseYtDlpArgs, url];
+    // "--" ends option parsing so a URL can never be read as a yt-dlp option.
+    const urlArgs = ["--", url.trim()];
+    const commonYtDlpArgs = [...baseYtDlpArgs, ...urlArgs];
 
     // yt-dlp currently recommends the mweb client when a PO-token
     // provider is available. The provider is discovered automatically.
@@ -1235,7 +1389,7 @@ ipcMain.handle("download-mp3", async (event, payload) => {
       ...baseYtDlpArgs,
       "--extractor-args",
       "youtube:player_client=mweb",
-      url,
+      ...urlArgs,
     ];
 
     const progressHandlers = {
@@ -1243,7 +1397,7 @@ ipcMain.handle("download-mp3", async (event, payload) => {
         const percent = extractPercent(line);
 
         if (isYtDlpSleepLine(line)) {
-          event.sender.send("download-progress", {
+          sendToRenderer(event.sender, "download-progress", {
             percent: 0,
             label: `${progressTitle} • pacing requests to avoid YouTube rate limits`,
           });
@@ -1251,7 +1405,7 @@ ipcMain.handle("download-mp3", async (event, payload) => {
         }
 
         if (percent !== null) {
-          event.sender.send("download-progress", {
+          sendToRenderer(event.sender, "download-progress", {
             percent,
             label: progressTitle,
           });
@@ -1262,7 +1416,7 @@ ipcMain.handle("download-mp3", async (event, payload) => {
         const percent = extractPercent(line);
 
         if (isYtDlpSleepLine(line)) {
-          event.sender.send("download-progress", {
+          sendToRenderer(event.sender, "download-progress", {
             percent: 0,
             label: `${progressTitle} • pacing requests to avoid YouTube rate limits`,
           });
@@ -1270,7 +1424,7 @@ ipcMain.handle("download-mp3", async (event, payload) => {
         }
 
         if (percent !== null) {
-          event.sender.send("download-progress", {
+          sendToRenderer(event.sender, "download-progress", {
             percent,
             label: progressTitle,
           });
@@ -1278,7 +1432,7 @@ ipcMain.handle("download-mp3", async (event, payload) => {
       },
     };
 
-    const authenticatedArgs = [...getYtDlpAuthArgs(), ...commonYtDlpArgs];
+    const authenticatedArgs = [...authArgs, ...commonYtDlpArgs];
 
     try {
       await runProcess("yt-dlp", authenticatedArgs, progressHandlers);
@@ -1290,14 +1444,20 @@ ipcMain.handle("download-mp3", async (event, payload) => {
       // Remove partial audio and metadata files from the failed attempt.
       cleanupMatchingTempFiles(outputFolder, tempBaseName);
 
-      event.sender.send("download-progress", {
-        percent: 0,
-        label: `${progressTitle} • retrying without authentication`,
-      });
-
-      // Public videos sometimes work without cookies when an authenticated
-      // YouTube media URL is rejected with HTTP 403.
       try {
+        // Public videos sometimes work without cookies when an authenticated
+        // YouTube media URL is rejected with HTTP 403. Without configured
+        // authentication this attempt would repeat the first one exactly, so
+        // it is skipped to avoid an extra YouTube request.
+        if (!authArgs.length) {
+          throw error;
+        }
+
+        sendToRenderer(event.sender, "download-progress", {
+          percent: 0,
+          label: `${progressTitle} • retrying without authentication`,
+        });
+
         await runProcess("yt-dlp", commonYtDlpArgs, progressHandlers);
       } catch (publicError) {
         if (!isHttp403Error(publicError)) {
@@ -1306,7 +1466,7 @@ ipcMain.handle("download-mp3", async (event, payload) => {
 
         cleanupMatchingTempFiles(outputFolder, tempBaseName);
 
-        event.sender.send("download-progress", {
+        sendToRenderer(event.sender, "download-progress", {
           percent: 0,
           label: `${progressTitle} • retrying with mweb YouTube client`,
         });
@@ -1355,7 +1515,7 @@ ipcMain.handle("download-mp3", async (event, payload) => {
 
     const hasCover = preparedArtworkPath && fileExists(preparedArtworkPath);
 
-    event.sender.send("download-progress", {
+    sendToRenderer(event.sender, "download-progress", {
       percent: 95,
       label: `${finalMetadata.title || progressTitle} • tagging metadata`,
     });
@@ -1421,8 +1581,9 @@ ipcMain.handle("download-mp3", async (event, payload) => {
     }
 
     cleanupMatchingTempFiles(outputFolder, tempBaseName);
+    producedFiles.add(normalizeApprovedPath(finalOutputPath));
 
-    event.sender.send("download-progress", {
+    sendToRenderer(event.sender, "download-progress", {
       percent: 100,
       label: finalMetadata.title || "Complete",
     });
@@ -1454,7 +1615,16 @@ ipcMain.handle("open-file", async (_, filePath) => {
     throw new Error("No file path provided");
   }
 
-  await shell.openPath(filePath);
+  // Only MP3s that WaveMint itself created can be opened from the UI.
+  if (!producedFiles.has(normalizeApprovedPath(filePath))) {
+    throw new Error("Only files extracted by WaveMint can be opened");
+  }
+
+  const openError = await shell.openPath(filePath);
+  if (openError) {
+    throw new Error(openError);
+  }
+
   return { success: true };
 });
 
@@ -1463,6 +1633,368 @@ ipcMain.handle("open-folder", async (_, folderPath) => {
     throw new Error("No folder path provided");
   }
 
-  await shell.openPath(folderPath);
+  if (!approvedOutputFolders.has(normalizeApprovedPath(folderPath))) {
+    throw new Error("Only the selected output folder can be opened");
+  }
+
+  const openError = await shell.openPath(folderPath);
+  if (openError) {
+    throw new Error(openError);
+  }
+
   return { success: true };
+});
+
+// ---------------------------------------------------------------------------
+// Application status
+// ---------------------------------------------------------------------------
+
+ipcMain.handle("get-app-status", async (_event, payload) => {
+  const dependencies = await getDependencyStatus({ refresh: !!payload?.refresh });
+  const bundledVersions = binaries.readBundledVersions();
+
+  return {
+    version: app.getVersion(),
+    isPackaged: app.isPackaged,
+    dependencies,
+    components: (bundledVersions?.binaries || []).map((item) => ({
+      id: item.id,
+      version: item.version,
+    })),
+  };
+});
+
+// ---------------------------------------------------------------------------
+// YouTube authentication settings
+// ---------------------------------------------------------------------------
+
+const AUTH_TEST_MIN_INTERVAL_MS = 10000;
+const AUTH_TEST_TIMEOUT_MS = 120000;
+let authTestInFlight = false;
+let lastAuthTestStartedAt = 0;
+
+// Everything the settings screen needs, without any cookie contents.
+function buildAuthState() {
+  const authSettings = getAuthSettings();
+  const fingerprint = getAuthFingerprint(authSettings);
+  let cookiesFile = null;
+
+  if (authSettings.cookiesFilePath) {
+    const inspection = inspectCookiesFile(authSettings.cookiesFilePath);
+    cookiesFile = {
+      path: authSettings.cookiesFilePath,
+      name: path.basename(authSettings.cookiesFilePath),
+      ok: inspection.ok,
+      code: inspection.code,
+      message: inspection.message || "",
+      stats: inspection.stats || null,
+    };
+  }
+
+  return {
+    mode: authSettings.mode,
+    browser: authSettings.browser,
+    browserProfile: authSettings.browserProfile,
+    cookiesFile,
+    lastTest:
+      authSettings.lastTest?.fingerprint === fingerprint
+        ? authSettings.lastTest
+        : null,
+  };
+}
+
+ipcMain.handle("auth-get-state", async () => buildAuthState());
+
+ipcMain.handle("auth-set-mode", async (_event, mode) => {
+  if (!["none", "browser", "cookies_file"].includes(mode)) {
+    throw new Error("Unknown authentication method");
+  }
+
+  getSettingsStore().updateAuth({ mode });
+  return buildAuthState();
+});
+
+// Browser detection only looks at folder layout and profile names. The
+// settings screen requests it when the user chooses browser cookies.
+ipcMain.handle("auth-detect-browsers", async () => detectBrowsers());
+
+ipcMain.handle("auth-set-browser", async (_event, payload) => {
+  const browser = payload?.browser;
+  const requestedProfile = sanitizeProfileValue(payload?.profile);
+
+  if (!isSupportedBrowser(browser)) {
+    throw new Error("Choose a supported browser");
+  }
+
+  let profile = "";
+
+  if (requestedProfile && path.isAbsolute(requestedProfile)) {
+    try {
+      profile = validateCustomProfileFolder(browser, requestedProfile);
+    } catch (error) {
+      throw createUserError("auth", error.message);
+    }
+  } else if (requestedProfile) {
+    const detected = detectBrowsers().find((item) => item.id === browser);
+    const isKnownProfile = detected?.profiles.some(
+      (item) => item.value === requestedProfile,
+    );
+
+    if (!isKnownProfile) {
+      throw createUserError("auth", "This browser profile could not be accessed.");
+    }
+
+    profile = requestedProfile;
+  }
+
+  getSettingsStore().updateAuth({
+    mode: "browser",
+    browser,
+    browserProfile: profile,
+  });
+
+  return buildAuthState();
+});
+
+ipcMain.handle("auth-choose-profile-folder", async (event, browserId) => {
+  const browser = getBrowser(browserId);
+  if (!browser) {
+    throw new Error("Choose a supported browser first");
+  }
+
+  const result = await dialog.showOpenDialog(
+    BrowserWindow.fromWebContents(event.sender),
+    {
+      title: `Choose a ${browser.label} profile folder`,
+      properties: ["openDirectory", "dontAddToRecent"],
+    },
+  );
+
+  if (result.canceled || !result.filePaths.length) {
+    return null;
+  }
+
+  let profile;
+  try {
+    profile = validateCustomProfileFolder(browser.id, result.filePaths[0]);
+  } catch (error) {
+    throw createUserError("auth", error.message);
+  }
+
+  getSettingsStore().updateAuth({
+    mode: "browser",
+    browser: browser.id,
+    browserProfile: profile,
+  });
+
+  return buildAuthState();
+});
+
+// The file is used where the user keeps it; WaveMint stores only its path.
+ipcMain.handle("auth-choose-cookies-file", async (event) => {
+  const result = await dialog.showOpenDialog(
+    BrowserWindow.fromWebContents(event.sender),
+    {
+      title: "Choose a cookies.txt file",
+      properties: ["openFile", "dontAddToRecent"],
+      filters: [
+        { name: "Cookie files", extensions: ["txt", "cookies"] },
+        { name: "All files", extensions: ["*"] },
+      ],
+    },
+  );
+
+  if (result.canceled || !result.filePaths.length) {
+    return null;
+  }
+
+  const filePath = result.filePaths[0];
+  const inspection = inspectCookiesFile(filePath);
+
+  if (!inspection.ok) {
+    throw createUserError("auth", inspection.message);
+  }
+
+  getSettingsStore().updateAuth({
+    mode: "cookies_file",
+    cookiesFilePath: filePath,
+  });
+
+  return buildAuthState();
+});
+
+ipcMain.handle("auth-remove-cookies-file", async () => {
+  const authSettings = getAuthSettings();
+
+  // WaveMint never copies the user's file, so forgetting its location is the
+  // whole cleanup.
+  getSettingsStore().updateAuth({
+    cookiesFilePath: "",
+    mode: authSettings.mode === "cookies_file" ? "none" : authSettings.mode,
+    lastTest: authSettings.lastTest?.fingerprint?.startsWith("cookies_file|")
+      ? null
+      : authSettings.lastTest,
+  });
+
+  return buildAuthState();
+});
+
+function getLocalCookiesFileVerdict(authSettings) {
+  const inspection = inspectCookiesFile(authSettings.cookiesFilePath);
+
+  if (!inspection.ok) {
+    return {
+      status: "failed",
+      sourceAccessible: false,
+      code: inspection.code,
+      message: inspection.message,
+    };
+  }
+
+  if (inspection.code === "no_sign_in") {
+    return {
+      status: "not_signed_in",
+      sourceAccessible: true,
+      code: "no_sign_in",
+      message:
+        "This cookie file doesn't contain a YouTube sign-in session. Export cookies from youtube.com while signed in.",
+    };
+  }
+
+  if (inspection.code === "expired") {
+    return {
+      status: "not_signed_in",
+      sourceAccessible: true,
+      code: "expired",
+      message:
+        "The YouTube sign-in cookies in this file have expired. Export a fresh cookies.txt while signed in to YouTube.",
+    };
+  }
+
+  return null;
+}
+
+// User-initiated check: confirms the cookie source can be read and that
+// YouTube accepts it as a signed-in session, using one lightweight request
+// (no media is downloaded). Cookie values never leave the main process.
+ipcMain.handle("auth-test", async () => {
+  const authSettings = getAuthSettings();
+
+  if (authSettings.mode === "none") {
+    throw new Error("Choose an authentication method to test");
+  }
+
+  if (authTestInFlight) {
+    throw new Error("An authentication test is already running");
+  }
+
+  if (activeYtDlpJobs > 0) {
+    throw new Error(
+      "Wait for the current analysis or extraction to finish before testing authentication",
+    );
+  }
+
+  const waitMs = lastAuthTestStartedAt + AUTH_TEST_MIN_INTERVAL_MS - Date.now();
+  if (waitMs > 0) {
+    throw new Error(
+      `Please wait ${Math.ceil(waitMs / 1000)} seconds before testing again`,
+    );
+  }
+
+  assertYouTubeSessionIsAvailable();
+  assertBundledToolsPresent();
+
+  authTestInFlight = true;
+  lastAuthTestStartedAt = Date.now();
+
+  try {
+    let outcome =
+      authSettings.mode === "cookies_file"
+        ? getLocalCookiesFileVerdict(authSettings)
+        : null;
+
+    let authArgs = [];
+    if (!outcome) {
+      try {
+        authArgs = buildYtDlpAuthArgs(authSettings);
+      } catch (error) {
+        if (!(error instanceof AuthError)) throw error;
+        outcome = {
+          status: "failed",
+          sourceAccessible: false,
+          code: error.code,
+          message: error.message,
+        };
+      }
+    }
+
+    if (!outcome) {
+      const ytDlp = binaries.resolve("yt-dlp");
+      const args = [
+        ...binaries.getYtDlpRuntimeArgs(),
+        ...authArgs,
+        "--flat-playlist",
+        "--playlist-items",
+        "1",
+        "--dump-single-json",
+        // Adds cookie counts to stderr (never values); stderr is redacted and
+        // only classified, not logged.
+        "--verbose",
+        "--",
+        AUTH_PROBE_URL,
+      ];
+
+      console.log(`[auth] Testing authentication (${authSettings.mode})`);
+      activeYtDlpJobs += 1;
+
+      let result;
+      try {
+        result = await runCommand(ytDlp.command, args, {
+          label: ytDlp.label,
+          env: binaries.getChildEnv(),
+          timeoutMs: AUTH_TEST_TIMEOUT_MS,
+        });
+      } catch (error) {
+        throw createUserError("dependency", error.message);
+      } finally {
+        activeYtDlpJobs -= 1;
+      }
+
+      // stdout holds the account's Watch Later data; only its id is read and
+      // it is never logged.
+      const stderr = redactSensitiveText(result.stderr);
+
+      if (result.code !== 0 && isYouTubeRateLimitMessage(stderr)) {
+        markYouTubeRateLimited();
+        outcome = {
+          status: "failed",
+          sourceAccessible: true,
+          code: "rate_limited",
+          message: "YouTube has temporarily rate-limited requests. Try again later.",
+        };
+      } else {
+        outcome = interpretAuthProbe(
+          { ...result, stdout: result.code === 0 ? result.stdout : "", stderr },
+          authSettings,
+        );
+      }
+    }
+
+    console.log(`[auth] Test result: ${outcome.status} (${outcome.code})`);
+
+    const testedAt = new Date().toISOString();
+    getSettingsStore().updateAuth({
+      lastTest: {
+        status: outcome.status,
+        fingerprint: getAuthFingerprint(authSettings),
+        code: outcome.code,
+        message: outcome.message,
+        testedAt,
+      },
+    });
+
+    return { ...outcome, testedAt, state: buildAuthState() };
+  } finally {
+    authTestInFlight = false;
+  }
 });

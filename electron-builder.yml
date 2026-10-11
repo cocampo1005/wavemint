@@ -1,0 +1,71 @@
+# electron-builder configuration for WaveMint's Windows release.
+# Build with `npm run dist:win` (installer) or `npm run pack:win` (unpacked).
+# Docs: https://www.electron.build/configuration
+
+appId: com.wavemint.app # Must match APP_USER_MODEL_ID in electron/main.cjs. Do not change after release.
+productName: WaveMint
+copyright: Copyright © 2026 Christian Ocampo
+
+directories:
+  output: release/${version}
+  buildResources: build
+
+# Whitelist of what goes into app.asar. The renderer is pre-bundled by Vite
+# into dist/, and the main process has no runtime npm dependencies, so no
+# node_modules, sources, scripts, tests or local files are packaged.
+files:
+  - dist/**/*
+  - electron/**/*
+  - package.json
+  - "!**/*.map"
+
+asar: true
+
+# Native tools must live outside app.asar so they can be executed directly.
+extraResources:
+  - from: resources/bin/win32-x64
+    to: bin
+    filter:
+      - "**/*"
+  - from: THIRD_PARTY_NOTICES.md
+    to: THIRD_PARTY_NOTICES.md
+  - from: node_modules/@fontsource/poppins/LICENSE
+    to: licenses/Poppins-OFL.txt
+
+# Fails the build if the packaged app is missing bundled tools or contains
+# anything that looks like cookies or other credentials.
+afterPack: scripts/check-release.cjs
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.ico
+  executableName: WaveMint
+  # Unsigned by default. See README "Code signing" for enabling signing in CI.
+  signAndEditExecutable: true
+
+nsis:
+  oneClick: false
+  perMachine: false # per-user install; never needs administrator rights
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createStartMenuShortcut: true
+  shortcutName: WaveMint
+  # The desktop shortcut is offered as a checkbox on the finish page instead
+  # (see build/installer.nsh), so it is optional.
+  createDesktopShortcut: false
+  runAfterFinish: true
+  include: build/installer.nsh
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  uninstallDisplayName: WaveMint
+  # Removes %APPDATA%\WaveMint (settings and caches) on a real uninstall.
+  # electron-builder skips this during in-place updates.
+  deleteAppDataOnUninstall: true
+  artifactName: ${productName}-Setup-${version}.${ext}
+
+# Auto-update readiness: add a publish provider (e.g. GitHub Releases) when
+# electron-updater is introduced; see README "Future: automatic updates".
+publish: null
