@@ -3,6 +3,7 @@ import "./App.css";
 import { GENRE_OPTIONS } from "./constants/genres";
 import { getErrorActions, isSkippableInBatch, parseIpcError } from "./ipcErrors";
 import { SettingsDialog } from "./SettingsDialog";
+import { LibraryView } from "./library/LibraryView";
 import horizontalLogo from "./assets/Horizontal Logo.png";
 import logomark from "./assets/Logomark.png";
 
@@ -478,6 +479,10 @@ function App() {
   const [downloadStatus, setDownloadStatus] = useState(null);
   const [cancelling, setCancelling] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // "extract" (YouTube to MP3) or "library". Extract stays mounted while the
+  // Library is open, so a running extraction keeps its progress.
+  const [section, setSection] = useState("extract");
+  const [libraryOpened, setLibraryOpened] = useState(false);
   const [settingsSection, setSettingsSection] = useState("");
   const [authState, setAuthState] = useState(null);
   const [appStatus, setAppStatus] = useState(null);
@@ -1197,7 +1202,7 @@ function App() {
   const busy = loading || downloading || batchDownloading;
 
   return (
-    <div className="app">
+    <div className={`app ${section === "library" ? "app--wide" : ""}`}>
       <header className="app-header">
         <div className="app-header__inner">
           <img
@@ -1206,9 +1211,29 @@ function App() {
             alt="WaveMint"
             draggable={false}
           />
+          <div className="segmented app-sections" role="tablist" aria-label="WaveMint sections">
+            {[
+              ["extract", "Extract"],
+              ["library", "Library"],
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                role="tab"
+                aria-selected={section === value}
+                className={`segmented__option ${section === value ? "is-active" : ""}`}
+                onClick={() => {
+                  setSection(value);
+                  if (value === "library") setLibraryOpened(true);
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <div className="app-header__actions">
             <span className="app-header__tagline">
-              YouTube audio to tagged MP3
+              {section === "library" ? "Your music, organized" : "YouTube audio to tagged MP3"}
             </span>
             <button
               type="button"
@@ -1250,7 +1275,13 @@ function App() {
         }}
       />
 
-      <main className="app-main">
+      {libraryOpened && (
+        <div className="app-library" hidden={section !== "library"}>
+          <LibraryView />
+        </div>
+      )}
+
+      <main className="app-main" hidden={section !== "extract"}>
         {componentProblems.length > 0 && (
           <div className="alert" role="alert">
             <AlertIcon className="alert__icon" />

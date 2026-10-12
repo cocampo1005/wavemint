@@ -1,4 +1,4 @@
-const { app, BrowserWindow, clipboard, ipcMain, dialog, shell } = require("electron");
+const { app, BrowserWindow, clipboard, ipcMain, dialog, protocol, shell } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const http = require("http");
@@ -33,6 +33,7 @@ const { createDiagnosticsStore, formatDiagnostics } = require("./diagnostics.cjs
 const { createExtractionManager } = require("./extraction.cjs");
 const { CHANNELS, createEngineStore, createEngineUpdater } = require("./engine.cjs");
 const { isAutoImportFolder, moveIntoOutputFolder } = require("./outputFiles.cjs");
+const { createLibraryHost, registerLibrarySchemes } = require("./library/host.cjs");
 
 const APP_USER_MODEL_ID = "com.wavemint.app";
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL || "http://localhost:5173";
@@ -42,6 +43,10 @@ const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL || "http://localhost:5173
 if (!app.isPackaged) {
   app.setPath("userData", path.join(app.getPath("appData"), "WaveMint-Dev"));
 }
+
+// Custom protocols for library audio previews and artwork (must be
+// registered before the app is ready).
+registerLibrarySchemes(protocol);
 
 const binaries = createBinaryResolver({
   isPackaged: app.isPackaged,
@@ -268,6 +273,17 @@ function scheduleEngineAutoCheck() {
   timer.unref?.();
 }
 
+const libraryHost = createLibraryHost({
+  app,
+  ipcMain,
+  dialog,
+  shell,
+  BrowserWindow,
+  protocol,
+  binaries,
+});
+libraryHost.register();
+
 app.whenReady().then(async () => {
   app.setAppUserModelId(app.isPackaged ? APP_USER_MODEL_ID : process.execPath);
   getSettingsStore().load();
@@ -286,6 +302,10 @@ app.whenReady().then(async () => {
   createWindow();
   scheduleEngineAutoCheck();
 
+  // The library worker starts on first use, so Extract-only sessions never
+  // open the database.
+  libraryHost.registerProtocols();
+
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -295,7 +315,17 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-app.on("before-quit", () => {
+let libraryShutDown = false;
+
+app.on("before-quit", (event) => {
+  // Close the library database cleanly once (finishes in-flight writes).
+  if (!libraryShutDown) {
+    libraryShutDown = true;
+    event.preventDefault();
+    libraryHost.shutdown().finally(() => app.quit());
+    return;
+  }
+
   for (const controllers of activeOperations.values()) {
     for (const controller of controllers) controller.abort();
   }

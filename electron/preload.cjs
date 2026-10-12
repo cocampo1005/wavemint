@@ -1,5 +1,28 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
+// Music library operations. Each maps to one allowlisted, validated method
+// in electron/library/host.cjs; the main process rejects anything else.
+const LIBRARY_METHODS = [
+  "getOverview",
+  "listTracks",
+  "listTrackIds",
+  "listAlbums",
+  "listArtists",
+  "listGenres",
+  "getTrack",
+  "getAlbum",
+  "listSources",
+  "updateSource",
+  "removeSource",
+  "scanSources",
+  "listJobs",
+  "cancelJob",
+  "getSettings",
+  "addSourceFromDialog",
+  "relinkSource",
+  "showFileInFolder",
+];
+
 function subscribe(channel, callback) {
   const listener = (_, data) => callback(data);
   ipcRenderer.on(channel, listener);
@@ -48,4 +71,11 @@ contextBridge.exposeInMainWorld("waveMintAPI", {
   onDownloadProgress: (callback) => subscribe("download-progress", callback),
   onEngineProgress: (callback) => subscribe("engine-progress", callback),
   onEngineStatusChanged: (callback) => subscribe("engine-status-changed", callback),
+
+  library: Object.freeze(
+    Object.fromEntries(
+      LIBRARY_METHODS.map((method) => [method, (params) => ipcRenderer.invoke("library", method, params)]),
+    ),
+  ),
+  onLibraryEvent: (callback) => subscribe("library-event", callback),
 });

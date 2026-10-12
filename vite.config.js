@@ -4,11 +4,14 @@ import react from '@vitejs/plugin-react'
 // Applied to the packaged UI only; the dev server needs inline scripts for
 // hot reloading. Thumbnails load from YouTube's image hosts over https, and
 // generated artwork previews arrive as data: URLs from the main process.
+// Library artwork and audio previews use WaveMint's own wavemint-art: and
+// wavemint-media: protocols (served by electron/library/host.cjs).
 const PRODUCTION_CSP = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: https:",
+  "img-src 'self' data: https: wavemint-art:",
+  "media-src 'self' wavemint-media:",
   "font-src 'self' data:",
   "connect-src 'self'",
   "object-src 'none'",

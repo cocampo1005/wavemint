@@ -58,6 +58,23 @@ const IGNORED_CONTENT_FILES = new Set(["LICENSES.chromium.html"]);
 
 const ASAR_ALLOWED = [/^dist([\\/]|$)/, /^electron([\\/]|$)/, /^package\.json$/];
 
+// Runtime npm packages (and their dependencies) may be packaged; nothing
+// else from node_modules. Derived from package-lock.json's non-dev entries.
+function productionPackages() {
+  const lock = JSON.parse(fs.readFileSync(path.join(ROOT, "package-lock.json"), "utf8"));
+  return new Set(
+    Object.entries(lock.packages || {})
+      .filter(([key, info]) => key.startsWith("node_modules/") && !info.dev && !info.devOptional)
+      .map(([key]) => key.replace(/^node_modules\//, "")),
+  );
+}
+
+function isAllowedAsarEntry(item, packages) {
+  if (ASAR_ALLOWED.some((pattern) => pattern.test(item))) return true;
+  const match = /^node_modules[\\/]((?:@[^\\/]+[\\/])?[^\\/]+)/.exec(item);
+  return !!match && packages.has(match[1].replace(/\\/g, "/"));
+}
+
 function sha256(filePath) {
   return crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
 }
@@ -204,8 +221,9 @@ async function checkPackagedApp(context) {
         }
       });
 
+    const packages = productionPackages();
     for (const item of asarFiles) {
-      if (!ASAR_ALLOWED.some((pattern) => pattern.test(item))) {
+      if (!isAllowedAsarEntry(item, packages)) {
         problems.push(`app.asar: unexpected file "${item}"`);
       }
     }
@@ -243,6 +261,8 @@ async function checkPackagedApp(context) {
 module.exports = checkPackagedApp;
 module.exports.default = checkPackagedApp;
 module.exports.checkInputs = checkInputs;
+module.exports.isAllowedAsarEntry = isAllowedAsarEntry;
+module.exports.productionPackages = productionPackages;
 module.exports.SENSITIVE_CONTENT_PATTERNS = SENSITIVE_CONTENT_PATTERNS;
 module.exports.SENSITIVE_NAME_PATTERNS = SENSITIVE_NAME_PATTERNS;
 

@@ -63,3 +63,18 @@ test("sensitive file names are detected", () => {
     assert.equal(flaggedName(name), false, name);
   }
 });
+
+test("only runtime npm packages may be packaged into app.asar", () => {
+  const { isAllowedAsarEntry, productionPackages } = require("../scripts/check-release.cjs");
+  const packages = productionPackages();
+
+  assert.ok(packages.has("node-taglib-sharp"));
+  assert.ok(!packages.has("electron"), "dev dependencies are excluded");
+
+  assert.equal(isAllowedAsarEntry(String.raw`node_modules\node-taglib-sharp\dist\index.js`, packages), true);
+  assert.equal(isAllowedAsarEntry("node_modules/iconv-lite/lib/index.js", packages), true);
+  assert.equal(isAllowedAsarEntry(String.raw`dist\index.html`, packages), true);
+  assert.equal(isAllowedAsarEntry(String.raw`node_modules\electron\index.js`, packages), false);
+  assert.equal(isAllowedAsarEntry(String.raw`node_modules\vite\dist\node.js`, packages), false);
+  assert.equal(isAllowedAsarEntry("cookies.txt", packages), false);
+});

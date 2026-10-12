@@ -29,6 +29,21 @@
   min-height: 68px;
 }
 
+.app--wide .app-header__inner {
+  max-width: none;
+  padding-inline: var(--wm-space-6);
+}
+
+.app-sections {
+  margin-right: auto;
+  margin-left: var(--wm-space-6);
+}
+
+.app-main[hidden],
+.app-library[hidden] {
+  display: none;
+}
+
 .app-header__logo {
   display: block;
   height: 34px;
