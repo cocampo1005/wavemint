@@ -90,8 +90,15 @@ function getOperationDetail(db, id) {
     summary: parseJson(operation.summary, null),
     changes: db
       .prepare(
-        `SELECT c.*, t.title AS track_title, t.artist AS track_artist FROM change_log c
-         LEFT JOIN tracks t ON c.entity_type = 'track' AND t.id = c.entity_id
+        `SELECT c.*, COALESCE(t.title, ft.title) AS track_title, COALESCE(t.artist, ft.artist) AS track_artist, other.title AS other_title
+         FROM change_log c
+         LEFT JOIN tracks t ON c.entity_type IN ('track', 'decision') AND t.id = c.entity_id
+         LEFT JOIN files f ON c.entity_type = 'file' AND f.id = c.entity_id
+         LEFT JOIN tracks ft ON ft.id = f.track_id
+         LEFT JOIN tracks other ON other.id = CASE
+           WHEN c.field = 'merged_into' THEN CAST(c.new_value AS INTEGER)
+           WHEN c.entity_type = 'decision' THEN json_extract(c.new_value, '$.other')
+         END
          WHERE c.operation_id = ? ORDER BY c.id LIMIT 500`,
       )
       .all(operation.id)

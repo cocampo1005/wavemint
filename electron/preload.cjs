@@ -56,6 +56,18 @@ const LIBRARY_METHODS = [
   "setReviewStatus",
   "approveSuggestions",
   "setArtworkFromDialog",
+  "analyzeMerge",
+  "currentMergeSession",
+  "listMergeGroups",
+  "setMergeGroupAction",
+  "acceptMergeSuggestions",
+  "applyMerge",
+  "getManagedLibrary",
+  "chooseManagedRoot",
+  "previewNamingPattern",
+  "previewConsolidation",
+  "consolidate",
+  "updateSettings",
 ];
 
 function subscribe(channel, callback) {

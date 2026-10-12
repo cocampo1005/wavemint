@@ -8,14 +8,18 @@ import {
   AlbumIcon,
   ArtistIcon,
   CloseIcon,
+  FolderOpenIcon,
   GenreIcon,
   HistoryIcon,
+  MergeIcon,
   OverviewIcon,
   ReviewIcon,
   SongsIcon,
   SourceIcon,
   WarningIcon,
 } from "./icons";
+import { ManagedView } from "./ManagedView";
+import { MergeView } from "./MergeView";
 import { OverviewView } from "./OverviewView";
 import { usePreviewPlayer } from "./Player";
 import { ReviewView } from "./ReviewView";
@@ -38,12 +42,16 @@ const NAV_GROUPS = [
   },
   {
     label: "Maintain",
-    items: [{ id: "review", label: "Review", Icon: ReviewIcon, badge: "reviewOpen" }],
+    items: [
+      { id: "review", label: "Review", Icon: ReviewIcon, badge: "reviewOpen" },
+      { id: "merge", label: "Merge & Duplicates", Icon: MergeIcon },
+    ],
   },
   {
     label: "Manage",
     items: [
       { id: "sources", label: "Sources", Icon: SourceIcon },
+      { id: "managed", label: "WaveMint Library", Icon: FolderOpenIcon },
       { id: "history", label: "History", Icon: HistoryIcon },
     ],
   },
@@ -56,25 +64,29 @@ const TITLES = {
   artists: "Artists",
   genres: "Genres",
   review: "Review",
+  merge: "Merge & Duplicates",
+  managed: "WaveMint Library",
   sources: "Library sources",
   history: "History",
   album: "Album",
 };
 
-const JOB_LABELS = { scan: "scan", "write-tags": "write-tags" };
+const JOB_LABELS = { scan: "scan", "write-tags": "write-tags", "merge-analysis": "merge-analysis", consolidate: "consolidate" };
 
 export function LibraryView() {
   const [route, setRoute] = useState({ view: "overview", scope: {} });
   const [error, setError] = useState("");
   const [writeTags, setWriteTags] = useState(null); // { trackIds } | null
   const [editAlbum, setEditAlbum] = useState(null);
-  const { running, revision, bump } = useLibraryJobs();
+  const { jobs, running, revision, bump } = useLibraryJobs();
   const [playing, play, player] = usePreviewPlayer();
   const { data: status } = useLoader(() => libraryApi.getStatus(), [revision]);
 
   const scanJob = running.find((job) => job.kind === "scan");
   const otherJob = running.find((job) => job.kind !== "scan" && JOB_LABELS[job.kind]);
   const busy = running.length > 0;
+  const lastJob = (kind) => jobs.filter((job) => job.kind === kind).at(-1) || null;
+  const failedAnalysis = lastJob("merge-analysis");
 
   const navigate = useCallback((view, scope = {}) => setRoute({ view, scope }), []);
 
@@ -151,6 +163,22 @@ export function LibraryView() {
     );
   } else if (view === "review") {
     content = <ReviewView revision={revision} onChanged={bump} onOpenTrack={openTrack} onOpenAlbum={openAlbum} onError={setError} />;
+  } else if (view === "merge") {
+    content = (
+      <>
+        {failedAnalysis?.status === "failed" && <div className="alert alert--compact">The comparison failed: {failedAnalysis.error}</div>}
+        <MergeView
+          revision={revision}
+          analyzing={failedAnalysis?.status === "running"}
+          playing={playing}
+          onPlay={(row) => play(row)}
+          onChanged={bump}
+          onError={setError}
+        />
+      </>
+    );
+  } else if (view === "managed") {
+    content = <ManagedView revision={revision} busy={busy} lastJob={lastJob("consolidate")} onChanged={bump} onError={setError} />;
   } else if (view === "history") {
     content = <HistoryView revision={revision} onChanged={bump} onError={setError} />;
   } else if (view === "sources") {

@@ -259,6 +259,50 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 3,
+    name: "library merge: match decisions, merge sessions and groups",
+    up(db) {
+      db.exec(`
+        -- The user's verdicts on pairs of songs; they outlive rescans and
+        -- new analyses, so a rejected match is never suggested again.
+        CREATE TABLE match_decisions (
+          id         INTEGER PRIMARY KEY,
+          track_a    INTEGER NOT NULL,
+          track_b    INTEGER NOT NULL,
+          decision   TEXT NOT NULL CHECK (decision IN ('same', 'different')),
+          created_at TEXT NOT NULL,
+          UNIQUE (track_a, track_b),
+          CHECK (track_a < track_b)
+        );
+
+        CREATE TABLE merge_sessions (
+          id          INTEGER PRIMARY KEY,
+          status      TEXT NOT NULL CHECK (status IN ('analyzed', 'applied', 'discarded')),
+          summary     TEXT,
+          created_at  TEXT NOT NULL,
+          applied_at  TEXT,
+          operation_id INTEGER REFERENCES operations(id) ON DELETE SET NULL
+        );
+
+        -- One group per recording (or per uncertain pair) found by an analysis.
+        CREATE TABLE merge_groups (
+          id                 INTEGER PRIMARY KEY,
+          session_id         INTEGER NOT NULL REFERENCES merge_sessions(id) ON DELETE CASCADE,
+          category           TEXT NOT NULL
+                             CHECK (category IN ('already_curated', 'legacy_only', 'curated_only', 'other_only', 'conflict')),
+          confidence         REAL,
+          track_ids          TEXT NOT NULL,
+          preferred_track_id INTEGER,
+          suggested_action   TEXT NOT NULL,
+          action             TEXT NOT NULL,
+          evidence           TEXT,
+          decided            INTEGER NOT NULL DEFAULT 0 CHECK (decided IN (0, 1))
+        );
+        CREATE INDEX merge_groups_session ON merge_groups(session_id, category);
+      `);
+    },
+  },
 ];
 
 module.exports = { MIGRATIONS };

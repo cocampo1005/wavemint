@@ -91,6 +91,7 @@ const editFields = v.obj(
 const editList = v.array(v.obj({ trackId: id(), fields: editFields }, { optional: false }), { max: 20000, optional: false });
 const fieldNames = v.oneOf(["title", "artist", "albumArtist", "album", "genre", "year", "trackNo", "trackTotal", "discNo", "discTotal", "composer", "comment", "compilation", "rating", "notes"], { optional: false });
 const trackIdList = (options = {}) => v.array(id(), { max: 20000, ...options });
+const mergeCategories = v.oneOf(["already_curated", "legacy_only", "curated_only", "other_only", "conflict"]);
 const reviewKinds = v.oneOf(["missing_album", "missing_artist", "missing_album_artist", "unclassified_genre", "missing_artwork", "track_numbering", "inconsistent_album", "similar_albums", "file_problem", "possible_duplicate"]);
 
 /** Renderer-callable worker methods and their parameter schemas. */
@@ -152,6 +153,27 @@ const WORKER_METHODS = {
   listReviewItems: { kind: reviewKinds, status: v.oneOf(["open", "needs_review", "suggested", "approved", "ignored", "resolved"]), offset: v.int({ min: 0, optional: true }), limit: v.int({ min: 1, max: 500, optional: true }) },
   setReviewStatus: { ids: v.array(id(), { max: 5000, optional: false }), status: v.oneOf(["needs_review", "ignored", "resolved"], { optional: false }) },
   approveSuggestions: { ids: v.array(id(), { max: 5000, optional: false }) },
+
+  // Merging libraries.
+  analyzeMerge: {},
+  currentMergeSession: {},
+  listMergeGroups: {
+    sessionId: id(),
+    category: mergeCategories,
+    onlyMulti: v.bool(),
+    offset: v.int({ min: 0, optional: true }),
+    limit: v.int({ min: 1, max: 500, optional: true }),
+  },
+  setMergeGroupAction: { groupId: id(), action: v.oneOf(["keep_preferred", "merge_metadata", "keep_both", "skip", "keep", "review"], { optional: false }), preferredTrackId: id({ optional: true }) },
+  acceptMergeSuggestions: { sessionId: id(), categories: v.array(mergeCategories, { max: 5 }) },
+  applyMerge: { sessionId: id(), acceptedAlbums: v.array(id(), { max: 5000 }) },
+
+  // Managed Library (its folder is chosen with chooseManagedRoot).
+  getManagedLibrary: {},
+  previewNamingPattern: { pattern: v.str({ max: 300, optional: false, allowEmpty: false }) },
+  previewConsolidation: { trackIds: trackIdList() },
+  consolidate: { trackIds: trackIdList() },
+  updateSettings: { patch: v.obj({ namingPattern: v.str({ max: 300, allowEmpty: false }) }, { optional: false }) },
 };
 
 function createLibraryHost({ app, ipcMain, dialog, shell, BrowserWindow, protocol, binaries, logger = console }) {
@@ -285,6 +307,14 @@ function createLibraryHost({ app, ipcMain, dialog, shell, BrowserWindow, protoco
         return call("setArtworkFromPath", { trackIds: params.trackIds, filePath: result.filePaths[0] });
       },
     },
+    chooseManagedRoot: {
+      schema: {},
+      run: async (sender) => {
+        const rootPath = await chooseFolder(sender, "Choose a folder for your WaveMint Library");
+        if (!rootPath) return null;
+        return call("setManagedRoot", { rootPath });
+      },
+    },
     showFileInFolder: {
       schema: { fileId: id() },
       run: async (_sender, params) => {
@@ -396,6 +426,6 @@ function registerLibrarySchemes(protocol) {
 }
 
 // Host methods (dialogs, shell) handled in the main process itself.
-const HOST_METHOD_NAMES = ["addSourceFromDialog", "relinkSource", "setArtworkFromDialog", "showFileInFolder"];
+const HOST_METHOD_NAMES = ["addSourceFromDialog", "chooseManagedRoot", "relinkSource", "setArtworkFromDialog", "showFileInFolder"];
 
 module.exports = { HOST_METHOD_NAMES, HOST_SCHEMES: [MEDIA_SCHEME, ART_SCHEME], WORKER_METHODS, createLibraryHost, registerLibrarySchemes };

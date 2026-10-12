@@ -195,3 +195,44 @@ is exercised by real code.
   field, conflicts with later edits reported instead of overwritten).
 - Verified in the real app on synthetic libraries: legacy folder byte-identical
   throughout; a written AAC file kept a bit-identical audio stream.
+
+### Phase 3 — Multi-library merge and the WaveMint Library: done
+
+- Migration 3: `match_decisions` (remembered "same" / "different" verdicts per
+  pair of songs), `merge_sessions` and `merge_groups` (one analysis, its groups,
+  suggested and chosen actions, evidence).
+- Matching (`match.cjs`): songs are compared only within blocks of the same
+  artist and base title. Exact copies are found by content hash (computed only
+  where the cheap signature collides). Version markers (live, remix, remaster,
+  acoustic, radio edit, …) and length decide the rest: within 2 s is the same
+  recording, 2–20 s needs a decision, over 20 s is different. Different
+  MusicBrainz recording IDs always mean different songs. Remembered decisions
+  override everything. Each group gets a category (already in curated, only in
+  legacy, only in curated, only in other folders, needs a decision), a
+  preferred copy (highest source priority, then quality), a confidence and
+  readable evidence.
+- Merge (`merge.cjs`): analysis changes nothing but cached hashes. Applying a
+  merge only links files: the other copies become alternate versions of the
+  preferred song (state `merged`, `merged_into` kept for stable references).
+  "Merge, fill gaps" also copies missing fields from the other copies; "Keep
+  separate" is remembered so the pair isn't offered again. Undecided groups
+  are left alone. Undo restores tracks, file links and decisions.
+- Album consolidation: when the merge keeps legacy songs that belong to an
+  album the curated library has under a similar name (and the same edition),
+  the Apply dialog offers to move them into the curated album (name, album
+  artist, year) as an ordinary undoable edit. Different editions stay apart.
+- WaveMint Library (`consolidate.cjs`, `organize.cjs`): a destination folder
+  chosen in a dialog becomes the `managed` source. Naming pattern with tokens
+  and live preview, Windows-safe names (reserved names, invalid characters,
+  length limits), case-insensitive collision handling with `(2)` suffixes.
+  Per file: copy to a `.wmtmp` sibling (never overwriting) → SHA-256 compared
+  with the source → WaveMint's metadata and artwork written into the copy
+  (verified by reading back; audio-stream hash unchanged) → rename into place
+  → the copy becomes the song's active version. Free space is checked first.
+  Interrupted copies are completed or cleaned up at the next start. Undo
+  switches songs back to their previous files and keeps the copies on disk.
+  Sources are only ever read; rescanning the managed folder recognizes the
+  copies.
+- Verified in the real app on synthetic iTunes + curated libraries: analysis,
+  decisions, apply, undo and re-apply; 22 songs copied with curated tags; both
+  source folders byte-identical throughout.

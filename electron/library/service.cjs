@@ -2,12 +2,16 @@
 // top of the database and the domain modules. Runs inside the library
 // worker. Methods receive already-validated parameters (see host.cjs).
 
+const fs = require("fs");
 const path = require("path");
 const { createArtStore } = require("./artstore.cjs");
 const { getSetting, setSetting } = require("./db.cjs");
 const queries = require("./queries.cjs");
 const sources = require("./sources.cjs");
-const { createScanner } = require("./scanner.cjs");
+const { contentHash, createScanner } = require("./scanner.cjs");
+const { createConsolidator } = require("./consolidate.cjs");
+const { createMerge } = require("./merge.cjs");
+const { DEFAULT_PATTERN, relativePathFor, validatePattern } = require("./organize.cjs");
 const edits = require("./edits.cjs");
 const { createFileOps } = require("./fileops.cjs");
 const genres = require("./genres.cjs");
@@ -17,7 +21,7 @@ const { readArtwork } = require("./tags.cjs");
 
 const SETTINGS_DEFAULTS = {
   managedRoot: "",
-  namingPattern: "{albumArtist}/{album}/{disc-}{track} {title}",
+  namingPattern: DEFAULT_PATTERN,
   preferOriginalReleases: true,
   lowBitrateKbps: queries.LOW_BITRATE_KBPS,
   exportRoot: "",
@@ -28,11 +32,23 @@ function createLibraryService({ db, media, jobs, paths, logger = console }) {
   const scanner = createScanner({ db, probe: media?.probe, logger });
   const artStore = createArtStore(path.join(paths.dataDir, "artwork-store"));
   const fileOps = createFileOps({ db, media, artStore, backupsRoot: paths.backupsDir, logger });
+  const merge = createMerge({ db, contentHash, logger });
+  const consolidator = createConsolidator({ db, media, artStore, logger });
 
   // Anything interrupted last time (crash, power loss) is finished or rolled
   // back before any new work starts.
-  const recovered = fileOps.recover();
+  const recovered = [...fileOps.recover(), ...consolidator.recover()];
   if (recovered.length) logger.warn(`[library] Recovered ${recovered.length} interrupted file step(s)`);
+
+  function requireIdle() {
+    if (jobs.isBusy()) throw new Error("Wait for the current library task to finish first.");
+  }
+
+  function managedRoot() {
+    const root = consolidator.managedSource()?.root_path || getSettings().managedRoot;
+    if (!root) throw new Error("Choose a folder for the WaveMint Library first.");
+    return root;
+  }
 
   function activeTrackIds(releaseId) {
     return db.prepare("SELECT id FROM tracks WHERE release_id = ? AND state = 'active'").all(Number(releaseId)).map((row) => row.id);
@@ -72,7 +88,7 @@ function createLibraryService({ db, media, jobs, paths, logger = console }) {
     addSource: ({ rootPath, role, name }) => sources.addSource(db, { rootPath, role, name }),
     updateSource: ({ id, patch }) => sources.updateSource(db, id, patch),
     removeSource: ({ id }) => {
-      if (jobs.isBusy()) throw new Error("Wait for the current library task to finish first.");
+      requireIdle();
       return sources.removeSource(db, id);
     },
     detectItunes: ({ rootPath }) => sources.detectItunes(rootPath),
@@ -132,11 +148,61 @@ function createLibraryService({ db, media, jobs, paths, logger = console }) {
     listOperations: (params) => operations.listOperations(db, params),
     getOperation: ({ id }) => operations.getOperationDetail(db, id),
     undoOperation: async ({ id }) => {
-      if (jobs.isBusy()) throw new Error("Wait for the current library task to finish first.");
+      requireIdle();
       const operation = db.prepare("SELECT kind FROM operations WHERE id = ?").get(Number(id));
       if (!operation) throw new Error("This change no longer exists.");
       if (operation.kind === "tag-write") return fileOps.undoTagWrite(id);
+      if (operation.kind === "merge") return merge.undoMerge(id);
+      if (operation.kind === "consolidate") return consolidator.undoConsolidation(id);
       return edits.undoMetadataOperation(db, id);
+    },
+
+    // --- merging libraries ----------------------------------------------------
+    analyzeMerge: () =>
+      jobs.start("merge-analysis", "Comparing libraries", ({ signal, progress }) => merge.analyze({ signal, progress })),
+    currentMergeSession: () => merge.currentSession(),
+    listMergeGroups: (params) => merge.listGroups(params),
+    setMergeGroupAction: (params) => merge.setGroupAction(params),
+    acceptMergeSuggestions: (params) => merge.acceptSuggestions(params),
+    applyMerge: (params) => {
+      requireIdle();
+      const result = merge.apply(params);
+      review.refreshReview(db);
+      return result;
+    },
+
+    // --- Managed Library -------------------------------------------------------
+    getManagedLibrary: () => {
+      const source = consolidator.managedSource();
+      const settings = getSettings();
+      return { source: source || null, root: source?.root_path || settings.managedRoot || "", pattern: settings.namingPattern };
+    },
+    // Host-only: the folder always comes from a main-process dialog.
+    setManagedRoot: ({ rootPath }) => {
+      requireIdle();
+      const source = consolidator.ensureManagedSource(rootPath);
+      setSetting(db, "library", { ...getSettings(), managedRoot: source.root_path });
+      const entries = fs.readdirSync(source.root_path).filter((name) => !name.startsWith("."));
+      return { source, empty: entries.length === 0 };
+    },
+    previewNamingPattern: ({ pattern }) => {
+      validatePattern(pattern);
+      const rows = db
+        .prepare(
+          `SELECT t.*, f.ext FROM tracks t JOIN files f ON f.id = t.active_file_id
+           WHERE t.state = 'active' ORDER BY (t.album IS NULL), t.disc_total DESC, t.id LIMIT 6`,
+        )
+        .all();
+      return rows.map((row) => ({ trackId: row.id, title: row.title, relPath: `${relativePathFor(row, pattern)}${row.ext}` }));
+    },
+    previewConsolidation: ({ trackIds }) =>
+      consolidator.preview({ root: managedRoot(), pattern: getSettings().namingPattern, trackIds: trackIds?.length ? trackIds : null }),
+    consolidate: ({ trackIds }) => {
+      const root = managedRoot();
+      const pattern = getSettings().namingPattern;
+      return jobs.start("consolidate", "Copying into the WaveMint Library", ({ signal, progress }) =>
+        consolidator.consolidateJob({ root, pattern, trackIds: trackIds?.length ? trackIds : null, signal, progress }),
+      );
     },
 
     // --- genres ------------------------------------------------------------------
@@ -171,6 +237,7 @@ function createLibraryService({ db, media, jobs, paths, logger = console }) {
     // --- settings ------------------------------------------------------------
     getSettings,
     updateSettings: ({ patch }) => {
+      if (patch.namingPattern !== undefined) patch = { ...patch, namingPattern: validatePattern(patch.namingPattern) };
       const next = { ...getSettings(), ...patch };
       setSetting(db, "library", next);
       return next;

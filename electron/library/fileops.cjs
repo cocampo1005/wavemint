@@ -289,7 +289,10 @@ function createFileOps({ db, media, artStore, backupsRoot, logger = console }) {
    * interrupted (crash, power loss): restore originals and clean up.
    */
   function recover() {
-    const interrupted = db.prepare("SELECT * FROM operations WHERE status = 'running'").all();
+    // Consolidations are recovered by consolidate.cjs.
+    const interrupted = db
+      .prepare("SELECT * FROM operations WHERE status = 'running' AND kind IN ('tag-write', 'tag-restore')")
+      .all();
     const report = [];
 
     for (const operation of interrupted) {
