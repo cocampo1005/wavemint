@@ -278,7 +278,10 @@ function getStatus(db) {
     .get().n;
   const review = db.prepare("SELECT COUNT(*) AS n FROM review_items WHERE status IN ('needs_review', 'suggested')").get().n;
   const sources = db.prepare("SELECT COUNT(*) AS n FROM sources").get().n;
-  return { unsavedWritable: unsaved, reviewOpen: review, sources };
+  const qualityAttention = db
+    .prepare("SELECT COUNT(*) AS n FROM tracks WHERE state = 'active' AND quality_status IN ('user_marked_poor', 'upgrade_available')")
+    .get().n;
+  return { unsavedWritable: unsaved, reviewOpen: review, qualityAttention, sources };
 }
 
 function getDashboard(db) {

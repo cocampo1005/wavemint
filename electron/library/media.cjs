@@ -91,6 +91,68 @@ function createMedia({ ffmpegPath, ffprobePath, cacheDir, env = process.env }) {
   }
 
   /**
+   * Diagnostic signals for one file in a single FFmpeg pass: the whole file
+   * is decoded (decoding errors), and a window of up to 90 s from the middle
+   * is measured for level, samples at full scale, and the energy above
+   * 16.5 kHz compared with the 12–15 kHz band (a sharp drop is typical of a
+   * low-bitrate encode somewhere in the file's history). These are hints for
+   * a human to review, never a verdict on how the file sounds.
+   */
+  async function qualityCheck(filePath, { durationMs = 0, sampleRate = 0 } = {}) {
+    const seconds = Math.max(0, Number(durationMs) || 0) / 1000;
+    const window = 90;
+    const start = seconds > window + 20 ? seconds / 2 - window / 2 : 0;
+    const highpass = (freq, times) => Array.from({ length: times }, () => `highpass=f=${freq}:poles=2`).join(",");
+    const lowpass = (freq, times) => Array.from({ length: times }, () => `lowpass=f=${freq}:poles=2`).join(",");
+    const graph = [
+      "[0:a:0]asplit=2[all][sample]",
+      "[all]anullsink",
+      `[sample]atrim=start=${start.toFixed(2)}:duration=${window},aformat=sample_fmts=fltp,asplit=3[full][mid][high]`,
+      "[full]astats=measure_perchannel=none:measure_overall=Peak_level+RMS_level+Peak_count+Number_of_samples,anullsink",
+      `[mid]${highpass(12000, 2)},${lowpass(15000, 2)},astats=measure_perchannel=none:measure_overall=RMS_level,anullsink`,
+      `[high]${highpass(16500, 3)},astats=measure_perchannel=none:measure_overall=RMS_level[out]`,
+    ].join(";");
+
+    const result = await runCommand(
+      ffmpegPath,
+      ["-hide_banner", "-nostats", "-v", "level+info", "-i", filePath, "-filter_complex", graph, "-map", "[out]", "-f", "null", "-"],
+      { label: "FFmpeg", env, timeoutMs: 600000 },
+    );
+
+    const stats = new Map(); // astats instance -> { name: value }
+    const errors = [];
+    for (const line of String(result.stderr || "").split(/\r?\n/)) {
+      const stat = /^\[Parsed_astats_(\d+) @ [^\]]+\] \[info\] ([A-Za-z ]+): (-?inf|-?[\d.]+)/.exec(line);
+      if (stat) {
+        if (!stats.has(Number(stat[1]))) stats.set(Number(stat[1]), {});
+        stats.get(Number(stat[1]))[stat[2].trim()] = /inf/.test(stat[3]) ? null : Number(stat[3]);
+        continue;
+      }
+      if (/\[(error|fatal)\]/.test(line) && !line.startsWith("[Parsed_")) errors.push(line.replace(/^(\[[^\]]*\]\s*)+/, "").trim());
+    }
+
+    const [full = {}, mid = {}, high = {}] = [...stats.keys()].sort((a, b) => a - b).map((key) => stats.get(key));
+    if (result.code !== 0 && !stats.size) {
+      return { decodeErrors: Math.max(1, errors.length), decodeSample: errors.slice(0, 5), failed: true, truncated: false };
+    }
+    // Fewer samples than the stated length allows: the audio ends early.
+    const expected = seconds && sampleRate ? Math.min(window, seconds - start) * sampleRate : 0;
+    const sampleCount = full["Number of samples"] ?? null;
+    return {
+      decodeErrors: errors.length,
+      decodeSample: errors.slice(0, 5),
+      peakDb: full["Peak level dB"] ?? null,
+      rmsDb: full["RMS level dB"] ?? null,
+      peakCount: full["Peak count"] ?? null,
+      sampleCount,
+      truncated: !!(expected && sampleCount !== null && sampleCount < expected * 0.9),
+      bandMidDb: mid["RMS level dB"] ?? null,
+      bandHighDb: high["RMS level dB"] ?? null,
+      failed: false,
+    };
+  }
+
+  /**
    * Returns the path of a cached JPEG thumbnail for an artwork hash, making
    * it from the bytes `loadArt()` returns ({ data }) when needed.
    */
@@ -166,7 +228,7 @@ function createMedia({ ffmpegPath, ffprobePath, cacheDir, env = process.env }) {
     return inFlight.get(key);
   }
 
-  return { audioStreamHash, decodeCheck, previewFile, probe, thumbnail };
+  return { audioStreamHash, decodeCheck, previewFile, probe, qualityCheck, thumbnail };
 }
 
 module.exports = { THUMB_SIZES, createMedia };

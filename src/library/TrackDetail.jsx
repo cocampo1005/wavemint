@@ -1,11 +1,64 @@
 import { artworkUrl, formatBytes, formatDate, formatDuration, formatQuality } from "./format";
-import { CloseIcon, FolderOpenIcon, PauseIcon, PlayIcon, WarningIcon } from "./icons";
+import { CloseIcon, FolderOpenIcon, PauseIcon, PlayIcon, UpgradeIcon, WarningIcon } from "./icons";
 import { TrackEditor } from "./Editors";
 import { errorMessage, libraryApi, useLoader } from "./useLibrary";
 
 const ROLE_LABELS = { legacy: "Legacy", curated: "Curated", managed: "Managed", other: "Library" };
 
-export function FileVersions({ track, playing, onPlayFile, onError }) {
+const QUALITY_LABELS = {
+  unknown: "Quality not checked",
+  review_suggested: "Quality review suggested",
+  acceptable: "No quality concerns found",
+  user_marked_poor: "Marked poor quality",
+  upgrade_available: "Upgrade candidate available",
+  upgraded: "Upgraded",
+  keep_original: "Kept in original form",
+};
+
+function QualitySection({ track, onUpgrade, onChanged, onError }) {
+  let reasons = [];
+  try {
+    reasons = JSON.parse(track.quality_reasons || "{}").reasons || [];
+  } catch {
+    reasons = [];
+  }
+  const set = (status) =>
+    libraryApi
+      .setQualityStatus({ trackIds: [track.id], status })
+      .then(onChanged)
+      .catch((error) => onError?.(errorMessage(error)));
+
+  return (
+    <div className="lib-detail__quality">
+      <div className="lib-detail__quality-head">
+        <span className={`lib-badge is-name is-${{ review_suggested: "warn", user_marked_poor: "error", upgrade_available: "info", upgraded: "success" }[track.quality_status] || "quiet"}`}>
+          {QUALITY_LABELS[track.quality_status] || track.quality_status}
+        </span>
+        {onUpgrade && (
+          <button type="button" className="btn btn--secondary btn--sm" onClick={() => onUpgrade(track.id)}>
+            <UpgradeIcon size={14} /> Upgrade Track…
+          </button>
+        )}
+        <select className="field lib-quality-row__status" aria-label="Quality decision" value="" onChange={(event) => event.target.value && set(event.target.value)}>
+          <option value="">Decide…</option>
+          <option value="user_marked_poor">Mark poor quality</option>
+          <option value="keep_original">Keep in original form</option>
+          <option value="acceptable">Acceptable</option>
+          {track.quality_set_by !== "auto" && <option value="auto">Let WaveMint decide</option>}
+        </select>
+      </div>
+      {reasons.length > 0 && (
+        <ul className="lib-detail__reasons">
+          {reasons.map((item) => (
+            <li key={item.code}>{item.text}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+export function FileVersions({ track, playing, onPlayFile, onError, onUpgrade }) {
   return (
     <div className="lib-versions">
       {track.files.map((file) => {
@@ -52,6 +105,12 @@ export function FileVersions({ track, playing, onPlayFile, onError }) {
                 <FolderOpenIcon size={14} />
                 Show in Explorer
               </button>
+              {!isActive && file.status === "ok" && onUpgrade && (
+                <button type="button" className="btn btn--ghost btn--sm" onClick={() => onUpgrade(track.id, { fileId: file.id })}>
+                  <UpgradeIcon size={14} />
+                  Use This Version…
+                </button>
+              )}
             </div>
           </div>
         );
@@ -60,7 +119,7 @@ export function FileVersions({ track, playing, onPlayFile, onError }) {
   );
 }
 
-export function TrackDetail({ trackId, revision, playing, onPlayFile, onClose, onOpenAlbum, onError, onChanged, onWriteTags }) {
+export function TrackDetail({ trackId, revision, playing, onPlayFile, onClose, onOpenAlbum, onError, onChanged, onWriteTags, onUpgrade }) {
   const { data: track, error, loading } = useLoader(() => libraryApi.getTrack({ id: trackId }), [trackId, revision]);
 
   if (!trackId) return null;
@@ -114,12 +173,13 @@ export function TrackDetail({ trackId, revision, playing, onPlayFile, onClose, o
           <div className="lib-detail__meta">
             {formatDuration(track.duration_ms)} · added {formatDate(track.created_at)}
           </div>
+          <QualitySection track={track} onUpgrade={onUpgrade} onChanged={onChanged} onError={onError} />
           <TrackEditor track={track} onChanged={onChanged} onError={onError} onWriteTags={onWriteTags} />
 
           <span className="section-label lib-detail__section">
             File versions ({track.files.length})
           </span>
-          <FileVersions track={track} playing={playing} onPlayFile={(file) => onPlayFile(track, file)} onError={onError} />
+          <FileVersions track={track} playing={playing} onPlayFile={(file) => onPlayFile(track, file)} onError={onError} onUpgrade={onUpgrade} />
         </div>
       )}
 

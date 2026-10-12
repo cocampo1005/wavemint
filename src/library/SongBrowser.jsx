@@ -40,6 +40,7 @@ export function SongBrowser({
   toolbarExtra,
   onChanged,
   onWriteTags,
+  onUpgrade,
   selection: controlledSelection,
   onSelectionChange: setControlledSelection,
 }) {
@@ -168,6 +169,7 @@ export function SongBrowser({
           onError={onError}
           onChanged={onChanged}
           onWriteTags={onWriteTags}
+          onUpgrade={onUpgrade}
         />
       )}
     </div>

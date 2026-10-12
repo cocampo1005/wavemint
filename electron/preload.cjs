@@ -68,6 +68,17 @@ const LIBRARY_METHODS = [
   "previewConsolidation",
   "consolidate",
   "updateSettings",
+  "qualitySummary",
+  "listQualityQueue",
+  "refreshQuality",
+  "checkQuality",
+  "setQualityStatus",
+  "prepareUpgrade",
+  "chooseUpgradeFile",
+  "compareUpgrade",
+  "discardUpgrade",
+  "listUpgradeCandidates",
+  "applyUpgrade",
 ];
 
 function subscribe(channel, callback) {

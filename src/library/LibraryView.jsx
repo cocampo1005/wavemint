@@ -13,6 +13,7 @@ import {
   HistoryIcon,
   MergeIcon,
   OverviewIcon,
+  QualityIcon,
   ReviewIcon,
   SongsIcon,
   SourceIcon,
@@ -21,9 +22,11 @@ import {
 import { ManagedView } from "./ManagedView";
 import { MergeView } from "./MergeView";
 import { OverviewView } from "./OverviewView";
+import { QualityView } from "./QualityView";
 import { usePreviewPlayer } from "./Player";
 import { ReviewView } from "./ReviewView";
 import { SongBrowser } from "./SongBrowser";
+import { UpgradeDialog } from "./UpgradeDialog";
 import { ScanProgress, SourcesView } from "./SourcesView";
 import { errorMessage, libraryApi, useLibraryJobs, useLoader } from "./useLibrary";
 import "./library.css";
@@ -45,6 +48,7 @@ const NAV_GROUPS = [
     items: [
       { id: "review", label: "Review", Icon: ReviewIcon, badge: "reviewOpen" },
       { id: "merge", label: "Merge & Duplicates", Icon: MergeIcon },
+      { id: "quality", label: "Quality & Upgrades", Icon: QualityIcon, badge: "qualityAttention" },
     ],
   },
   {
@@ -65,19 +69,28 @@ const TITLES = {
   genres: "Genres",
   review: "Review",
   merge: "Merge & Duplicates",
+  quality: "Quality & Upgrades",
   managed: "WaveMint Library",
   sources: "Library sources",
   history: "History",
   album: "Album",
 };
 
-const JOB_LABELS = { scan: "scan", "write-tags": "write-tags", "merge-analysis": "merge-analysis", consolidate: "consolidate" };
+const JOB_LABELS = {
+  scan: "scan",
+  "write-tags": "write-tags",
+  "merge-analysis": "merge-analysis",
+  consolidate: "consolidate",
+  "quality-check": "quality-check",
+  upgrade: "upgrade",
+};
 
 export function LibraryView() {
   const [route, setRoute] = useState({ view: "overview", scope: {} });
   const [error, setError] = useState("");
   const [writeTags, setWriteTags] = useState(null); // { trackIds } | null
   const [editAlbum, setEditAlbum] = useState(null);
+  const [upgrade, setUpgrade] = useState(null); // { trackId, start } | null
   const { jobs, running, revision, bump } = useLibraryJobs();
   const [playing, play, player] = usePreviewPlayer();
   const { data: status } = useLoader(() => libraryApi.getStatus(), [revision]);
@@ -105,7 +118,7 @@ export function LibraryView() {
 
   const cancelJob = (id) => libraryApi.cancelJob({ id }).catch(() => {});
   const openAlbum = (releaseId) => navigate("album", { releaseId });
-  const openTrack = (trackId) => navigate("songs", { ids: [trackId], activeId: trackId, chip: "Song from review" });
+  const openTrack = (trackId) => navigate("songs", { ids: [trackId], activeId: trackId, chip: "Selected song" });
 
   const browserProps = {
     revision,
@@ -116,6 +129,7 @@ export function LibraryView() {
     onError: setError,
     onChanged: bump,
     onWriteTags: (trackIds) => setWriteTags({ trackIds }),
+    onUpgrade: (trackId, start = null) => setUpgrade({ trackId, start }),
   };
 
   const { view, scope } = route;
@@ -176,6 +190,19 @@ export function LibraryView() {
           onError={setError}
         />
       </>
+    );
+  } else if (view === "quality") {
+    content = (
+      <QualityView
+        revision={revision}
+        checking={running.some((job) => job.kind === "quality-check")}
+        playing={playing}
+        onPlay={(row) => play(row)}
+        onOpenTrack={openTrack}
+        onUpgrade={(trackId) => setUpgrade({ trackId, start: null })}
+        onChanged={bump}
+        onError={setError}
+      />
     );
   } else if (view === "managed") {
     content = <ManagedView revision={revision} busy={busy} lastJob={lastJob("consolidate")} onChanged={bump} onError={setError} />;
@@ -268,6 +295,17 @@ export function LibraryView() {
             setWriteTags(null);
             bump();
           }}
+        />
+      )}
+      {upgrade && (
+        <UpgradeDialog
+          trackId={upgrade.trackId}
+          start={upgrade.start}
+          onClose={() => {
+            setUpgrade(null);
+            bump();
+          }}
+          onDone={bump}
         />
       )}
       {editAlbum && (

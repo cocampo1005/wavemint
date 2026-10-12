@@ -303,6 +303,53 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 4,
+    name: "audio quality: file checks, quality decisions, upgrade candidates",
+    up(db) {
+      db.exec(`
+        -- Results of a quality check of one file version (diagnostic signals,
+        -- not verdicts). Stale when the file's size or mtime changes.
+        CREATE TABLE quality_checks (
+          file_id        INTEGER PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE,
+          size           INTEGER NOT NULL,
+          mtime_ms       INTEGER NOT NULL,
+          checked_at     TEXT NOT NULL,
+          decode_errors  INTEGER NOT NULL DEFAULT 0,
+          decode_sample  TEXT,
+          truncated      INTEGER NOT NULL DEFAULT 0 CHECK (truncated IN (0, 1)),
+          peak_db        REAL,
+          rms_db         REAL,
+          peak_count     INTEGER,
+          sample_count   INTEGER,
+          band_mid_db    REAL,
+          band_high_db   REAL
+        );
+
+        -- Who decided a song's quality status: computed ('auto'), the user,
+        -- or an upgrade. Only 'auto' statuses are recomputed.
+        ALTER TABLE tracks ADD COLUMN quality_set_by TEXT NOT NULL DEFAULT 'auto'
+          CHECK (quality_set_by IN ('auto', 'user', 'upgrade'));
+        ALTER TABLE tracks ADD COLUMN quality_reasons TEXT;
+        CREATE INDEX tracks_quality ON tracks(quality_status);
+
+        -- A replacement being considered for a song (a chosen file, another
+        -- version already in the library, or an extraction).
+        CREATE TABLE upgrade_candidates (
+          id           INTEGER PRIMARY KEY,
+          track_id     INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+          kind         TEXT NOT NULL CHECK (kind IN ('file', 'version', 'extraction')),
+          path         TEXT NOT NULL,
+          file_id      INTEGER REFERENCES files(id) ON DELETE SET NULL,
+          info         TEXT,
+          status       TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'applied', 'discarded')),
+          operation_id INTEGER REFERENCES operations(id) ON DELETE SET NULL,
+          created_at   TEXT NOT NULL
+        );
+        CREATE INDEX upgrade_candidates_track ON upgrade_candidates(track_id, status);
+      `);
+    },
+  },
 ];
 
 module.exports = { MIGRATIONS };

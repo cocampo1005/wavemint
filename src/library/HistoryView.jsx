@@ -22,9 +22,11 @@ const KIND_LABEL = {
   "secondary-genres": "Genres",
   merge: "Merge",
   consolidate: "Files",
+  upgrade: "Upgrade",
+  quality: "Quality",
 };
 
-const STEP_LABEL = { consolidate: "Copy", "write-tags": "Write tags", "restore-tags": "Restore" };
+const STEP_LABEL = { consolidate: "Copy", upgrade: "Upgrade", "write-tags": "Write tags", "restore-tags": "Restore" };
 
 // Merges log several low-level rows per song; show one readable line each.
 function readableChanges(operation) {

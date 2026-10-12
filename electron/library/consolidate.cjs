@@ -26,6 +26,47 @@ const { canWriteTags, readTags, writeTags } = require("./tags.cjs");
 const { validateRoot } = require("./sources.cjs");
 
 const TAG_FIELDS = Object.entries(FIELDS).filter(([, def]) => def.tag);
+// Versions replaced by an upgrade are kept here, inside the managed folder
+// (hidden folders aren't scanned, so they never show up as songs).
+const ARCHIVE_DIR = ".wavemint-archive";
+
+/** Inserts a file version for a track; returns its id. */
+function insertFileRow(db, { trackId, sourceId, target, relRoot, snapshot, role = "active" }) {
+  const stat = fs.statSync(target);
+  const now = nowIso();
+  return Number(
+    db
+      .prepare(
+        `INSERT INTO files (track_id, source_id, path, path_key, rel_path, ext, size, mtime_ms, container, codec, lossless, bitrate,
+           sample_rate, bit_depth, channels, duration_ms, tag_snapshot, artwork_hash, artwork_count, status, role, first_seen_at, last_seen_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ok', ?, ?, ?)`,
+      )
+      .run(
+        trackId,
+        sourceId,
+        target,
+        pathKey(target),
+        path.relative(relRoot, target),
+        path.extname(target).toLowerCase(),
+        stat.size,
+        Math.round(stat.mtimeMs),
+        snapshot.container ?? null,
+        snapshot.codec ?? null,
+        snapshot.lossless ?? null,
+        snapshot.bitrate ?? null,
+        snapshot.sampleRate ?? null,
+        snapshot.bitDepth ?? null,
+        snapshot.channels ?? null,
+        snapshot.durationMs ?? null,
+        JSON.stringify(snapshot),
+        snapshot.artworkHash ?? null,
+        snapshot.artworkCount ?? 0,
+        role,
+        now,
+        now,
+      ).lastInsertRowid,
+  );
+}
 
 function sha256(filePath) {
   return new Promise((resolve, reject) => {
@@ -83,13 +124,35 @@ function createConsolidator({ db, media, artStore, logger = console }) {
     const filter = trackIds?.length ? `AND t.id IN (${trackIds.map(() => "?").join(",")})` : "";
     return db
       .prepare(
-        `SELECT t.*, f.id AS file_id, f.path, f.ext, f.size, f.status AS file_status, f.tag_snapshot, f.source_id
+        `SELECT t.*, f.id AS file_id, f.path, f.ext, f.size, f.status AS file_status, f.tag_snapshot, f.source_id,
+                (SELECT m.id FROM files m WHERE m.track_id = t.id AND m.source_id = ? AND m.id != t.active_file_id AND m.status = 'ok'
+                   AND m.rel_path NOT LIKE '${ARCHIVE_DIR}%' ORDER BY m.id DESC LIMIT 1) AS reusable_file_id
          FROM tracks t JOIN files f ON f.id = t.active_file_id
          WHERE t.state = 'active' ${filter}
          ORDER BY t.album_artist COLLATE NOCASE, t.album COLLATE NOCASE, t.disc_no, t.track_no, t.title COLLATE NOCASE`,
       )
-      .all(...(trackIds || []))
-      .map((row) => ({ ...row, managed: !!managed && row.source_id === managed.id }));
+      .all(managed?.id ?? -1, ...(trackIds || []))
+      .map((row) => {
+        // A copy made earlier (e.g. before an undo) that still exists is reused.
+        const reusable = row.reusable_file_id ? db.prepare("SELECT path FROM files WHERE id = ?").get(row.reusable_file_id) : null;
+        return {
+          ...row,
+          managed: !!managed && row.source_id === managed.id,
+          reusable_file_id: reusable && fs.existsSync(reusable.path) ? row.reusable_file_id : null,
+        };
+      });
+  }
+
+  /** Makes an earlier managed copy the active version again (no copying). */
+  function reuseCopy({ track, operationId }) {
+    const copy = db.prepare("SELECT * FROM files WHERE id = ?").get(track.reusable_file_id);
+    transaction(db, () => {
+      db.prepare("UPDATE files SET role = 'alternate' WHERE id = ?").run(track.active_file_id);
+      db.prepare("UPDATE files SET role = 'active' WHERE id = ?").run(copy.id);
+      const stale = tagDifferences(track, parseJson(copy.tag_snapshot, {})).length > 0;
+      db.prepare("UPDATE tracks SET active_file_id = ?, tags_dirty = ?, updated_at = ? WHERE id = ?").run(copy.id, stale ? 1 : 0, nowIso(), track.id);
+      logChange(db, operationId, { entityId: track.id, field: "active_file_id", oldValue: track.active_file_id, newValue: copy.id });
+    });
   }
 
   /** What copying into `root` would do. Nothing is changed. */
@@ -101,8 +164,9 @@ function createConsolidator({ db, media, artStore, logger = console }) {
 
     const rows = candidates(trackIds);
     const alreadyManaged = rows.filter((row) => row.managed);
-    const unavailable = rows.filter((row) => !row.managed && row.file_status !== "ok");
-    const todo = rows.filter((row) => !row.managed && row.file_status === "ok");
+    const unavailable = rows.filter((row) => !row.managed && !row.reusable_file_id && row.file_status !== "ok");
+    const reused = rows.filter((row) => !row.managed && row.reusable_file_id);
+    const todo = rows.filter((row) => !row.managed && !row.reusable_file_id && row.file_status === "ok");
     const planned = planPaths(
       todo.map((row) => ({ track: row, ext: row.ext })),
       { root: resolved, pattern, exists: (target) => fs.existsSync(target) },
@@ -117,6 +181,7 @@ function createConsolidator({ db, media, artStore, logger = console }) {
       bytes,
       freeBytes: freeBytes(resolved),
       alreadyManaged: alreadyManaged.length,
+      reused: reused.length,
       unavailable: unavailable.map((row) => ({ trackId: row.id, title: row.title, reason: row.file_status === "missing" ? "File missing" : "File unreadable" })).slice(0, 200),
       unavailableCount: unavailable.length,
       tagsWritten: withTags.length,
@@ -136,40 +201,9 @@ function createConsolidator({ db, media, artStore, logger = console }) {
   }
 
   function register({ track, sourceId, target, relRoot, operationId, stepId, snapshot }) {
-    const stat = fs.statSync(target);
     const now = nowIso();
     transaction(db, () => {
-      const fileId = Number(
-        db
-          .prepare(
-            `INSERT INTO files (track_id, source_id, path, path_key, rel_path, ext, size, mtime_ms, container, codec, lossless, bitrate,
-               sample_rate, bit_depth, channels, duration_ms, tag_snapshot, artwork_hash, artwork_count, status, role, first_seen_at, last_seen_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ok', 'active', ?, ?)`,
-          )
-          .run(
-            track.id,
-            sourceId,
-            target,
-            pathKey(target),
-            path.relative(relRoot, target),
-            path.extname(target).toLowerCase(),
-            stat.size,
-            Math.round(stat.mtimeMs),
-            snapshot.container,
-            snapshot.codec,
-            snapshot.lossless ?? null,
-            snapshot.bitrate ?? null,
-            snapshot.sampleRate ?? null,
-            snapshot.bitDepth ?? null,
-            snapshot.channels ?? null,
-            snapshot.durationMs ?? null,
-            JSON.stringify(snapshot),
-            snapshot.artworkHash ?? null,
-            snapshot.artworkCount ?? 0,
-            now,
-            now,
-          ).lastInsertRowid,
-      );
+      const fileId = insertFileRow(db, { trackId: track.id, sourceId, target, relRoot, snapshot });
       const previous = db.prepare("SELECT active_file_id, tags_dirty FROM tracks WHERE id = ?").get(track.id);
       db.prepare("UPDATE files SET role = 'alternate' WHERE id = ?").run(previous.active_file_id);
       db.prepare("UPDATE tracks SET active_file_id = ?, tags_dirty = 0, updated_at = ? WHERE id = ?").run(fileId, now, track.id);
@@ -234,7 +268,9 @@ function createConsolidator({ db, media, artStore, logger = console }) {
   async function consolidateJob({ root, pattern = DEFAULT_PATTERN, trackIds = null, signal, progress }) {
     validatePattern(pattern);
     const source = ensureManagedSource(root);
-    const rows = candidates(trackIds).filter((row) => !row.managed && row.file_status === "ok");
+    const all = candidates(trackIds);
+    const reusable = all.filter((row) => !row.managed && row.reusable_file_id);
+    const rows = all.filter((row) => !row.managed && !row.reusable_file_id && row.file_status === "ok");
     const planned = planPaths(rows.map((row) => ({ track: row, ext: row.ext })), {
       root: source.root_path,
       pattern,
@@ -247,8 +283,13 @@ function createConsolidator({ db, media, artStore, logger = console }) {
       throw new Error("There isn't enough free space at the destination for these songs.");
     }
 
-    const operationId = startOperation(db, { kind: "consolidate", label: `Copy ${planned.length} song${planned.length === 1 ? "" : "s"} into the WaveMint Library` });
-    const report = { copied: 0, failed: 0, bytes: 0, failures: [] };
+    const count = planned.length + reusable.length;
+    const operationId = startOperation(db, { kind: "consolidate", label: `Copy ${count} song${count === 1 ? "" : "s"} into the WaveMint Library` });
+    const report = { copied: 0, reused: 0, failed: 0, bytes: 0, failures: [] };
+    for (const track of reusable) {
+      reuseCopy({ track, operationId });
+      report.reused += 1;
+    }
 
     for (const [index, item] of planned.entries()) {
       if (signal?.aborted) break;
@@ -330,4 +371,4 @@ function createConsolidator({ db, media, artStore, logger = console }) {
   return { consolidateJob, ensureManagedSource, managedSource, preview, recover, undoConsolidation };
 }
 
-module.exports = { createConsolidator };
+module.exports = { ARCHIVE_DIR, TAG_FIELDS, createConsolidator, freeBytes, insertFileRow, sha256 };

@@ -2116,3 +2116,347 @@
 .lib-merge__body .segmented {
   flex-wrap: wrap;
 }
+
+/* --- Quality & Upgrades ------------------------------------------------------ */
+
+.lib-quality {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wm-space-3);
+}
+
+.lib-quality__views {
+  margin-bottom: 0;
+}
+
+.lib-quality .lib-toolbar .field {
+  width: auto;
+}
+
+.lib-quality .lib-search {
+  flex: 1;
+  min-width: 200px;
+}
+
+.lib-quality__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wm-space-2);
+}
+
+.lib-quality-row {
+  display: flex;
+  align-items: center;
+  gap: var(--wm-space-3);
+  padding: var(--wm-space-2) var(--wm-space-4);
+  border: 1px solid var(--wm-border-subtle);
+  border-radius: var(--wm-radius-lg);
+  background: rgba(10, 18, 48, 0.55);
+}
+
+.lib-quality-row.is-selected {
+  border-color: rgba(31, 200, 255, 0.4);
+}
+
+.lib-quality-row .lib-play {
+  flex: none;
+  opacity: 1;
+}
+
+.lib-quality-row__text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.lib-quality-row__text > strong,
+.lib-quality-row__text > span:not(.lib-quality-row__reasons) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lib-quality-row__text > span {
+  color: var(--wm-text-muted);
+  font-size: var(--wm-text-xs);
+}
+
+.lib-quality-row__reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.lib-quality-row__reasons .lib-badge {
+  height: auto;
+  min-height: 18px;
+  white-space: normal;
+}
+
+.lib-quality-row__actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--wm-space-1);
+  flex: none;
+}
+
+.lib-quality-row__status {
+  height: 28px;
+  padding: 0 var(--wm-space-2);
+  font-size: var(--wm-text-xs);
+}
+
+.lib-detail__quality {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wm-space-2);
+  margin: var(--wm-space-3) 0;
+}
+
+.lib-detail__quality-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--wm-space-2);
+}
+
+.lib-detail__quality-head .lib-quality-row__status {
+  width: auto;
+}
+
+.lib-detail__reasons {
+  margin: 0;
+  padding-left: var(--wm-space-5);
+  color: var(--wm-text-muted);
+  font-size: var(--wm-text-xs);
+}
+
+/* --- Upgrade dialog ------------------------------------------------------------ */
+
+.lib-upgrade,
+.lib-upgrade__start {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wm-space-3);
+}
+
+.lib-upgrade__start {
+  align-items: flex-start;
+}
+
+.lib-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--wm-space-3);
+}
+
+.lib-compare__side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wm-space-2);
+  min-width: 0;
+  padding: var(--wm-space-3) var(--wm-space-4);
+  border: 1px solid var(--wm-border-subtle);
+  border-radius: var(--wm-radius-lg);
+  background: rgba(10, 18, 48, 0.55);
+}
+
+.lib-compare__side.is-candidate {
+  border-color: rgba(31, 200, 255, 0.35);
+}
+
+.lib-compare__hero {
+  display: flex;
+  gap: var(--wm-space-3);
+  min-width: 0;
+}
+
+.lib-compare__hero img,
+.lib-compare__art {
+  flex: none;
+  width: 64px;
+  height: 64px;
+  border-radius: var(--wm-radius-sm);
+  object-fit: cover;
+}
+
+.lib-compare__hero > div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.lib-compare__hero > div > * {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lib-compare__hero span {
+  color: var(--wm-text-muted);
+  font-size: var(--wm-text-xs);
+}
+
+.lib-compare__facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px var(--wm-space-3);
+  margin: 0;
+  font-size: var(--wm-text-xs);
+}
+
+.lib-compare__facts dt {
+  color: var(--wm-text-subtle);
+}
+
+.lib-compare__facts dd {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.lib-compare__signals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.lib-compare__signals .lib-badge {
+  height: auto;
+  min-height: 18px;
+  white-space: normal;
+}
+
+.lib-ab {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--wm-space-2);
+}
+
+.lib-upgrade__match {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--wm-space-2) var(--wm-space-3);
+  border-left: 3px solid var(--wm-success);
+  border-radius: var(--wm-radius-sm);
+  background: rgba(5, 10, 30, 0.35);
+  font-size: var(--wm-text-sm);
+}
+
+.lib-upgrade__match span {
+  color: var(--wm-text-muted);
+  font-size: var(--wm-text-xs);
+}
+
+.lib-upgrade__match.is-uncertain {
+  border-left-color: var(--wm-warning);
+}
+
+.lib-upgrade__match.is-different {
+  border-left-color: var(--wm-danger);
+}
+
+.lib-upgrade__warning {
+  display: flex;
+  gap: var(--wm-space-2);
+  margin: 0;
+  color: var(--wm-warning);
+  font-size: var(--wm-text-xs);
+}
+
+.lib-upgrade__warning.is-strong {
+  color: var(--wm-danger);
+}
+
+.lib-upgrade__warning svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.lib-upgrade__fields {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--wm-border-subtle);
+  border-radius: var(--wm-radius-md);
+  overflow: hidden;
+}
+
+.lib-upgrade__field {
+  display: grid;
+  grid-template-columns: 130px 1fr 1fr;
+  align-items: center;
+  gap: var(--wm-space-3);
+  padding: 6px var(--wm-space-3);
+  font-size: var(--wm-text-sm);
+}
+
+.lib-upgrade__field + .lib-upgrade__field {
+  border-top: 1px solid var(--wm-border-subtle);
+}
+
+.lib-upgrade__field.is-head {
+  background: rgba(5, 10, 30, 0.35);
+  color: var(--wm-text-subtle);
+  font-size: var(--wm-text-xs);
+  font-weight: 600;
+}
+
+.lib-upgrade__field.is-same {
+  color: var(--wm-text-subtle);
+}
+
+.lib-upgrade__field > span:first-child {
+  color: var(--wm-text-muted);
+}
+
+.lib-upgrade__field label {
+  display: flex;
+  align-items: center;
+  gap: var(--wm-space-2);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.lib-upgrade__field img {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--wm-radius-sm);
+  object-fit: cover;
+}
+
+.lib-upgrade__plan {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--wm-text-muted);
+  font-size: var(--wm-text-sm);
+}
+
+.lib-upgrade__plan strong {
+  color: var(--wm-text);
+  overflow-wrap: anywhere;
+}
+
+.lib-upgrade__plan .is-warn {
+  color: var(--wm-warning);
+}
+
+.lib-upgrade__done {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wm-space-2);
+}

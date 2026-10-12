@@ -96,7 +96,7 @@ function CopyDialog({ preview, onClose, onStarted, onError }) {
             Cancel
           </button>
           <button type="button" className={`btn btn--primary ${starting ? "is-loading" : ""}`} disabled={starting} onClick={start}>
-            Copy {pluralize(preview.toCopy, "Song")}
+            Copy {pluralize(preview.toCopy + (preview.reused || 0), "Song")}
           </button>
         </>
       }
@@ -192,6 +192,7 @@ export function ManagedView({ revision, busy, lastJob, onChanged, onError }) {
                   <strong>{formatNumber(preview.toCopy)}</strong> to copy · {formatBytes(preview.bytes)}
                 </span>
                 <span>{formatNumber(preview.alreadyManaged)} already in the WaveMint Library</span>
+                {preview.reused > 0 && <span>{pluralize(preview.reused, "earlier copy", "earlier copies")} will be used again</span>}
                 {preview.tagsWritten > 0 && <span>Your edited tags go into {pluralize(preview.tagsWritten, "copy", "copies")}</span>}
                 {preview.renamedForCollisions > 0 && <span>{pluralize(preview.renamedForCollisions, "name")} get a (2) suffix to avoid clashes</span>}
                 {preview.unavailableCount > 0 && <span className="is-warn">{formatNumber(preview.unavailableCount)} can&apos;t be copied (missing or unreadable)</span>}
@@ -206,9 +207,9 @@ export function ManagedView({ revision, busy, lastJob, onChanged, onError }) {
                 </ul>
               )}
               <div className="lib-edit__actions">
-                {preview.toCopy > 0 ? (
+                {preview.toCopy + (preview.reused || 0) > 0 ? (
                   <button type="button" className="btn btn--primary" disabled={busy || lowSpace} onClick={() => setCopyOpen(true)}>
-                    Copy {pluralize(preview.toCopy, "Song")}…
+                    Copy {pluralize(preview.toCopy + (preview.reused || 0), "Song")}…
                   </button>
                 ) : (
                   <span className="lib-managed__done">

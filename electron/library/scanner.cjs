@@ -525,13 +525,20 @@ function createScanner({ db, readTagsImpl = readTags, probe = null, logger = con
       transaction(db, () => {
         stats.restored = restoredIds.length;
         // Only a completed walk of a reachable folder can declare files missing.
+        // Versions archived by WaveMint live in a hidden folder the walk
+        // skips; they are checked directly instead.
         const missing = db
           .prepare(
             `UPDATE files SET status = 'missing'
-             WHERE source_id = ? AND status != 'missing' AND (last_seen_scan_id IS NULL OR last_seen_scan_id != ?)`,
+             WHERE source_id = ? AND status != 'missing' AND (last_seen_scan_id IS NULL OR last_seen_scan_id != ?)
+               AND NOT (role = 'archived' AND rel_path LIKE '.wavemint-archive%')`,
           )
           .run(sourceId, scanId);
         stats.missing = Number(missing.changes);
+        for (const file of db.prepare("SELECT id, path, status FROM files WHERE source_id = ? AND role = 'archived' AND rel_path LIKE '.wavemint-archive%'").all(sourceId)) {
+          const status = fs.existsSync(file.path) ? "ok" : "missing";
+          if (status !== file.status) db.prepare("UPDATE files SET status = ? WHERE id = ?").run(status, file.id);
+        }
       });
     } catch (error) {
       flush();

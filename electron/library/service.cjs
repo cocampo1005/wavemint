@@ -16,7 +16,9 @@ const edits = require("./edits.cjs");
 const { createFileOps } = require("./fileops.cjs");
 const genres = require("./genres.cjs");
 const operations = require("./operations.cjs");
+const quality = require("./quality.cjs");
 const review = require("./review.cjs");
+const { createUpgrader } = require("./upgrade.cjs");
 const { readArtwork } = require("./tags.cjs");
 
 const SETTINGS_DEFAULTS = {
@@ -34,10 +36,11 @@ function createLibraryService({ db, media, jobs, paths, logger = console }) {
   const fileOps = createFileOps({ db, media, artStore, backupsRoot: paths.backupsDir, logger });
   const merge = createMerge({ db, contentHash, logger });
   const consolidator = createConsolidator({ db, media, artStore, logger });
+  const upgrader = createUpgrader({ db, media, artStore, managedSource: consolidator.managedSource, getSettings, logger });
 
   // Anything interrupted last time (crash, power loss) is finished or rolled
   // back before any new work starts.
-  const recovered = [...fileOps.recover(), ...consolidator.recover()];
+  const recovered = [...fileOps.recover(), ...consolidator.recover(), ...upgrader.recover()];
   if (recovered.length) logger.warn(`[library] Recovered ${recovered.length} interrupted file step(s)`);
 
   function requireIdle() {
@@ -70,6 +73,8 @@ function createLibraryService({ db, media, jobs, paths, logger = console }) {
   function getSettings() {
     return { ...SETTINGS_DEFAULTS, ...getSetting(db, "library", {}) };
   }
+
+  const refreshQuality = (trackIds = null) => quality.refreshQuality(db, { trackIds, lowBitrateKbps: getSettings().lowBitrateKbps });
 
   const methods = {
     // --- overview and browsing -------------------------------------------
@@ -107,8 +112,9 @@ function createLibraryService({ db, media, jobs, paths, logger = console }) {
           });
           results.push({ sourceId: id, ...result });
         }
-        // Fresh findings for the review queue.
+        // Fresh findings for the review queue and quality statuses.
         const reviewResult = review.refreshReview(db);
+        refreshQuality();
         return { results, review: reviewResult };
       });
     },
@@ -153,7 +159,17 @@ function createLibraryService({ db, media, jobs, paths, logger = console }) {
       if (!operation) throw new Error("This change no longer exists.");
       if (operation.kind === "tag-write") return fileOps.undoTagWrite(id);
       if (operation.kind === "merge") return merge.undoMerge(id);
-      if (operation.kind === "consolidate") return consolidator.undoConsolidation(id);
+      if (operation.kind === "consolidate") {
+        const result = consolidator.undoConsolidation(id);
+        refreshQuality();
+        return result;
+      }
+      if (operation.kind === "upgrade") return upgrader.undoUpgrade(id);
+      if (operation.kind === "quality") {
+        const result = edits.undoMetadataOperation(db, id);
+        refreshQuality();
+        return result;
+      }
       return edits.undoMetadataOperation(db, id);
     },
 
@@ -168,6 +184,7 @@ function createLibraryService({ db, media, jobs, paths, logger = console }) {
       requireIdle();
       const result = merge.apply(params);
       review.refreshReview(db);
+      refreshQuality();
       return result;
     },
 
@@ -200,10 +217,39 @@ function createLibraryService({ db, media, jobs, paths, logger = console }) {
     consolidate: ({ trackIds }) => {
       const root = managedRoot();
       const pattern = getSettings().namingPattern;
-      return jobs.start("consolidate", "Copying into the WaveMint Library", ({ signal, progress }) =>
-        consolidator.consolidateJob({ root, pattern, trackIds: trackIds?.length ? trackIds : null, signal, progress }),
-      );
+      return jobs.start("consolidate", "Copying into the WaveMint Library", async ({ signal, progress }) => {
+        const result = await consolidator.consolidateJob({ root, pattern, trackIds: trackIds?.length ? trackIds : null, signal, progress });
+        refreshQuality();
+        return result;
+      });
     },
+
+    // --- audio quality and upgrades -------------------------------------------
+    qualitySummary: () => quality.qualitySummary(db),
+    listQualityQueue: (params) => quality.listQueue(db, params),
+    refreshQuality: () => ({ updated: refreshQuality() }),
+    checkQuality: ({ trackIds, force }) =>
+      jobs.start("quality-check", "Checking audio quality", ({ signal, progress }) =>
+        quality.checkJob(db, media, {
+          trackIds: trackIds?.length ? trackIds : null,
+          force: !!force,
+          lowBitrateKbps: getSettings().lowBitrateKbps,
+          signal,
+          progress,
+          logger,
+        }),
+      ),
+    setQualityStatus: ({ trackIds, status }) => quality.setQualityStatus(db, { trackIds, status, lowBitrateKbps: getSettings().lowBitrateKbps }),
+    // filePath only from the host (a main-process dialog); the renderer can pick versions.
+    prepareUpgrade: ({ trackId, fileId, filePath }) => {
+      requireIdle();
+      return upgrader.prepare({ trackId, fileId, filePath });
+    },
+    compareUpgrade: (params) => upgrader.compare(params),
+    discardUpgrade: (params) => upgrader.discard(params),
+    listUpgradeCandidates: (params) => upgrader.listCandidates(params),
+    applyUpgrade: ({ candidateId, choices, artwork }) =>
+      jobs.start("upgrade", "Upgrading song", ({ signal, progress }) => upgrader.applyJob({ candidateId, choices, artwork, signal, progress })),
 
     // --- genres ------------------------------------------------------------------
     listGenreTaxonomy: () => genres.listTaxonomy(db),
@@ -238,8 +284,10 @@ function createLibraryService({ db, media, jobs, paths, logger = console }) {
     getSettings,
     updateSettings: ({ patch }) => {
       if (patch.namingPattern !== undefined) patch = { ...patch, namingPattern: validatePattern(patch.namingPattern) };
-      const next = { ...getSettings(), ...patch };
+      const before = getSettings();
+      const next = { ...before, ...patch };
       setSetting(db, "library", next);
+      if (next.lowBitrateKbps !== before.lowBitrateKbps) refreshQuality();
       return next;
     },
 
@@ -254,6 +302,15 @@ function createLibraryService({ db, media, jobs, paths, logger = console }) {
       const needsConversion = file.codec === "alac" || file.ext === ".aif" || file.ext === ".aiff";
       if (!needsConversion) return { path: file.path };
       return { path: await media.previewFile({ fileId: file.id, filePath: file.path, mtimeMs: file.mtime_ms }) };
+    },
+    resolveCandidatePreview: async ({ candidateId }) => {
+      const candidate = upgrader.resolveCandidateFile({ candidateId });
+      if (!candidate) return null;
+      const ext = path.extname(candidate.path).toLowerCase();
+      const codec = JSON.parse(db.prepare("SELECT info FROM upgrade_candidates WHERE id = ?").get(candidate.id).info || "{}").tags?.codec;
+      if (![".aif", ".aiff"].includes(ext) && codec !== "alac") return { path: candidate.path };
+      const stat = fs.statSync(candidate.path);
+      return { path: await media.previewFile({ fileId: `c${candidate.id}`, filePath: candidate.path, mtimeMs: stat.mtimeMs }) };
     },
     resolveArtwork: async ({ hash, size }) => {
       const key = String(hash);

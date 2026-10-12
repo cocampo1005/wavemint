@@ -241,6 +241,14 @@ test("consolidation copies, tags the copies, verifies, and never touches sources
   const restored = queries.getTrack(lib.db, song6);
   assert.equal(restored.files.find((file) => file.id === restored.active_file_id).source_role, "legacy");
   assert.ok(fs.existsSync(copy), "copies are kept on disk");
+
+  // Copying again reuses those copies instead of making "(2)" duplicates.
+  const again = await consolidator.consolidateJob({ root: managedRoot });
+  assert.equal(again.copied, 0);
+  assert.equal(again.reused, 10);
+  assert.equal(Object.keys(snapshotFolder(managedRoot)).length, 10);
+  const reactivated = queries.getTrack(lib.db, song6);
+  assert.equal(reactivated.files.find((file) => file.id === reactivated.active_file_id).path, copy);
 });
 
 test("consolidation never overwrites an existing file", needsAudio, async (t) => {

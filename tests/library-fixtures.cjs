@@ -15,7 +15,7 @@ const FFMPEG = path.join(BIN, process.platform === "win32" ? "ffmpeg.exe" : "ffm
 const HAVE_FFMPEG = fs.existsSync(FFMPEG);
 const SKIP_REASON = !HAVE_FFMPEG && 'run "npm run binaries:fetch" first';
 
-const BASE_DIR = path.join(os.tmpdir(), "wavemint-test-audio-v1");
+const BASE_DIR = path.join(os.tmpdir(), "wavemint-test-audio-v2");
 
 // Different tones and lengths make files that are genuinely different audio.
 const BASES = {
@@ -25,32 +25,42 @@ const BASES = {
   m4a: { ext: ".m4a", args: ["-c:a", "aac", "-b:a", "256k"], freq: 440, seconds: 3 },
   flac: { ext: ".flac", args: ["-c:a", "flac"], freq: 440, seconds: 3 },
   wav: { ext: ".wav", args: [], freq: 550, seconds: 2 },
+  // Full-band noise (like music) for the quality signals; "transcoded" is a
+  // 320 kbps file made from the 128 kbps one.
+  noise_128: { ext: ".mp3", args: ["-ac", "2", "-ar", "44100", "-c:a", "libmp3lame", "-b:a", "128k"], noise: 6 },
+  noise_320: { ext: ".mp3", args: ["-ac", "2", "-ar", "44100", "-c:a", "libmp3lame", "-b:a", "320k"], noise: 6 },
+  noise_flac: { ext: ".flac", args: ["-ac", "2", "-ar", "44100", "-sample_fmt", "s16", "-c:a", "flac"], noise: 6 },
+  noise_transcoded: { ext: ".mp3", args: ["-c:a", "libmp3lame", "-b:a", "320k"], from: "noise_128" },
 };
 
-function ensureBase(name) {
-  const spec = BASES[name];
-  const target = path.join(BASE_DIR, `${name}${spec.ext}`);
+// Test files run in parallel processes: each one renders into its own temp
+// file and the first to finish wins, so nobody reads a half-written file.
+function generateOnce(target, args) {
   if (fs.existsSync(target)) return target;
-  fs.mkdirSync(BASE_DIR, { recursive: true });
-  const cover = path.join(BASE_DIR, "cover.jpg");
-  if (!fs.existsSync(cover)) {
-    execFileSync(FFMPEG, ["-v", "error", "-y", "-f", "lavfi", "-i", "color=c=navy:s=300x300", "-frames:v", "1", cover]);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  const ext = path.extname(target);
+  const temp = `${target}.${process.pid}.tmp${ext}`;
+  execFileSync(FFMPEG, ["-v", "error", "-y", ...args, temp]);
+  try {
+    if (!fs.existsSync(target)) fs.renameSync(temp, target);
+  } catch (error) {
+    if (!fs.existsSync(target)) throw error;
+  } finally {
+    fs.rmSync(temp, { force: true });
   }
-  const temp = `${target}.tmp${spec.ext}`;
-  execFileSync(FFMPEG, [
-    "-v", "error", "-y", "-f", "lavfi", "-i", `sine=frequency=${spec.freq}:duration=${spec.seconds}`,
-    ...spec.args, temp,
-  ]);
-  fs.renameSync(temp, target);
   return target;
 }
 
+function ensureBase(name) {
+  const spec = BASES[name];
+  const input = spec.from
+    ? ["-i", ensureBase(spec.from)]
+    : ["-f", "lavfi", "-i", spec.noise ? `anoisesrc=d=${spec.noise}:c=pink:a=0.3:seed=7` : `sine=frequency=${spec.freq}:duration=${spec.seconds}`];
+  return generateOnce(path.join(BASE_DIR, `${name}${spec.ext}`), [...input, ...spec.args]);
+}
+
 function coverBytes(color = "navy") {
-  const file = path.join(BASE_DIR, `cover-${color}.jpg`);
-  if (!fs.existsSync(file)) {
-    fs.mkdirSync(BASE_DIR, { recursive: true });
-    execFileSync(FFMPEG, ["-v", "error", "-y", "-f", "lavfi", "-i", `color=c=${color}:s=300x300`, "-frames:v", "1", file]);
-  }
+  const file = generateOnce(path.join(BASE_DIR, `cover-${color}.jpg`), ["-f", "lavfi", "-i", `color=c=${color}:s=300x300`, "-frames:v", "1"]);
   return fs.readFileSync(file);
 }
 

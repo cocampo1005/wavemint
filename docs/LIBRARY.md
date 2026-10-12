@@ -236,3 +236,51 @@ is exercised by real code.
 - Verified in the real app on synthetic iTunes + curated libraries: analysis,
   decisions, apply, undo and re-apply; 22 songs copied with curated tags; both
   source folders byte-identical throughout.
+
+### Phase 4 — Audio quality and Upgrade Track: done
+
+- Migration 4: `quality_checks` (per file version; stale when size or mtime
+  change), `tracks.quality_set_by` (auto / user / upgrade) and
+  `tracks.quality_reasons`, `upgrade_candidates`.
+- Quality signals (`quality.cjs`, `media.qualityCheck`): one FFmpeg pass per
+  file decodes the whole file (decoding errors, audio ending before the
+  stated length) and measures a 90-second window from the middle: level,
+  samples at full scale (possible clipping), and the energy above 16.5 kHz
+  relative to 12–15 kHz. A sharp drop there is reported as "almost nothing
+  above 16 kHz": for a 256+ kbps or lossless file it suggests a transcode
+  from a lower-quality source. About 0.6 s per song. Every signal is worded
+  as a hint; nothing claims one file sounds better than another.
+- Statuses: Quality unknown (not checked), Acceptable (checked, no concerns),
+  Quality review suggested, Upgrade candidate available (another version of
+  the song in the library is technically higher resolution and not damaged),
+  plus the user's own Marked poor quality, Kept in original form, Acceptable
+  and Upgraded. User statuses are never recomputed; "Let WaveMint decide"
+  hands a song back. Decisions are journaled and undoable.
+- Quality & Upgrades view: views by status with counts, search, bitrate and
+  sort filters, bulk decisions, per-song Upgrade and decisions, "Check
+  Unchecked Songs" (background job, cancellable, results stream in).
+- Upgrade Track (`upgrade.cjs`): from a chosen file (main-process dialog) or
+  another version of the song. Side-by-side comparison (file, source,
+  format, length, size, artwork, album/artist, MusicBrainz ID, quality
+  signals of both), A/B playback that keeps the position, a match verdict
+  with evidence and warnings (different version or recording, lower
+  technical resolution, damaged replacement; a strong warning needs explicit
+  confirmation), and per-field metadata choice where curated values are kept
+  by default and the replacement only fills gaps.
+- Applying copies the replacement into the WaveMint Library (pattern name,
+  its own extension/format) → SHA-256 check → chosen metadata and artwork
+  written into the copy and verified (audio stream unchanged) → a managed
+  previous file moves to `.wavemint-archive/` (other folders are never
+  touched; their file is kept as an archived version) → rename into place →
+  one transaction activates it. Failure at any step restores the files;
+  interrupted upgrades are rolled back at the next start. Undo Upgrade
+  reactivates the previous version and archives the copy. Without a WaveMint
+  Library folder, switching to another existing version only changes the
+  database; upgrading from a chosen file asks for a folder first.
+- Consolidation now reuses an earlier managed copy (e.g. after undoing a
+  copy) instead of making a "(2)" duplicate. Rescans check archived files
+  directly instead of marking them missing.
+- Verified in the real app: quality checks of 22 songs, decisions, upgrade
+  from a downloaded FLAC with A/B playback and a metadata choice, undo, and
+  "Use This Version…" from a song's versions; legacy, curated and the chosen
+  file's folder byte-identical throughout.

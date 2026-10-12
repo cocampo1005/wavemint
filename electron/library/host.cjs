@@ -173,7 +173,41 @@ const WORKER_METHODS = {
   previewNamingPattern: { pattern: v.str({ max: 300, optional: false, allowEmpty: false }) },
   previewConsolidation: { trackIds: trackIdList() },
   consolidate: { trackIds: trackIdList() },
-  updateSettings: { patch: v.obj({ namingPattern: v.str({ max: 300, allowEmpty: false }) }, { optional: false }) },
+  updateSettings: {
+    patch: v.obj(
+      { namingPattern: v.str({ max: 300, allowEmpty: false }), lowBitrateKbps: v.int({ min: 32, max: 512, optional: true }) },
+      { optional: false },
+    ),
+  },
+
+  // Audio quality and upgrades (replacement files are chosen with chooseUpgradeFile).
+  qualitySummary: {},
+  listQualityQueue: {
+    view: v.oneOf(["attention", "review_suggested", "user_marked_poor", "upgrade_available", "keep_original", "upgraded", "acceptable", "unknown", "all"]),
+    search: text(200),
+    artist: text(300),
+    genre: text(200),
+    releaseId: id({ optional: true }),
+    maxBitrate: v.int({ min: 32, max: 512, optional: true }),
+    sort: v.oneOf(["severity", "bitrate", "artist", "album", "title"]),
+    offset: v.int({ min: 0, optional: true }),
+    limit: v.int({ min: 1, max: 500, optional: true }),
+  },
+  refreshQuality: {},
+  checkQuality: { trackIds: trackIdList(), force: v.bool() },
+  setQualityStatus: {
+    trackIds: trackIdList({ optional: false }),
+    status: v.oneOf(["auto", "user_marked_poor", "keep_original", "acceptable", "upgraded"], { optional: false }),
+  },
+  prepareUpgrade: { trackId: id(), fileId: id() },
+  compareUpgrade: { candidateId: id() },
+  discardUpgrade: { candidateId: id() },
+  listUpgradeCandidates: { trackId: id() },
+  applyUpgrade: {
+    candidateId: id(),
+    choices: v.obj(Object.fromEntries(["title", "artist", "albumArtist", "album", "genre", "year", "trackNo", "trackTotal", "discNo", "discTotal", "composer"].map((field) => [field, v.oneOf(["current", "candidate"])]))),
+    artwork: v.oneOf(["current", "candidate"]),
+  },
 };
 
 function createLibraryHost({ app, ipcMain, dialog, shell, BrowserWindow, protocol, binaries, logger = console }) {
@@ -315,6 +349,18 @@ function createLibraryHost({ app, ipcMain, dialog, shell, BrowserWindow, protoco
         return call("setManagedRoot", { rootPath });
       },
     },
+    chooseUpgradeFile: {
+      schema: { trackId: id() },
+      run: async (sender, params) => {
+        const result = await dialog.showOpenDialog(BrowserWindow.fromWebContents(sender), {
+          title: "Choose the replacement audio file",
+          properties: ["openFile", "dontAddToRecent"],
+          filters: [{ name: "Audio files", extensions: ["mp3", "m4a", "flac", "wav", "aif", "aiff", "aac"] }],
+        });
+        if (result.canceled || !result.filePaths.length) return null;
+        return call("prepareUpgrade", { trackId: params.trackId, filePath: result.filePaths[0] });
+      },
+    },
     showFileInFolder: {
       schema: { fileId: id() },
       run: async (_sender, params) => {
@@ -365,13 +411,14 @@ function createLibraryHost({ app, ipcMain, dialog, shell, BrowserWindow, protoco
   }
 
   function registerProtocols() {
-    // wavemint-media://file/<fileId>
+    // wavemint-media://file/<fileId> and wavemint-media://candidate/<candidateId>
     protocol.handle(MEDIA_SCHEME, async (request) => {
       try {
         const url = new URL(request.url);
-        const fileId = Number(url.pathname.replace(/^\/+/, ""));
-        if (url.hostname !== "file" || !Number.isInteger(fileId) || fileId < 1) return new Response(null, { status: 400 });
-        const file = await call("resolvePreview", { fileId });
+        const itemId = Number(url.pathname.replace(/^\/+/, ""));
+        if (!["file", "candidate"].includes(url.hostname) || !Number.isInteger(itemId) || itemId < 1) return new Response(null, { status: 400 });
+        const file =
+          url.hostname === "file" ? await call("resolvePreview", { fileId: itemId }) : await call("resolveCandidatePreview", { candidateId: itemId });
         if (!file || !fs.existsSync(file.path)) return new Response(null, { status: 404 });
         return streamFile(file.path, request, MIME_TYPES[path.extname(file.path).toLowerCase()] || "application/octet-stream");
       } catch (error) {
@@ -426,6 +473,6 @@ function registerLibrarySchemes(protocol) {
 }
 
 // Host methods (dialogs, shell) handled in the main process itself.
-const HOST_METHOD_NAMES = ["addSourceFromDialog", "chooseManagedRoot", "relinkSource", "setArtworkFromDialog", "showFileInFolder"];
+const HOST_METHOD_NAMES = ["addSourceFromDialog", "chooseManagedRoot", "chooseUpgradeFile", "relinkSource", "setArtworkFromDialog", "showFileInFolder"];
 
 module.exports = { HOST_METHOD_NAMES, HOST_SCHEMES: [MEDIA_SCHEME, ART_SCHEME], WORKER_METHODS, createLibraryHost, registerLibrarySchemes };
