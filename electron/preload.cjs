@@ -98,6 +98,23 @@ const LIBRARY_METHODS = [
   "listImports",
   "commitImport",
   "discardImport",
+  "listPlaylists",
+  "getPlaylist",
+  "createPlaylist",
+  "updatePlaylist",
+  "deletePlaylist",
+  "addToPlaylist",
+  "removeFromPlaylist",
+  "movePlaylistTrack",
+  "exportPlaylistFile",
+  "importPlaylistFile",
+  "getExportSetup",
+  "previewExport",
+  "exportForIphone",
+  "handOffToApple",
+  "chooseExportRoot",
+  "chooseAutoAddFolder",
+  "openExportFolder",
 ];
 
 function subscribe(channel, callback) {

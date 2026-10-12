@@ -21,6 +21,8 @@ const review = require("./review.cjs");
 const { createUpgrader } = require("./upgrade.cjs");
 const { createIdentifier } = require("./identify.cjs");
 const { createImporter } = require("./importer.cjs");
+const { createExporter } = require("./exporter.cjs");
+const playlists = require("./playlists.cjs");
 const { createMusicBrainz } = require("./musicbrainz.cjs");
 const { createWebClient } = require("./webclient.cjs");
 const { readArtwork } = require("./tags.cjs");
@@ -31,6 +33,8 @@ const SETTINGS_DEFAULTS = {
   preferOriginalReleases: true,
   lowBitrateKbps: queries.LOW_BITRATE_KBPS,
   exportRoot: "",
+  convertWavAiff: true,
+  appleAutoAddFolder: "",
   musicBrainzEnabled: false,
 };
 
@@ -45,6 +49,7 @@ function createLibraryService({ db, media, jobs, paths, logger = console, appVer
   const web = createWebClient({ db, userAgent: `WaveMint/${appVersion} ( https://github.com/cocampo1005/wavemint )`, fetchImpl, logger });
   const identifier = createIdentifier({ db, mb: createMusicBrainz({ web }), artStore, getSettings, logger });
   const importer = createImporter({ db, media, artStore, upgrader, managedSource: consolidator.managedSource, getSettings, paths, logger });
+  const exporter = createExporter({ db, media, artStore, getSettings, logger });
 
   // Anything interrupted last time (crash, power loss) is finished or rolled
   // back before any new work starts.
@@ -344,6 +349,61 @@ function createLibraryService({ db, media, jobs, paths, logger = console, appVer
     // Host only: the main process saves extractions into staging.
     prepareImportStaging: (params) => importer.prepareStaging(params),
     addStagedImport: (params) => importer.addStaged(params),
+
+    // --- playlists -------------------------------------------------------------------
+    listPlaylists: () => playlists.listPlaylists(db),
+    getPlaylist: (params) => playlists.getPlaylist(db, params),
+    createPlaylist: (params) => playlists.createPlaylist(db, params),
+    updatePlaylist: (params) => playlists.updatePlaylist(db, params),
+    deletePlaylist: (params) => playlists.deletePlaylist(db, params),
+    addToPlaylist: (params) => playlists.addTracks(db, params),
+    removeFromPlaylist: (params) => playlists.removeTracks(db, params),
+    movePlaylistTrack: (params) => playlists.moveTrack(db, params),
+    // Host only (paths from main-process dialogs).
+    exportPlaylistM3U8: (params) => playlists.exportM3U8(db, params),
+    importPlaylistM3U: (params) => playlists.importM3U(db, params),
+
+    // --- Prepare for iPhone ------------------------------------------------------------
+    getExportSetup: () => {
+      const settings = getSettings();
+      const detected = exporter.findAutoAddFolders();
+      const autoAdd = [...new Set([settings.appleAutoAddFolder, ...detected].filter(Boolean))];
+      return { root: settings.exportRoot || "", convertWavAiff: settings.convertWavAiff !== false, autoAddFolders: autoAdd, last: exporter.lastExport({ root: settings.exportRoot || null }) };
+    },
+    previewExport: ({ scope }) => exporter.preview({ root: getSettings().exportRoot, scope, options: { convertWavAiff: getSettings().convertWavAiff !== false } }),
+    exportForIphone: ({ scope, allPlaylists }) => {
+      const settings = getSettings();
+      exporter.checkRoot(settings.exportRoot);
+      return jobs.start("export", "Preparing songs for iPhone", ({ signal, progress }) =>
+        exporter.exportJob({
+          root: settings.exportRoot,
+          scope,
+          options: { convertWavAiff: settings.convertWavAiff !== false, playlists: allPlaylists ? "all" : "selected" },
+          signal,
+          progress,
+        }),
+      );
+    },
+    handOffToApple: ({ exportId, folder }) => {
+      // Only Apple's own folders that WaveMint found or the user chose.
+      const settings = getSettings();
+      const allowed = [settings.appleAutoAddFolder, ...exporter.findAutoAddFolders()].filter(Boolean).map((item) => path.resolve(item).toLowerCase());
+      if (!allowed.includes(path.resolve(String(folder || "")).toLowerCase())) throw new Error("Choose Apple's Automatically Add folder first.");
+      return exporter.handOff({ exportId, folder });
+    },
+    // Host only.
+    setExportRoot: ({ rootPath }) => {
+      const root = exporter.checkRoot(rootPath);
+      setSetting(db, "library", { ...getSettings(), exportRoot: root });
+      return { root };
+    },
+    setAutoAddFolder: ({ folder }) => {
+      if (!/^Automatically Add to (?:iTunes|Music|Apple Music)$/i.test(path.basename(folder))) {
+        throw new Error('That isn\'t an "Automatically Add to iTunes/Music" folder.');
+      }
+      setSetting(db, "library", { ...getSettings(), appleAutoAddFolder: path.resolve(folder) });
+      return { folder: path.resolve(folder) };
+    },
 
     // --- genres ------------------------------------------------------------------
     listGenreTaxonomy: () => genres.listTaxonomy(db),

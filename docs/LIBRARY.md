@@ -378,3 +378,56 @@ is exercised by real code.
 - Verified in the real app with a real YouTube playlist: import as new (album
   details and cover in the copied file), re-import matched as "In library"
   and kept, and Extract to Folder plus Open All in iTunes still working.
+
+### Phase 7 — Playlists and Prepare for iPhone: done
+
+- Migration 7: `playlists`, `playlist_tracks` (logical song IDs, order),
+  `export_state` (per export folder and song: path, file and metadata
+  signatures, format) and `exports` (reports).
+- Playlists (`playlists.cjs`): manual playlists (add from the song panel or
+  the selection toolbar, reorder, remove, name and description) and smart
+  playlists (all/any of genre, artist, album, year, quality status, date
+  added, open review issues, rating, format/lossless, source; sort and
+  limit), compiled from an allowlist only. Entries survive upgrades (the
+  song's ID doesn't change) and follow merges via `merged_into`.
+- M3U8: export (UTF-8, CRLF, `#EXTINF`, absolute or relative paths) through
+  a save dialog; import of M3U8/M3U (UTF-8, falling back to the Windows code
+  page for old .m3u) matching by file path, then by artist and title, with a
+  list of songs not found.
+- Prepare for iPhone (`exporter.cjs`): a stable export folder (it may not
+  overlap a library source). MP3, AAC and Apple Lossless are copied as they
+  are; FLAC is converted to Apple Lossless (lossless, required by Apple's
+  apps); WAV/AIFF optionally (default on, so tags and artwork travel). Never
+  lossy to lossy. Each copy gets the curated tags and artwork (audio stream
+  verified). A song keeps its path across exports; unchanged songs are
+  skipped; changed details are refreshed in place; a new file (e.g. an
+  upgrade to another format) gets a new name and the old file is set aside in
+  `.replaced/` (never deleted); songs no longer selected are reported and
+  left. Writes `wavemint-export.json` (manifest), `WaveMint Export
+  Report.txt` (what to add, replace or refresh in Apple Music) and M3U8
+  playlists. Scope: whole library, playlists or genres (albums and songs in
+  the API).
+- Hand-off: "Send to Apple Music" copies the new and changed files into
+  Apple's "Automatically Add to iTunes" / "…to Music" folder (detected under
+  the user's Music folder and next to library sources, or chosen in a
+  dialog; only those folders are accepted). Apple's app imports them itself.
+
+#### Apple Music / iPhone workflow (documented, partly unverified)
+
+- WaveMint never writes to the iPhone or to Apple's library database.
+- Supported path: files → Apple Music (Windows app) or iTunes → iPhone sync
+  with the Apple Devices app (or iTunes). Importing is done by Apple's app:
+  its "Automatically Add" folder, adding files/folders from its File menu,
+  or (iTunes) importing M3U/M3U8 playlists.
+- Apple's app keeps its own copy of song details (and, with "copy files to
+  the media folder" on, its own copy of the file), so replacing a file or
+  changing tags in the export folder does not update a song it already has.
+  The report lists those songs: delete and re-add replaced songs; edit or
+  re-add songs whose details changed.
+- Not verified on this PC: the exact menu names in the current Apple Music
+  for Windows app and whether it imports M3U8 playlists; the guidance in the
+  app says so.
+- Verified in the real app: playlists (manual, smart, M3U8 round trip),
+  export of 8 songs with a FLAC→ALAC conversion carrying tags and cover, a
+  second run with nothing to write, and the hand-off into a stand-in
+  "Automatically Add to iTunes" folder.

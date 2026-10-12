@@ -91,6 +91,23 @@ function createMedia({ ffmpegPath, ffprobePath, cacheDir, env = process.env }) {
   }
 
   /**
+   * Lossless conversion to Apple Lossless (.m4a) for formats Apple's apps
+   * can't use (FLAC) or can't carry tags in (WAV). Audio only; WaveMint
+   * writes the tags and artwork afterwards.
+   */
+  async function convertToAlac(input, output, { signal } = {}) {
+    const result = await runCommand(
+      ffmpegPath,
+      ["-v", "error", "-y", "-i", input, "-map", "0:a:0", "-map_metadata", "-1", "-c:a", "alac", "-f", "ipod", output],
+      { label: "FFmpeg", env, timeoutMs: 900000, signal },
+    );
+    if (result.code !== 0 || !fs.existsSync(output)) {
+      throw new Error(`The conversion to Apple Lossless failed${result.stderr ? `: ${String(result.stderr).trim().split(/\r?\n/).pop()}` : ""}`);
+    }
+    return output;
+  }
+
+  /**
    * Diagnostic signals for one file in a single FFmpeg pass: the whole file
    * is decoded (decoding errors), and a window of up to 90 s from the middle
    * is measured for level, samples at full scale, and the energy above
@@ -228,7 +245,7 @@ function createMedia({ ffmpegPath, ffprobePath, cacheDir, env = process.env }) {
     return inFlight.get(key);
   }
 
-  return { audioStreamHash, decodeCheck, previewFile, probe, qualityCheck, thumbnail };
+  return { audioStreamHash, convertToAlac, decodeCheck, previewFile, probe, qualityCheck, thumbnail };
 }
 
 module.exports = { THUMB_SIZES, createMedia };

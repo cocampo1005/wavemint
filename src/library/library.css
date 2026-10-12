@@ -2688,3 +2688,253 @@
   min-height: 18px;
   white-space: normal;
 }
+
+/* --- Playlists ------------------------------------------------------------------ */
+
+.lib-playlists__new {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--wm-space-1);
+  margin-bottom: var(--wm-space-3);
+}
+
+.lib-playlist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wm-space-3);
+}
+
+.lib-playlist__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--wm-space-3);
+}
+
+.lib-playlist__head > svg {
+  flex: none;
+  margin-top: 4px;
+  color: var(--wm-cyan);
+}
+
+.lib-playlist__title {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+}
+
+.lib-playlist__name,
+.lib-playlist__description {
+  border: 1px solid transparent;
+  border-radius: var(--wm-radius-sm);
+  background: transparent;
+  color: var(--wm-text);
+  padding: 2px 6px;
+  margin-left: -6px;
+  font: inherit;
+}
+
+.lib-playlist__name {
+  font-size: var(--wm-text-xl);
+  font-weight: 700;
+}
+
+.lib-playlist__description {
+  color: var(--wm-text-muted);
+  font-size: var(--wm-text-sm);
+}
+
+.lib-playlist__name:hover,
+.lib-playlist__description:hover,
+.lib-playlist__name:focus,
+.lib-playlist__description:focus {
+  border-color: var(--wm-border-subtle);
+  outline: none;
+}
+
+.lib-playlist__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--wm-space-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.lib-playlist__rules {
+  padding: var(--wm-space-4);
+}
+
+.lib-playlist__tracks {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--wm-border-subtle);
+  border-radius: var(--wm-radius-lg);
+  overflow: hidden;
+}
+
+.lib-playlist__row {
+  display: flex;
+  align-items: center;
+  gap: var(--wm-space-3);
+  padding: 6px var(--wm-space-3);
+}
+
+.lib-playlist__row + .lib-playlist__row {
+  border-top: 1px solid var(--wm-border-subtle);
+}
+
+.lib-playlist__row .lib-play {
+  opacity: 1;
+  flex: none;
+}
+
+.lib-playlist__pos {
+  width: 24px;
+  flex: none;
+  color: var(--wm-text-subtle);
+  font-size: var(--wm-text-xs);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.lib-playlist__art {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border-radius: var(--wm-radius-sm);
+  object-fit: cover;
+}
+
+.lib-playlist__text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.lib-playlist__text > * {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lib-playlist__text > span {
+  color: var(--wm-text-muted);
+  font-size: var(--wm-text-xs);
+}
+
+.lib-playlist__time {
+  flex: none;
+  color: var(--wm-text-muted);
+  font-size: var(--wm-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.lib-playlist__edit {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+
+.lib-smart {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wm-space-2);
+}
+
+.lib-smart__head,
+.lib-smart__rule,
+.lib-smart__foot,
+.lib-smart__inline {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--wm-space-2);
+  font-size: var(--wm-text-sm);
+}
+
+.lib-smart .field {
+  width: auto;
+  min-width: 120px;
+}
+
+.lib-smart__inline .field {
+  min-width: 80px;
+  width: 90px;
+}
+
+.lib-add-playlist {
+  width: auto;
+  max-width: 220px;
+}
+
+.lib-detail .lib-add-playlist {
+  margin-bottom: var(--wm-space-3);
+}
+
+/* --- Prepare for iPhone ---------------------------------------------------------- */
+
+.lib-iphone {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wm-space-4);
+}
+
+.lib-iphone .panel {
+  padding: var(--wm-space-4) var(--wm-space-5);
+}
+
+.lib-iphone__picks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--wm-space-1) var(--wm-space-3);
+  margin-bottom: var(--wm-space-3);
+}
+
+.lib-iphone__items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: var(--wm-space-3);
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.lib-iphone__item {
+  display: flex;
+  align-items: center;
+  gap: var(--wm-space-2);
+  font-size: var(--wm-text-sm);
+}
+
+.lib-iphone__item-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lib-iphone__handoff {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.lib-iphone__handoff .field {
+  width: auto;
+  max-width: 360px;
+}
+
+.lib-iphone__guide ol {
+  margin: var(--wm-space-2) 0;
+  padding-left: var(--wm-space-5);
+  color: var(--wm-text-muted);
+  font-size: var(--wm-text-sm);
+  line-height: 1.6;
+}

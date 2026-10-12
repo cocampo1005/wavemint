@@ -24,6 +24,7 @@ const KIND_LABEL = {
   consolidate: "Files",
   upgrade: "Upgrade",
   quality: "Quality",
+  import: "Import",
 };
 
 const STEP_LABEL = { consolidate: "Copy", upgrade: "Upgrade", "write-tags": "Write tags", "restore-tags": "Restore" };

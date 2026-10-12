@@ -106,6 +106,25 @@ const importEntries = v.array(
   ),
   { max: 1000 },
 );
+const smartRules = v.obj({
+  match: v.oneOf(["all", "any"]),
+  conditions: v.array(
+    v.obj({ field: v.str({ max: 20, optional: false }), op: v.str({ max: 20, optional: false }), value: v.any() }, { optional: false }),
+    { max: 20, optional: false },
+  ),
+  limit: v.int({ min: 1, max: 10000, optional: true }),
+  sort: v.oneOf(["artist", "album", "title", "year", "recent", "rating"]),
+});
+const exportScope = v.obj(
+  {
+    all: v.bool(),
+    trackIds: trackIdList(),
+    playlistIds: v.array(id(), { max: 500 }),
+    genres: v.array(text(200), { max: 200 }),
+    releaseIds: v.array(id(), { max: 5000 }),
+  },
+  { optional: false },
+);
 const reviewKinds = v.oneOf(["missing_album", "missing_artist", "missing_album_artist", "unclassified_genre", "missing_artwork", "track_numbering", "inconsistent_album", "similar_albums", "file_problem", "possible_duplicate", "uncertain_match"]);
 
 /** Renderer-callable worker methods and their parameter schemas. */
@@ -194,6 +213,7 @@ const WORKER_METHODS = {
         lowBitrateKbps: v.int({ min: 32, max: 512, optional: true }),
         musicBrainzEnabled: v.bool(),
         preferOriginalReleases: v.bool(),
+        convertWavAiff: v.bool(),
       },
       { optional: false },
     ),
@@ -274,6 +294,28 @@ const WORKER_METHODS = {
     decisions: v.array(v.obj({ itemId: id(), decision: v.oneOf(["add", "upgrade", "keep_existing", "keep_both", "skip"], { optional: false }) }, { optional: false }), { max: 1000, optional: false }),
   },
   discardImport: { sessionId: id() },
+
+  // Playlists.
+  listPlaylists: {},
+  getPlaylist: { id: id() },
+  createPlaylist: {
+    name: v.str({ max: 120, optional: false }),
+    description: text(1000),
+    kind: v.oneOf(["manual", "smart"]),
+    rules: smartRules,
+    trackIds: trackIdList(),
+  },
+  updatePlaylist: { id: id(), name: text(120), description: text(1000), rules: smartRules },
+  deletePlaylist: { id: id() },
+  addToPlaylist: { id: id(), trackIds: trackIdList({ optional: false }) },
+  removeFromPlaylist: { id: id(), trackIds: trackIdList({ optional: false }) },
+  movePlaylistTrack: { id: id(), trackId: id(), toPosition: v.int({ min: 1, max: 100000 }) },
+
+  // Prepare for iPhone (folders come from dialogs or WaveMint's own detection).
+  getExportSetup: {},
+  previewExport: { scope: exportScope },
+  exportForIphone: { scope: exportScope, allPlaylists: v.bool() },
+  handOffToApple: { exportId: id(), folder: v.str({ max: 1000, optional: false }) },
 
   applyUpgrade: {
     candidateId: id(),
@@ -434,6 +476,56 @@ function createLibraryHost({ app, ipcMain, dialog, shell, BrowserWindow, protoco
         return call("prepareUpgrade", { trackId: params.trackId, filePath: result.filePaths[0] });
       },
     },
+    chooseExportRoot: {
+      schema: {},
+      run: async (sender) => {
+        const rootPath = await chooseFolder(sender, "Choose a folder for songs prepared for iPhone");
+        return rootPath ? call("setExportRoot", { rootPath }) : null;
+      },
+    },
+    chooseAutoAddFolder: {
+      schema: {},
+      run: async (sender) => {
+        const folder = await chooseFolder(sender, 'Choose Apple\'s "Automatically Add to iTunes" (or "to Music") folder');
+        return folder ? call("setAutoAddFolder", { folder }) : null;
+      },
+    },
+    openExportFolder: {
+      schema: { report: v.bool() },
+      run: async (_sender, params) => {
+        const setup = await call("getExportSetup", {});
+        if (!setup.root || !fs.existsSync(setup.root)) throw new Error("The export folder isn't available.");
+        const target = params.report ? path.join(setup.root, "WaveMint Export Report.txt") : setup.root;
+        const problem = await shell.openPath(target);
+        if (problem) throw new Error(problem);
+        return { opened: true };
+      },
+    },
+    exportPlaylistFile: {
+      schema: { id: id(), relative: v.bool() },
+      run: async (sender, params) => {
+        const playlist = await call("getPlaylist", { id: params.id });
+        const result = await dialog.showSaveDialog(BrowserWindow.fromWebContents(sender), {
+          title: "Export playlist",
+          defaultPath: `${playlist.name.replace(/[<>:"/\\|?*]/g, " ").trim() || "Playlist"}.m3u8`,
+          filters: [{ name: "M3U8 playlist", extensions: ["m3u8"] }],
+        });
+        if (result.canceled || !result.filePath) return null;
+        return call("exportPlaylistM3U8", { id: params.id, filePath: result.filePath, relative: !!params.relative });
+      },
+    },
+    importPlaylistFile: {
+      schema: {},
+      run: async (sender) => {
+        const result = await dialog.showOpenDialog(BrowserWindow.fromWebContents(sender), {
+          title: "Import a playlist",
+          properties: ["openFile", "dontAddToRecent"],
+          filters: [{ name: "Playlists", extensions: ["m3u8", "m3u"] }],
+        });
+        if (result.canceled || !result.filePaths.length) return null;
+        return call("importPlaylistM3U", { filePath: result.filePaths[0] });
+      },
+    },
     showFileInFolder: {
       schema: { fileId: id() },
       run: async (_sender, params) => {
@@ -546,6 +638,18 @@ function registerLibrarySchemes(protocol) {
 }
 
 // Host methods (dialogs, shell) handled in the main process itself.
-const HOST_METHOD_NAMES = ["addSourceFromDialog", "chooseManagedRoot", "chooseUpgradeFile", "relinkSource", "setArtworkFromDialog", "showFileInFolder"];
+const HOST_METHOD_NAMES = [
+  "addSourceFromDialog",
+  "chooseAutoAddFolder",
+  "chooseExportRoot",
+  "chooseManagedRoot",
+  "chooseUpgradeFile",
+  "exportPlaylistFile",
+  "importPlaylistFile",
+  "openExportFolder",
+  "relinkSource",
+  "setArtworkFromDialog",
+  "showFileInFolder",
+];
 
 module.exports = { HOST_METHOD_NAMES, HOST_SCHEMES: [MEDIA_SCHEME, ART_SCHEME], WORKER_METHODS, createLibraryHost, registerLibrarySchemes };

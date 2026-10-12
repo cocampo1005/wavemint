@@ -5,6 +5,8 @@ import { AlbumEditor, WriteTagsDialog } from "./Editors";
 import { pluralize } from "./format";
 import { GenreManager } from "./GenreManager";
 import { HistoryView } from "./HistoryView";
+import { IphoneView } from "./IphoneView";
+import { AddToPlaylist, PlaylistsView } from "./PlaylistsView";
 import { IdentifyDialog } from "./IdentifyDialog";
 import { IdentifyView } from "./IdentifyView";
 import {
@@ -16,6 +18,8 @@ import {
   HistoryIcon,
   MergeIcon,
   OverviewIcon,
+  PhoneIcon,
+  PlaylistIcon,
   QualityIcon,
   ReviewIcon,
   SearchIcon,
@@ -45,6 +49,7 @@ const NAV_GROUPS = [
       { id: "albums", label: "Albums", Icon: AlbumIcon },
       { id: "artists", label: "Artists", Icon: ArtistIcon },
       { id: "genres", label: "Genres", Icon: GenreIcon },
+      { id: "playlists", label: "Playlists", Icon: PlaylistIcon },
     ],
   },
   {
@@ -61,6 +66,7 @@ const NAV_GROUPS = [
     items: [
       { id: "sources", label: "Sources", Icon: SourceIcon },
       { id: "managed", label: "WaveMint Library", Icon: FolderOpenIcon },
+      { id: "iphone", label: "Prepare for iPhone", Icon: PhoneIcon },
       { id: "history", label: "History", Icon: HistoryIcon },
     ],
   },
@@ -77,6 +83,8 @@ const TITLES = {
   quality: "Quality & Upgrades",
   identify: "Identify",
   managed: "WaveMint Library",
+  playlists: "Playlists",
+  iphone: "Prepare for iPhone",
   sources: "Library sources",
   history: "History",
   album: "Album",
@@ -90,6 +98,8 @@ const JOB_LABELS = {
   "quality-check": "quality-check",
   upgrade: "upgrade",
   identify: "identify",
+  import: "import",
+  export: "export",
 };
 
 export function LibraryView() {
@@ -140,6 +150,8 @@ export function LibraryView() {
     onWriteTags: (trackIds) => setWriteTags({ trackIds }),
     onUpgrade: (trackId, start = null) => setUpgrade({ trackId, start }),
     onIdentify: (trackId) => setIdentify(trackId),
+    toolbarExtra: ({ selection }) =>
+      selection.size > 0 ? <AddToPlaylist trackIds={[...selection]} onDone={() => bump()} onError={setError} /> : null,
   };
 
   const { view, scope } = route;
@@ -224,6 +236,10 @@ export function LibraryView() {
         onError={setError}
       />
     );
+  } else if (view === "playlists") {
+    content = <PlaylistsView revision={revision} playing={playing} onPlay={(row) => play(row)} onOpenTrack={openTrack} onChanged={bump} onError={setError} />;
+  } else if (view === "iphone") {
+    content = <IphoneView revision={revision} exporting={running.some((job) => job.kind === "export")} onChanged={bump} onError={setError} />;
   } else if (view === "managed") {
     content = <ManagedView revision={revision} busy={busy} lastJob={lastJob("consolidate")} onChanged={bump} onError={setError} />;
   } else if (view === "history") {

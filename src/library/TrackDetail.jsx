@@ -1,6 +1,7 @@
 import { artworkUrl, formatBytes, formatDate, formatDuration, formatQuality } from "./format";
 import { CloseIcon, FolderOpenIcon, PauseIcon, PlayIcon, UpgradeIcon, WarningIcon } from "./icons";
 import { TrackEditor } from "./Editors";
+import { AddToPlaylist } from "./PlaylistsView";
 import { errorMessage, libraryApi, useLoader } from "./useLibrary";
 
 const ROLE_LABELS = { legacy: "Legacy", curated: "Curated", managed: "Managed", other: "Library" };
@@ -180,6 +181,7 @@ export function TrackDetail({ trackId, revision, playing, onPlayFile, onClose, o
             )}
           </div>
           <QualitySection track={track} onUpgrade={onUpgrade} onChanged={onChanged} onError={onError} />
+          <AddToPlaylist trackIds={[track.id]} onDone={onChanged} onError={onError} />
           <TrackEditor track={track} onChanged={onChanged} onError={onError} onWriteTags={onWriteTags} />
 
           <span className="section-label lib-detail__section">

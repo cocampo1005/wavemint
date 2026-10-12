@@ -428,6 +428,56 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 7,
+    name: "playlists and iPhone export state",
+    up(db) {
+      db.exec(`
+        CREATE TABLE playlists (
+          id          INTEGER PRIMARY KEY,
+          name        TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          kind        TEXT NOT NULL CHECK (kind IN ('manual', 'smart')),
+          rules       TEXT,
+          created_at  TEXT NOT NULL,
+          updated_at  TEXT NOT NULL
+        );
+
+        -- Entries reference logical songs, never files: an upgraded song
+        -- keeps its place, a merged one is followed to the song it joined.
+        CREATE TABLE playlist_tracks (
+          playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+          track_id    INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+          position    INTEGER NOT NULL,
+          added_at    TEXT NOT NULL,
+          PRIMARY KEY (playlist_id, track_id)
+        );
+        CREATE INDEX playlist_tracks_order ON playlist_tracks(playlist_id, position);
+
+        -- What was last exported for each song to an export folder, so
+        -- unchanged songs aren't copied again and changes can be reported.
+        CREATE TABLE export_state (
+          root_key     TEXT NOT NULL,
+          track_id     INTEGER NOT NULL,
+          rel_path     TEXT NOT NULL,
+          file_id      INTEGER,
+          file_sig     TEXT NOT NULL,
+          meta_sig     TEXT NOT NULL,
+          format       TEXT NOT NULL,
+          exported_at  TEXT NOT NULL,
+          PRIMARY KEY (root_key, track_id)
+        );
+
+        CREATE TABLE exports (
+          id           INTEGER PRIMARY KEY,
+          root_path    TEXT NOT NULL,
+          created_at   TEXT NOT NULL,
+          status       TEXT NOT NULL,
+          report       TEXT
+        );
+      `);
+    },
+  },
 ];
 
 module.exports = { MIGRATIONS };
