@@ -92,6 +92,12 @@ const LIBRARY_METHODS = [
   "identifyAlbumCandidates",
   "identifyAlbumProposal",
   "applyAlbumIdentification",
+  "startImport",
+  "updateImport",
+  "getImport",
+  "listImports",
+  "commitImport",
+  "discardImport",
 ];
 
 function subscribe(channel, callback) {

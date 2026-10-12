@@ -20,6 +20,7 @@ const quality = require("./quality.cjs");
 const review = require("./review.cjs");
 const { createUpgrader } = require("./upgrade.cjs");
 const { createIdentifier } = require("./identify.cjs");
+const { createImporter } = require("./importer.cjs");
 const { createMusicBrainz } = require("./musicbrainz.cjs");
 const { createWebClient } = require("./webclient.cjs");
 const { readArtwork } = require("./tags.cjs");
@@ -43,10 +44,11 @@ function createLibraryService({ db, media, jobs, paths, logger = console, appVer
   // MusicBrainz asks every application to identify itself with a contact URL.
   const web = createWebClient({ db, userAgent: `WaveMint/${appVersion} ( https://github.com/cocampo1005/wavemint )`, fetchImpl, logger });
   const identifier = createIdentifier({ db, mb: createMusicBrainz({ web }), artStore, getSettings, logger });
+  const importer = createImporter({ db, media, artStore, upgrader, managedSource: consolidator.managedSource, getSettings, paths, logger });
 
   // Anything interrupted last time (crash, power loss) is finished or rolled
   // back before any new work starts.
-  const recovered = [...fileOps.recover(), ...consolidator.recover(), ...upgrader.recover()];
+  const recovered = [...fileOps.recover(), ...consolidator.recover(), ...upgrader.recover(), ...importer.recover()];
   if (recovered.length) logger.warn(`[library] Recovered ${recovered.length} interrupted file step(s)`);
 
   // Online lookups only happen after the user turned them on.
@@ -180,6 +182,11 @@ function createLibraryService({ db, media, jobs, paths, logger = console, appVer
         return result;
       }
       if (operation.kind === "upgrade") return upgrader.undoUpgrade(id);
+      if (operation.kind === "import") {
+        const result = importer.undoImport(id);
+        review.refreshReview(db);
+        return result;
+      }
       if (operation.kind === "quality") {
         const result = edits.undoMetadataOperation(db, id);
         refreshQuality();
@@ -320,6 +327,23 @@ function createLibraryService({ db, media, jobs, paths, logger = console, appVer
       review.refreshReview(db);
       return result;
     },
+
+    // --- playlist import ------------------------------------------------------------
+    startImport: (params) => importer.startSession(params),
+    updateImport: (params) => importer.updateSession(params),
+    getImport: ({ sessionId }) => importer.view(sessionId),
+    listImports: () => importer.listSessions(),
+    commitImport: ({ sessionId, decisions }) =>
+      jobs.start("import", "Importing into the WaveMint Library", async ({ signal, progress }) => {
+        const report = await importer.commitJob({ sessionId, decisions, signal, progress });
+        review.refreshReview(db);
+        refreshQuality();
+        return report;
+      }),
+    discardImport: (params) => importer.discard(params),
+    // Host only: the main process saves extractions into staging.
+    prepareImportStaging: (params) => importer.prepareStaging(params),
+    addStagedImport: (params) => importer.addStaged(params),
 
     // --- genres ------------------------------------------------------------------
     listGenreTaxonomy: () => genres.listTaxonomy(db),

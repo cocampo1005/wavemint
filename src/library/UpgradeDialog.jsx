@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Dialog } from "./Dialog";
 import { artworkUrl, formatBytes, formatDuration } from "./format";
 import { CheckIcon, FolderOpenIcon, PauseIcon, PlayIcon, UpgradeIcon, WarningIcon } from "./icons";
-import { errorMessage, libraryApi, useLibraryEvent } from "./useLibrary";
+import { errorMessage, libraryApi, useJobRunner } from "./useLibrary";
 
 const FIELD_FORMAT = (value) => (value === null || value === undefined || value === "" ? "—" : String(value));
 
@@ -152,26 +152,25 @@ export function UpgradeDialog({ trackId, start = null, candidateId: initialCandi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useLibraryEvent(({ name, data }) => {
-    if (name !== "job" || data.id !== jobId || data.status === "running") return;
-    if (data.status === "completed") {
-      setResult(data.result);
-      onDone?.();
-    } else {
-      setError(data.error || "The upgrade didn't complete; the current version is unchanged.");
-    }
-    setJobId(null);
-  });
+  const runJob = useJobRunner();
 
   const chooseFile = () => load(() => libraryApi.chooseUpgradeFile({ trackId }));
 
   const apply = async () => {
     setError("");
     try {
-      const job = await libraryApi.applyUpgrade({ candidateId: comparison.candidateId, choices, artwork });
-      setJobId(job.id);
+      setJobId(true);
+      const job = await runJob(libraryApi.applyUpgrade({ candidateId: comparison.candidateId, choices, artwork }));
+      if (job.status === "completed") {
+        setResult(job.result);
+        onDone?.();
+      } else {
+        setError(job.error || "The upgrade didn't complete; the current version is unchanged.");
+      }
     } catch (err) {
       setError(errorMessage(err));
+    } finally {
+      setJobId(null);
     }
   };
 

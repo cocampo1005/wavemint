@@ -344,3 +344,37 @@ is exercised by real code.
   the user's own API key in settings, and use the existing `acoustid` column
   and the `acoustid` identification method. Fingerprinting costs about one
   decode per song (≈ 0.2–0.5 s).
+
+### Phase 6 — Smart playlist and album import: done
+
+- Migration 6: `import_sessions` (playlist, album fields, report, operation)
+  and `import_items` (entry, pre-download match, action, staged file and its
+  checks, upgrade candidate, outcome).
+- Extract view: an analyzed playlist offers **Extract to Folder** (unchanged:
+  output folder, batch selection, metadata fields, artwork options, progress,
+  Open All in iTunes) or **Import into WaveMint Library**.
+- Before anything is downloaded, every entry is matched against the library
+  (title/artist/length scoring) and shows a Library Match indicator (New /
+  Possibly in library / In library, with the existing copy's album and
+  format). Actions: Add New Track, Compare & Upgrade, Keep Existing, Keep
+  Both, Skip. Nothing is said about audio quality before the file exists.
+- Album details for the import: album title, album artist, year, genre (for
+  songs without one), edition, numbering in playlist order, and one cover for
+  all (from a chosen entry) or each song's own. They apply to every new song
+  except ones deliberately given a different album.
+- Staged extraction: in import mode `download-mp3` saves the finished MP3 in
+  the session's private staging folder (`<userData>/library/staging/imports`,
+  chosen by the library, never by the renderer) and the main process hands it
+  to the worker, which checks it (decoding, truncation, real tags), compares
+  it with the library again, and prepares an upgrade candidate when the song
+  already exists (side-by-side compare with A/B available).
+- Review: per song the checked file, comparison and signals; owned songs need
+  an explicit choice (Upgrade my copy / Keep my copy / Keep both / Skip).
+  Committing copies new songs into the WaveMint Library (verified copy, album
+  details written in, registered), runs approved upgrades through Upgrade
+  Track (curated metadata kept), removes the staging folder and reports e.g.
+  "9 tracks added, 1 upgraded, 0 skipped". Undo Import removes the added
+  songs and archives their files; upgrades undo separately.
+- Verified in the real app with a real YouTube playlist: import as new (album
+  details and cover in the copied file), re-import matched as "In library"
+  and kept, and Extract to Folder plus Open All in iTunes still working.

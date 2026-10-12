@@ -1389,7 +1389,8 @@ function createPostProcessingError(message, error, url) {
 }
 
 ipcMain.handle("download-mp3", async (event, payload) => {
-  const { url, outputFolder, metadata, thumbnail, artwork } = payload || {};
+  const { url, metadata, thumbnail, artwork, importSessionId, importEntryKey } = payload || {};
+  let { outputFolder } = payload || {};
 
   extraction.assertAvailable();
 
@@ -1397,12 +1398,24 @@ ipcMain.handle("download-mp3", async (event, payload) => {
     throw new Error("No URL provided for download");
   }
 
-  if (!outputFolder || !outputFolder.trim()) {
-    throw new Error("No output folder selected");
-  }
+  // Library import: the finished MP3 goes to the import's private staging
+  // folder (decided by the library, never by the renderer) and is handed
+  // to the library for checking. Otherwise the chosen output folder.
+  const libraryImport = importSessionId !== undefined && importSessionId !== null;
+  if (libraryImport) {
+    const staging = await libraryHost.call("prepareImportStaging", {
+      sessionId: Number(importSessionId),
+      entryKey: String(importEntryKey || ""),
+    });
+    outputFolder = staging.folder;
+  } else {
+    if (!outputFolder || !outputFolder.trim()) {
+      throw new Error("No output folder selected");
+    }
 
-  if (!approvedOutputFolders.has(normalizeApprovedPath(outputFolder))) {
-    throw new Error("Choose the output folder again before extracting");
+    if (!approvedOutputFolders.has(normalizeApprovedPath(outputFolder))) {
+      throw new Error("Choose the output folder again before extracting");
+    }
   }
 
   if (
@@ -1562,6 +1575,17 @@ ipcMain.handle("download-mp3", async (event, payload) => {
         saveError,
         url,
       );
+    }
+
+    if (libraryImport) {
+      sendProgress({ phase: "checking", title: finalMetadata.title || progressTitle });
+      const staged = await libraryHost.call("addStagedImport", {
+        sessionId: Number(importSessionId),
+        entryKey: String(importEntryKey || ""),
+        filePath: finalOutputPath,
+      });
+      sendProgress({ phase: "complete", title: finalMetadata.title || progressTitle });
+      return { success: true, staged, metadata: finalMetadata, artworkMode, autoImported: false };
     }
 
     producedFiles.add(normalizeApprovedPath(finalOutputPath));

@@ -387,6 +387,47 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 6,
+    name: "playlist import: sessions and staged items",
+    up(db) {
+      db.exec(`
+        -- A YouTube playlist being imported into the library. Files are
+        -- extracted into a private staging folder and only reach the
+        -- WaveMint Library when the import is committed.
+        CREATE TABLE import_sessions (
+          id           INTEGER PRIMARY KEY,
+          status       TEXT NOT NULL CHECK (status IN ('open', 'committed', 'discarded')),
+          title        TEXT,
+          source_url   TEXT,
+          album_fields TEXT,
+          report       TEXT,
+          operation_id INTEGER REFERENCES operations(id) ON DELETE SET NULL,
+          created_at   TEXT NOT NULL,
+          committed_at TEXT
+        );
+
+        CREATE TABLE import_items (
+          id           INTEGER PRIMARY KEY,
+          session_id   INTEGER NOT NULL REFERENCES import_sessions(id) ON DELETE CASCADE,
+          entry_key    TEXT NOT NULL,
+          position     INTEGER NOT NULL,
+          entry        TEXT NOT NULL,
+          match        TEXT,
+          action       TEXT NOT NULL CHECK (action IN ('add', 'compare', 'keep_existing', 'keep_both', 'skip')),
+          status       TEXT NOT NULL DEFAULT 'pending'
+                       CHECK (status IN ('pending', 'staged', 'failed', 'committed', 'skipped')),
+          staged_path  TEXT,
+          staged_info  TEXT,
+          candidate_id INTEGER REFERENCES upgrade_candidates(id) ON DELETE SET NULL,
+          result_track_id INTEGER REFERENCES tracks(id) ON DELETE SET NULL,
+          outcome      TEXT,
+          error        TEXT,
+          UNIQUE (session_id, entry_key)
+        );
+      `);
+    },
+  },
 ];
 
 module.exports = { MIGRATIONS };

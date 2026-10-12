@@ -101,7 +101,7 @@ function createUpgrader({ db, media, artStore, managedSource, getSettings, logge
   }
 
   /** Adds a replacement for a song: a file chosen by the user, or another version. */
-  async function prepare({ trackId, filePath = null, fileId = null }) {
+  async function prepare({ trackId, filePath = null, fileId = null, kind: requestedKind = null }) {
     const track = trackRow(trackId);
     let kind = "file";
     let candidatePath = filePath;
@@ -132,6 +132,7 @@ function createUpgrader({ db, media, artStore, managedSource, getSettings, logge
       }
     }
 
+    if (kind === "file" && requestedKind === "extraction") kind = "extraction";
     const info = await describeReplacement(candidatePath);
     try {
       info.check = await media.qualityCheck(candidatePath, { durationMs: info.tags.durationMs, sampleRate: info.tags.sampleRate });
@@ -284,7 +285,7 @@ function createUpgrader({ db, media, artStore, managedSource, getSettings, logge
       candidate: {
         fileName: candidate.info.fileName,
         folder: path.dirname(candidate.path),
-        sourceName: candidate.kind === "version" ? fileRow(candidate.file_id)?.source_name : "Chosen file",
+        sourceName: candidate.kind === "version" ? fileRow(candidate.file_id)?.source_name : candidate.kind === "extraction" ? "New extraction" : "Chosen file",
         codec: tags.codec,
         lossless: tags.lossless,
         bitrate: tags.bitrate,

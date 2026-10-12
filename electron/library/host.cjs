@@ -92,6 +92,20 @@ const editList = v.array(v.obj({ trackId: id(), fields: editFields }, { optional
 const fieldNames = v.oneOf(["title", "artist", "albumArtist", "album", "genre", "year", "trackNo", "trackTotal", "discNo", "discTotal", "composer", "comment", "compilation", "rating", "notes"], { optional: false });
 const trackIdList = (options = {}) => v.array(id(), { max: 20000, ...options });
 const mergeCategories = v.oneOf(["already_curated", "legacy_only", "curated_only", "other_only", "conflict"]);
+const importEntries = v.array(
+  v.obj(
+    {
+      key: v.str({ max: 200, optional: false, allowEmpty: false }),
+      title: text(500),
+      artist: text(500),
+      album: text(500),
+      genre: text(200),
+      durationMs: v.int({ min: 0, max: 24 * 3600 * 1000, optional: true }),
+    },
+    { optional: false },
+  ),
+  { max: 1000 },
+);
 const reviewKinds = v.oneOf(["missing_album", "missing_artist", "missing_album_artist", "unclassified_genre", "missing_artwork", "track_numbering", "inconsistent_album", "similar_albums", "file_problem", "possible_duplicate", "uncertain_match"]);
 
 /** Renderer-callable worker methods and their parameter schemas. */
@@ -236,6 +250,30 @@ const WORKER_METHODS = {
     exclude: trackIdList(),
     useCover: v.bool(),
   },
+
+  // Playlist import (files reach staging only through the main process).
+  startImport: { title: text(300), url: text(2000), entries: importEntries },
+  updateImport: {
+    sessionId: id(),
+    albumFields: v.obj({
+      album: text(500),
+      albumArtist: text(500),
+      year: v.int({ min: 1000, max: 9999, optional: true }),
+      genre: text(200),
+      edition: text(100),
+      numberTracks: v.bool(),
+      artworkKey: text(200),
+    }),
+    actions: v.array(v.obj({ itemId: id(), action: v.oneOf(["add", "compare", "keep_existing", "keep_both", "skip"], { optional: false }) }, { optional: false }), { max: 1000 }),
+    entries: importEntries,
+  },
+  getImport: { sessionId: id() },
+  listImports: {},
+  commitImport: {
+    sessionId: id(),
+    decisions: v.array(v.obj({ itemId: id(), decision: v.oneOf(["add", "upgrade", "keep_existing", "keep_both", "skip"], { optional: false }) }, { optional: false }), { max: 1000, optional: false }),
+  },
+  discardImport: { sessionId: id() },
 
   applyUpgrade: {
     candidateId: id(),

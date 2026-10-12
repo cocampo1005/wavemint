@@ -4,6 +4,8 @@ import { GENRE_OPTIONS } from "./constants/genres";
 import { getErrorActions, isSkippableInBatch, parseIpcError } from "./ipcErrors";
 import { SettingsDialog } from "./SettingsDialog";
 import { LibraryView } from "./library/LibraryView";
+import { EntryLibraryMatch, PlaylistImport } from "./library/PlaylistImport";
+import { entryKey } from "./library/useLibrary";
 import horizontalLogo from "./assets/Horizontal Logo.png";
 import logomark from "./assets/Logomark.png";
 
@@ -101,6 +103,7 @@ const PHASE_LABELS = {
   converting: "Extracting audio…",
   artwork: "Processing artwork…",
   metadata: "Writing metadata…",
+  checking: "Checking the file…",
   complete: "Complete",
 };
 
@@ -488,6 +491,11 @@ function App() {
   const [appStatus, setAppStatus] = useState(null);
   const [engineStatus, setEngineStatus] = useState(null);
   const [checkingComponents, setCheckingComponents] = useState(false);
+  // Playlists: "folder" keeps the classic Extract to Folder; "library"
+  // imports into the WaveMint Library.
+  const [playlistTarget, setPlaylistTarget] = useState("folder");
+  const [importMatches, setImportMatches] = useState({});
+  const [importBusy, setImportBusy] = useState(false);
   // The last operation that can be retried from an error message.
   const lastActionRef = useRef(null);
 
@@ -1562,8 +1570,27 @@ function App() {
                     <span className="eyebrow">Playlist detected</span>
                     <h2 className="heading-md">{result.title}</h2>
                     <span className="text-muted" style={{ fontSize: 13 }}>
-                      Select the songs you want to extract as MP3 files.
+                      {playlistTarget === "library"
+                        ? "Select the songs to import into your WaveMint Library."
+                        : "Select the songs you want to extract as MP3 files."}
                     </span>
+                  </div>
+                  <div className="segmented" role="group" aria-label="Where the songs go">
+                    {[
+                      ["folder", "Extract to Folder"],
+                      ["library", "Import into WaveMint Library"],
+                    ].map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        className={`segmented__option ${playlistTarget === value ? "is-active" : ""}`}
+                        aria-pressed={playlistTarget === value}
+                        disabled={batchDownloading || importBusy}
+                        onClick={() => setPlaylistTarget(value)}
+                      >
+                        {label}
+                      </button>
+                    ))}
                   </div>
                 </div>
 
@@ -1591,7 +1618,7 @@ function App() {
                   <div className="playlist-toolbar__group">
                     <InlineStatus message={statusMessage} />
 
-                    {(downloadedFiles.length === 0 || hasPendingSelection) && (
+                    {playlistTarget === "folder" && (downloadedFiles.length === 0 || hasPendingSelection) && (
                       <button
                         type="button"
                         className={`btn ${
@@ -1608,7 +1635,7 @@ function App() {
                       </button>
                     )}
 
-                    {downloadedFiles.length > 0 && !itunesOpened && (
+                    {playlistTarget === "folder" && downloadedFiles.length > 0 && !itunesOpened && (
                       <button
                         type="button"
                         className="btn btn--primary"
@@ -1633,6 +1660,17 @@ function App() {
                     )}`}
                     onCancel={handleCancel}
                     cancelling={cancelling}
+                  />
+                )}
+
+                {playlistTarget === "library" && (
+                  <PlaylistImport
+                    playlist={result}
+                    entries={entries}
+                    downloadStatus={downloadStatus}
+                    onBusyChange={setImportBusy}
+                    onCancel={handleCancel}
+                    onMatches={setImportMatches}
                   />
                 )}
 
@@ -1727,6 +1765,9 @@ function App() {
                           <span className="meta-line__dot" aria-hidden="true" />
                           <span>{formatDuration(entry.duration)}</span>
                         </div>
+                        {playlistTarget === "library" && (
+                          <EntryLibraryMatch match={importMatches[entryKey(entry)]} />
+                        )}
 
                         <div className="form-grid form-grid--3">
                           <FormField label="Title" wide>

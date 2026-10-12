@@ -93,3 +93,33 @@ export function useDebounced(value, delay = 250) {
   }, [value, delay]);
   return debounced;
 }
+
+/** Stable key of a playlist entry from the Extract view. */
+export const entryKey = (entry) => String(entry.id || entry.webpage_url);
+
+/**
+ * Starts a background job and resolves with its final snapshot. Finished
+ * jobs are remembered, so a job that completes before its start call
+ * returns is never missed.
+ */
+export function useJobRunner() {
+  const finished = useRef(new Map());
+  const waiting = useRef(new Map());
+
+  useLibraryEvent(({ name, data }) => {
+    if (name !== "job" || data.status === "running") return;
+    finished.current.set(data.id, data);
+    const resolve = waiting.current.get(data.id);
+    if (resolve) {
+      waiting.current.delete(data.id);
+      resolve(data);
+    }
+  });
+
+  return useCallback(async (start) => {
+    const job = await start;
+    const done = finished.current.get(job.id);
+    if (done) return done;
+    return new Promise((resolve) => waiting.current.set(job.id, resolve));
+  }, []);
+}
