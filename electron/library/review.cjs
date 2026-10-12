@@ -24,6 +24,7 @@ const KINDS = {
   file_problem: { label: "File missing or unreadable", entity: "file" },
   possible_duplicate: { label: "Possible duplicate", entity: "track" },
   uncertain_match: { label: "Uncertain MusicBrainz match", entity: "track" },
+  incomplete_album: { label: "Album missing songs", entity: "release" },
 };
 
 function majority(values) {
@@ -175,6 +176,35 @@ function detectIssues(db) {
   }
   for (const ids of groups.values()) {
     if (ids.length > 1) add("possible_duplicate", Math.min(...ids), { trackIds: ids });
+  }
+
+  // Albums missing songs: per disc, the numbers below the disc's track
+  // total that no song has. Only when the totals are known and agree.
+  for (const [releaseId, members] of byRelease) {
+    const release = releases.get(releaseId);
+    if (!release) continue;
+    const discs = new Map();
+    for (const track of members) {
+      const disc = track.disc_no || 1;
+      if (!discs.has(disc)) discs.set(disc, []);
+      discs.get(disc).push(track);
+    }
+    const missing = [];
+    let have = 0;
+    let total = 0;
+    for (const [disc, songs] of discs) {
+      const totals = new Set(songs.map((song) => song.track_total).filter(Boolean));
+      if (totals.size !== 1) continue;
+      const discTotal = [...totals][0];
+      const numbers = new Set(songs.map((song) => song.track_no).filter(Boolean));
+      if (discTotal > 99 || numbers.size === 0) continue;
+      have += [...numbers].filter((number) => number <= discTotal).length;
+      total += discTotal;
+      for (let number = 1; number <= discTotal; number += 1) {
+        if (!numbers.has(number)) missing.push(discs.size > 1 ? `${disc}-${number}` : String(number));
+      }
+    }
+    if (missing.length && total) add("incomplete_album", releaseId, { album: release.title, have, total, missing: missing.slice(0, 40) });
   }
 
   // Identifications that need a human decision.

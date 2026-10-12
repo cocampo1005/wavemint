@@ -18,6 +18,8 @@ function describe(item) {
       return d.label ? `Genre "${d.label}" isn't in your genre list` : "No genre";
     case "file_problem":
       return `${d.status === "missing" ? "Missing" : "Unreadable"}: ${item.file_path || ""}${d.error ? ` (${d.error})` : ""}`;
+    case "incomplete_album":
+      return `${d.album}: ${d.have} of ${d.total} songs; missing track${d.missing?.length === 1 ? "" : "s"} ${(d.missing || []).join(", ")}`;
     case "uncertain_match":
       return `MusicBrainz might know this song${d.album ? ` (from "${d.album}"${d.year ? `, ${d.year}` : ""})` : ""}; ${Math.round((d.confidence || 0) * 100)}% match. Open the song and choose Identify to review.`;
     case "possible_duplicate":

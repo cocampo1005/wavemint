@@ -76,6 +76,7 @@ const LIBRARY_METHODS = [
   "prepareUpgrade",
   "chooseUpgradeFile",
   "compareUpgrade",
+  "spectrogram",
   "discardUpgrade",
   "listUpgradeCandidates",
   "applyUpgrade",

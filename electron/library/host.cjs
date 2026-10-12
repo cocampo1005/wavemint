@@ -125,7 +125,7 @@ const exportScope = v.obj(
   },
   { optional: false },
 );
-const reviewKinds = v.oneOf(["missing_album", "missing_artist", "missing_album_artist", "unclassified_genre", "missing_artwork", "track_numbering", "inconsistent_album", "similar_albums", "file_problem", "possible_duplicate", "uncertain_match"]);
+const reviewKinds = v.oneOf(["missing_album", "missing_artist", "missing_album_artist", "unclassified_genre", "missing_artwork", "track_numbering", "inconsistent_album", "similar_albums", "file_problem", "possible_duplicate", "uncertain_match", "incomplete_album"]);
 
 /** Renderer-callable worker methods and their parameter schemas. */
 const WORKER_METHODS = {
@@ -240,6 +240,7 @@ const WORKER_METHODS = {
   },
   prepareUpgrade: { trackId: id(), fileId: id() },
   compareUpgrade: { candidateId: id() },
+  spectrogram: { fileId: id({ optional: true }), candidateId: id({ optional: true }) },
   discardUpgrade: { candidateId: id() },
   listUpgradeCandidates: { trackId: id() },
   // Identification (MusicBrainz / Cover Art Archive; only when enabled).

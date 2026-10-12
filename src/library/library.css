@@ -2938,3 +2938,31 @@
   font-size: var(--wm-text-sm);
   line-height: 1.6;
 }
+
+.lib-spectra__start {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--wm-space-2);
+}
+
+.lib-spectra {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--wm-space-3);
+}
+
+.lib-spectra figure {
+  margin: 0;
+}
+
+.lib-spectra img {
+  width: 100%;
+  border-radius: var(--wm-radius-sm);
+  background: #000;
+}
+
+.lib-spectra figcaption {
+  color: var(--wm-text-muted);
+  font-size: var(--wm-text-xs);
+}

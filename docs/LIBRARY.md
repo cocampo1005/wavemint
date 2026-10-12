@@ -431,3 +431,38 @@ is exercised by real code.
   export of 8 songs with a FLAC→ALAC conversion carrying tags and cover, a
   second run with nothing to write, and the hand-off into a stand-in
   "Automatically Add to iTunes" folder.
+
+### Phase 8 — Evaluations and small improvements: done
+
+Implemented (cheap, local, clearly useful):
+
+- **Album completion report**: the review queue lists albums missing songs
+  ("Gaps: 3 of 5 songs; missing tracks 3, 5"), per disc, only when the
+  albums' own track totals are known and agree. Identify Album additionally
+  lists the release's tracks you don't have.
+- **Spectrograms** in the Upgrade comparison (FFmpeg `showspectrumpic`,
+  cached): both versions side by side, presented as a hint (a flat ceiling
+  in the high frequencies suggests a lossy encode).
+
+Evaluated, not implemented:
+
+- **AI-assisted genre classification.** Cloud models would make an online,
+  usually paid service part of a core feature; local audio-embedding models
+  (e.g. Essentia/Discogs-EfficientNet via ONNX) add 100 MB+ and native
+  runtimes for uncertain gains over what exists: your own rules and aliases,
+  MusicBrainz genres mapped to your list, and per-artist/album rules. Not
+  worth it now; could be an optional plug-in later.
+- **More quality diagnostics.** True peak and loudness range (FFmpeg
+  `ebur128`) could join the existing single pass for little cost; they
+  describe mastering rather than encoding quality, so they're left out until
+  there's a concrete use (e.g. choosing between two masters).
+- **Advanced duplicate matching.** Chromaprint fingerprints compared locally
+  (no AcoustID web service or key needed) would catch the same recording
+  under different titles. It needs the `fpcalc` binary (see the AcoustID
+  evaluation); recommended as the next step if mismatched titles turn out to
+  be common in the merged library.
+- **Library health score.** The Overview, Review and Quality views already
+  show concrete counts; a single score would hide what to fix.
+- **More metadata providers.** Discogs (token, strict limits), Last.fm (API
+  key) and the iTunes Search API (no key; good artwork, restrictive terms)
+  were considered. None is needed for the core workflow; none is added.

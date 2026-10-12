@@ -91,6 +91,30 @@ function createMedia({ ffmpegPath, ffprobePath, cacheDir, env = process.env }) {
   }
 
   /**
+   * A spectrogram picture (PNG, cached by `key`), for comparing versions by
+   * eye: a lossy encode shows as a flat ceiling in the high frequencies.
+   */
+  async function spectrogram(filePath, key) {
+    if (!/^[\w.-]+$/.test(String(key))) throw new Error("Invalid spectrogram key");
+    const target = path.join(cacheDir, "spectra", `${key}.png`);
+    if (fs.existsSync(target)) return target;
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    const temp = `${target}.${process.pid}.tmp.png`;
+    try {
+      const result = await runCommand(
+        ffmpegPath,
+        ["-v", "error", "-y", "-i", filePath, "-lavfi", "showspectrumpic=s=720x240:legend=1:mode=combined:scale=log:fscale=lin", "-frames:v", "1", temp],
+        { label: "FFmpeg", env, timeoutMs: 300000 },
+      );
+      if (result.code !== 0 || !fs.existsSync(temp)) throw new Error("The spectrogram couldn't be made");
+      fs.renameSync(temp, target);
+    } finally {
+      fs.rmSync(temp, { force: true });
+    }
+    return target;
+  }
+
+  /**
    * Lossless conversion to Apple Lossless (.m4a) for formats Apple's apps
    * can't use (FLAC) or can't carry tags in (WAV). Audio only; WaveMint
    * writes the tags and artwork afterwards.
@@ -245,7 +269,7 @@ function createMedia({ ffmpegPath, ffprobePath, cacheDir, env = process.env }) {
     return inFlight.get(key);
   }
 
-  return { audioStreamHash, convertToAlac, decodeCheck, previewFile, probe, qualityCheck, thumbnail };
+  return { audioStreamHash, convertToAlac, decodeCheck, previewFile, probe, qualityCheck, spectrogram, thumbnail };
 }
 
 module.exports = { THUMB_SIZES, createMedia };

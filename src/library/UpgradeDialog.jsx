@@ -66,6 +66,53 @@ function AbPlayer({ currentSrc, candidateSrc }) {
   );
 }
 
+/** Spectrograms of both versions, on request (about a second each). */
+function Spectrograms({ currentFileId, candidateId }) {
+  const [images, setImages] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const load = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const [current, candidate] = await Promise.all([
+        currentFileId ? libraryApi.spectrogram({ fileId: currentFileId }) : null,
+        libraryApi.spectrogram({ candidateId }),
+      ]);
+      setImages({ current, candidate });
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (!images) {
+    return (
+      <div className="lib-spectra__start">
+        <button type="button" className={`btn btn--ghost btn--sm ${busy ? "is-loading" : ""}`} disabled={busy} onClick={load}>
+          Show Spectrograms
+        </button>
+        <span className="settings-hint">A lossy encode often shows as a flat ceiling in the high frequencies. A hint, not proof.</span>
+        {error && <span className="settings-hint">{error}</span>}
+      </div>
+    );
+  }
+  return (
+    <div className="lib-spectra">
+      {images.current && (
+        <figure>
+          <img src={images.current} alt="Spectrogram of the current version" />
+          <figcaption>Current</figcaption>
+        </figure>
+      )}
+      <figure>
+        <img src={images.candidate} alt="Spectrogram of the replacement" />
+        <figcaption>Replacement</figcaption>
+      </figure>
+    </div>
+  );
+}
+
 function Side({ title, data, kind }) {
   if (!data) return <div className="lib-compare__side" />;
   return (
@@ -242,6 +289,8 @@ export function UpgradeDialog({ trackId, start = null, candidateId: initialCandi
             <Side title="Current" data={comparison.current} kind="current" />
             <Side title="Replacement" data={comparison.candidate} kind="candidate" />
           </div>
+
+          <Spectrograms currentFileId={comparison.current?.fileId} candidateId={comparison.candidateId} />
 
           <AbPlayer
             currentSrc={comparison.current ? `wavemint-media://file/${comparison.current.fileId}` : ""}

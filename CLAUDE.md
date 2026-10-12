@@ -47,6 +47,14 @@ Design notes, measured baseline and the PO Token / YouTube.js evaluations (both 
 
 Prefer editing helper functions in `main.cjs` over duplicating metadata/artwork logic in the renderer. Artwork cropping, FFmpeg processing and metadata embedding have been debugged extensively; change them only for a concrete reason.
 
+### Library (WaveMint 2.0)
+
+The Library tab is a local music library manager. Design, data model, safety model and per-phase notes: `docs/LIBRARY.md`.
+
+- **`electron/library/host.cjs`** (main process): starts **`worker.cjs`** (a worker thread that owns the SQLite database via `node:sqlite`), exposes one allowlisted, schema-validated IPC channel (`library`, `WORKER_METHODS`), runs every file/folder dialog (`HOST_METHOD_NAMES`) and serves `wavemint-media://` / `wavemint-art://`. The renderer never sends paths or SQL; `preload.cjs`'s `LIBRARY_METHODS` must match (a test checks).
+- **`service.cjs`** wires the domain modules: `scanner` (read-only scans), `edits`/`fileops` (metadata, verified tag writes), `genres`, `review`, `match`/`merge`, `consolidate`/`organize` (Managed Library), `quality`/`upgrade`, `identify`/`musicbrainz`/`webclient` (opt-in online lookups), `importer` (playlist import via staging; `download-mp3` with `importSessionId`), `playlists`, `exporter` (Prepare for iPhone). Schema changes go in `migrations.cjs` (new versions only; a backup is taken before migrating).
+- Safety rules: sources are read-only unless the user allows writing; file changes are staged, verified and journaled (`operations`/`operation_steps`, recovered at worker start) and undoable from History; nothing in a source is ever moved or deleted. Tests build synthetic libraries in temp folders (`tests/library-fixtures.cjs`); never point tests at a real music library.
+
 ### Packaging
 
 `electron-builder.yml`: only `dist/`, `electron/`, `package.json` go into `app.asar`. Bundled tools are `extraResources` → `resources/bin`. `afterPack` runs `scripts/check-release.cjs`, which fails the build on credential-like files/contents or unpinned/modified tools. `build/installer.nsh` adds the optional desktop-shortcut checkbox and cleans up on uninstall. Never add cookie files or personal paths to the repo; the release check will fail the build.

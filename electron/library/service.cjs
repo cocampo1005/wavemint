@@ -273,6 +273,24 @@ function createLibraryService({ db, media, jobs, paths, logger = console, appVer
       return upgrader.prepare({ trackId, fileId, filePath });
     },
     compareUpgrade: (params) => upgrader.compare(params),
+    // Spectrograms of a library file or a replacement, as data URLs.
+    spectrogram: async ({ fileId, candidateId }) => {
+      let filePath;
+      let key;
+      if (fileId) {
+        const file = db.prepare("SELECT id, path, mtime_ms, status FROM files WHERE id = ?").get(Number(fileId));
+        if (!file || file.status !== "ok") throw new Error("This file isn't available.");
+        filePath = file.path;
+        key = `f${file.id}-${Math.round(file.mtime_ms)}`;
+      } else {
+        const candidate = upgrader.resolveCandidateFile({ candidateId });
+        if (!candidate) throw new Error("This replacement isn't available.");
+        filePath = candidate.path;
+        key = `c${candidate.id}-${Math.round(fs.statSync(candidate.path).mtimeMs)}`;
+      }
+      const image = await media.spectrogram(filePath, key);
+      return `data:image/png;base64,${fs.readFileSync(image).toString("base64")}`;
+    },
     discardUpgrade: (params) => upgrader.discard(params),
     listUpgradeCandidates: (params) => upgrader.listCandidates(params),
     applyUpgrade: ({ candidateId, choices, artwork }) =>
