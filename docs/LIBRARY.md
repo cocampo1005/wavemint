@@ -466,3 +466,30 @@ Evaluated, not implemented:
 - **More metadata providers.** Discogs (token, strict limits), Last.fm (API
   key) and the iTunes Search API (no key; good artwork, restrictive terms)
   were considered. None is needed for the core workflow; none is added.
+
+## Importing your two libraries (step by step)
+
+Nothing in these steps changes your iTunes or curated folders.
+
+1. **Library → Overview → Add iTunes / Legacy Folder**: choose the `iTunes
+   Media` folder (or its `Music` subfolder). WaveMint scans it read-only. It
+   doesn't read the `.itl` database; ratings and play counts stored only there
+   aren't imported.
+2. **Add Curated Folder**: choose your newer collection. Curated sources have
+   a higher priority, so their copies win when the same song is in both.
+3. **Merge & Duplicates → Analyze Libraries**. Check "Needs a decision"
+   (remasters, different lengths), choose Merge / Keep separate per group,
+   then **Accept Suggestions** and **Apply Merge…**. Only WaveMint's database
+   changes; undo from History.
+4. Optional cleanup: **Review** (missing details, albums missing songs),
+   **Genres**, **Identify** (MusicBrainz, opt-in), **Quality & Upgrades**
+   ("Check Unchecked Songs" takes about half a second per song).
+5. **WaveMint Library → Choose Folder…** (an empty folder on a drive with
+   enough space), check the naming preview, then **Copy N Songs…**. Each song
+   is copied once from its best source, verified, and gets your edited tags.
+   Your original folders stay as a backup.
+6. **Prepare for iPhone**: choose an export folder, check what's changed,
+   prepare, then follow the in-app steps (or Send to Apple Music) and sync the
+   iPhone with the Apple Devices app.
+
+Rescan sources any time from **Sources**; songs you edited keep your edits.
