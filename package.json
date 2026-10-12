@@ -2,7 +2,7 @@
   "name": "wavemint",
   "productName": "WaveMint",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Turn YouTube videos and playlists into clean, tagged MP3s.",
   "author": {
     "name": "Christian Ocampo"

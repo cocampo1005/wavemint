@@ -101,12 +101,26 @@ export function TrackTable({
     [queryKey],
   );
 
-  // New query or data revision: start over from the top of the cache.
+  const pagesRef = useRef(pages);
+  pagesRef.current = pages;
+  const loadedQuery = useRef(null);
+
+  // A new query starts over from the top. A data revision (an edit, a
+  // finished job) reloads the loaded pages in place, so the list keeps its
+  // rows, its height and therefore its scroll position.
   useEffect(() => {
     generation.current += 1;
-    setPages(new Map());
-    setTotal(null);
-    loadPage(0, generation.current);
+    if (loadedQuery.current !== queryKey) {
+      loadedQuery.current = queryKey;
+      setPages(new Map());
+      setTotal(null);
+      if (containerRef.current) containerRef.current.scrollTop = 0;
+      loadPage(0, generation.current);
+      return;
+    }
+    const loaded = [...pagesRef.current.keys()];
+    for (const pageIndex of loaded.length ? loaded : [0]) loadPage(pageIndex, generation.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadPage, revision]);
 
   useEffect(() => {
