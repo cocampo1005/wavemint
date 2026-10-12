@@ -79,6 +79,19 @@ const LIBRARY_METHODS = [
   "discardUpgrade",
   "listUpgradeCandidates",
   "applyUpgrade",
+  "identifySong",
+  "identifySongs",
+  "getIdentification",
+  "chooseIdentificationRelease",
+  "identificationCover",
+  "applyIdentification",
+  "dismissIdentifications",
+  "applyConfidentIdentifications",
+  "listIdentifications",
+  "identificationSummary",
+  "identifyAlbumCandidates",
+  "identifyAlbumProposal",
+  "applyAlbumIdentification",
 ];
 
 function subscribe(channel, callback) {

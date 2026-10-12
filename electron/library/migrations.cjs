@@ -350,6 +350,43 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 5,
+    name: "identification: web cache, MusicBrainz suggestions, release identifiers",
+    up(db) {
+      db.exec(`
+        -- Responses from MusicBrainz / Cover Art Archive, so repeated
+        -- lookups don't hit the services again (404s are cached too).
+        CREATE TABLE web_cache (
+          key        TEXT PRIMARY KEY,
+          status     INTEGER NOT NULL,
+          body       TEXT,
+          fetched_at TEXT NOT NULL
+        );
+
+        -- The latest identification of a song: candidates, the suggested
+        -- metadata, and what the user did with it. Suggestions are never
+        -- applied without approval.
+        CREATE TABLE identifications (
+          track_id     INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+          status       TEXT NOT NULL CHECK (status IN ('matched', 'uncertain', 'no_match', 'error', 'applied', 'dismissed')),
+          method       TEXT NOT NULL DEFAULT 'search' CHECK (method IN ('search', 'mbid', 'album', 'acoustid')),
+          confidence   REAL,
+          recordings   TEXT,
+          releases     TEXT,
+          chosen_release_id TEXT,
+          suggestion   TEXT,
+          error        TEXT,
+          checked_at   TEXT NOT NULL,
+          operation_id INTEGER REFERENCES operations(id) ON DELETE SET NULL
+        );
+        CREATE INDEX identifications_status ON identifications(status);
+
+        ALTER TABLE tracks ADD COLUMN mb_release_id TEXT;
+        ALTER TABLE tracks ADD COLUMN mb_release_group_id TEXT;
+      `);
+    },
+  },
 ];
 
 module.exports = { MIGRATIONS };

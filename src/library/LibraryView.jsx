@@ -1,9 +1,12 @@
 import { useCallback, useState } from "react";
+import { AlbumIdentifyDialog } from "./AlbumIdentifyDialog";
 import { AlbumHeader, AlbumsView, ArtistsView } from "./CollectionViews";
 import { AlbumEditor, WriteTagsDialog } from "./Editors";
 import { pluralize } from "./format";
 import { GenreManager } from "./GenreManager";
 import { HistoryView } from "./HistoryView";
+import { IdentifyDialog } from "./IdentifyDialog";
+import { IdentifyView } from "./IdentifyView";
 import {
   AlbumIcon,
   ArtistIcon,
@@ -15,6 +18,7 @@ import {
   OverviewIcon,
   QualityIcon,
   ReviewIcon,
+  SearchIcon,
   SongsIcon,
   SourceIcon,
   WarningIcon,
@@ -49,6 +53,7 @@ const NAV_GROUPS = [
       { id: "review", label: "Review", Icon: ReviewIcon, badge: "reviewOpen" },
       { id: "merge", label: "Merge & Duplicates", Icon: MergeIcon },
       { id: "quality", label: "Quality & Upgrades", Icon: QualityIcon, badge: "qualityAttention" },
+      { id: "identify", label: "Identify", Icon: SearchIcon },
     ],
   },
   {
@@ -70,6 +75,7 @@ const TITLES = {
   review: "Review",
   merge: "Merge & Duplicates",
   quality: "Quality & Upgrades",
+  identify: "Identify",
   managed: "WaveMint Library",
   sources: "Library sources",
   history: "History",
@@ -83,6 +89,7 @@ const JOB_LABELS = {
   consolidate: "consolidate",
   "quality-check": "quality-check",
   upgrade: "upgrade",
+  identify: "identify",
 };
 
 export function LibraryView() {
@@ -91,6 +98,8 @@ export function LibraryView() {
   const [writeTags, setWriteTags] = useState(null); // { trackIds } | null
   const [editAlbum, setEditAlbum] = useState(null);
   const [upgrade, setUpgrade] = useState(null); // { trackId, start } | null
+  const [identify, setIdentify] = useState(null); // trackId | null
+  const [identifyAlbum, setIdentifyAlbum] = useState(null); // releaseId | null
   const { jobs, running, revision, bump } = useLibraryJobs();
   const [playing, play, player] = usePreviewPlayer();
   const { data: status } = useLoader(() => libraryApi.getStatus(), [revision]);
@@ -130,6 +139,7 @@ export function LibraryView() {
     onChanged: bump,
     onWriteTags: (trackIds) => setWriteTags({ trackIds }),
     onUpgrade: (trackId, start = null) => setUpgrade({ trackId, start }),
+    onIdentify: (trackId) => setIdentify(trackId),
   };
 
   const { view, scope } = route;
@@ -158,7 +168,7 @@ export function LibraryView() {
   } else if (view === "album") {
     content = (
       <div className="lib-album-view">
-        <AlbumHeader releaseId={scope.releaseId} revision={revision} onEdit={setEditAlbum} />
+        <AlbumHeader releaseId={scope.releaseId} revision={revision} onEdit={setEditAlbum} onIdentify={(album) => setIdentifyAlbum(album.id)} />
         <SongBrowser key={scope.releaseId} {...browserProps} baseFilters={{ releaseId: scope.releaseId }} defaultSort="track" hideColumns={["album"]} />
       </div>
     );
@@ -200,6 +210,16 @@ export function LibraryView() {
         onPlay={(row) => play(row)}
         onOpenTrack={openTrack}
         onUpgrade={(trackId) => setUpgrade({ trackId, start: null })}
+        onChanged={bump}
+        onError={setError}
+      />
+    );
+  } else if (view === "identify") {
+    content = (
+      <IdentifyView
+        revision={revision}
+        identifying={running.some((job) => job.kind === "identify")}
+        onReview={(trackId) => setIdentify(trackId)}
         onChanged={bump}
         onError={setError}
       />
@@ -295,6 +315,26 @@ export function LibraryView() {
             setWriteTags(null);
             bump();
           }}
+        />
+      )}
+      {identify && (
+        <IdentifyDialog
+          trackId={identify}
+          onClose={() => {
+            setIdentify(null);
+            bump();
+          }}
+          onApplied={bump}
+        />
+      )}
+      {identifyAlbum && (
+        <AlbumIdentifyDialog
+          releaseId={identifyAlbum}
+          onClose={() => {
+            setIdentifyAlbum(null);
+            bump();
+          }}
+          onApplied={bump}
         />
       )}
       {upgrade && (

@@ -284,3 +284,63 @@ is exercised by real code.
   from a downloaded FLAC with A/B playback and a metadata choice, undo, and
   "Use This Version…" from a song's versions; legacy, curated and the chosen
   file's folder byte-identical throughout.
+
+### Phase 5 — Identification with MusicBrainz: done
+
+- Migration 5: `web_cache` (MusicBrainz / Cover Art Archive answers, 404s
+  included, 30 days), `identifications` (latest result per song: status,
+  method, confidence, recordings, grouped releases, chosen release,
+  suggested fields, what was applied), `tracks.mb_release_id` and
+  `tracks.mb_release_group_id`.
+- Off by default. Settings → `musicBrainzEnabled` is turned on from a notice
+  that says what is sent (title, artist, album and length of the songs you
+  identify) and to whom. Every network method refuses while it's off.
+- `webclient.cjs`: one queue per host (MusicBrainz ≈ 1 request/s, Cover Art
+  Archive 0.3 s), User-Agent `WaveMint/<version> ( https://github.com/cocampo1005/wavemint )`,
+  15 s timeout, at most 2 retries on 429/5xx/network errors honouring
+  Retry-After, cached in SQLite.
+- `identify.cjs`: songs with an album are looked up album-first (release
+  search → tracklist → the recording and all its releases), which finds the
+  studio recording reliably; others by recording search on the base title
+  (versions such as "(Live)" are compared against MusicBrainz's
+  disambiguation instead). Confidence is computed only from title, artist,
+  length and version agreement and shown with its reasons (≥ 85 %
+  identified, ≥ 60 % uncertain). Releases are grouped by release group and
+  labelled Original album / Album / Single / EP / Soundtrack / Live /
+  Compilation; bootleg-only groups are hidden. The suggestion uses the
+  song's current album when it is a candidate, otherwise the original album
+  (the "prefer original releases" setting), and the user can pick another.
+  Disc totals are only suggested when the full release was read; genres only
+  when a MusicBrainz genre/tag matches the user's genre list or aliases.
+- Review before applying: per field current vs suggested with checkboxes
+  (gaps and identifiers preselected, fields you edited never preselected,
+  title/artist/genre only fill gaps by default), alternative releases, the
+  MusicBrainz tags, and the cover from the Cover Art Archive (stored in the
+  local artwork store). Applying is one ordinary undoable edit.
+- Whole albums: Identify Album lists matching releases (sorted by relevance,
+  official, same track count, earliest, worldwide/US/UK), maps your songs to
+  the tracklist (low-confidence rows unticked), lists tracks you don't have,
+  and applies album-level fields to all chosen songs in one edit.
+- Identify view: background identification of songs not looked up yet,
+  results by status, review, dismiss, and "Apply Confident Matches" (≥ 90 %,
+  with confirmation, default field choices only). Uncertain matches appear in
+  the review queue.
+- Verified against the live service with a handful of requests: "Yellow"
+  found through Parachutes (35 editions grouped as the original album, plus
+  the single, a soundtrack and compilations), the real cover applied, and
+  "Lungs" matched to its 13-track release.
+
+#### AcoustID / Chromaprint evaluation (not integrated)
+
+- Needs two things WaveMint doesn't have: the `fpcalc` tool (Chromaprint,
+  LGPL-2.1; the official Windows build is a few MB and links FFmpeg) and an
+  AcoustID application API key, which each application must register itself
+  (free for non-commercial use, 3 requests/s).
+- Benefit for this library: most files are tagged, and album-first MusicBrainz
+  lookups identify tagged songs well. Fingerprints mainly help untagged files
+  ("Unknown Artist/Track 01") and wrongly tagged ones.
+- Recommendation: add it later as an opt-in: pin `fpcalc` in
+  `scripts/binaries.manifest.json` (SHA-256, license notice in About), store
+  the user's own API key in settings, and use the existing `acoustid` column
+  and the `acoustid` identification method. Fingerprinting costs about one
+  decode per song (≈ 0.2–0.5 s).

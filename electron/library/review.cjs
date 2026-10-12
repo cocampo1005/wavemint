@@ -23,6 +23,7 @@ const KINDS = {
   similar_albums: { label: "Similar album names", entity: "release" },
   file_problem: { label: "File missing or unreadable", entity: "file" },
   possible_duplicate: { label: "Possible duplicate", entity: "track" },
+  uncertain_match: { label: "Uncertain MusicBrainz match", entity: "track" },
 };
 
 function majority(values) {
@@ -174,6 +175,14 @@ function detectIssues(db) {
   }
   for (const ids of groups.values()) {
     if (ids.length > 1) add("possible_duplicate", Math.min(...ids), { trackIds: ids });
+  }
+
+  // Identifications that need a human decision.
+  for (const row of db
+    .prepare("SELECT i.track_id, i.confidence, i.suggestion FROM identifications i JOIN tracks t ON t.id = i.track_id AND t.state = 'active' WHERE i.status = 'uncertain'")
+    .all()) {
+    const fields = parseJson(row.suggestion, {}).fields || {};
+    add("uncertain_match", row.track_id, { confidence: row.confidence, album: fields.album || null, year: fields.year || null });
   }
 
   return issues;

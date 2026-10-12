@@ -32,6 +32,11 @@ const FIELDS = {
   compilation: { column: "compilation", type: "bool", tag: true },
   rating: { column: "rating", type: "rating", tag: false },
   notes: { column: "notes", type: "text", tag: false },
+  // Set only by approved identifications (not editable from the renderer).
+  mbRecordingId: { column: "mb_recording_id", type: "id", tag: false },
+  mbReleaseId: { column: "mb_release_id", type: "id", tag: false },
+  mbReleaseGroupId: { column: "mb_release_group_id", type: "id", tag: false },
+  artworkHash: { column: "artwork_hash", type: "hash", tag: false, marksDirty: true },
 };
 
 const COLUMN_TO_FIELD = Object.fromEntries(Object.entries(FIELDS).map(([field, def]) => [def.column, field]));
@@ -54,6 +59,10 @@ function normalizeValue(field, value) {
     }
     case "bool":
       return value ? 1 : 0;
+    case "id":
+      return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(value ?? "")) ? String(value).toLowerCase() : null;
+    case "hash":
+      return /^[0-9a-f]{40}$/.test(String(value ?? "")) ? String(value) : null;
     case "rating": {
       const number = Number(value);
       return Number.isInteger(number) && number >= 0 && number <= 5 ? number : null;
@@ -151,7 +160,7 @@ function applyEdits(db, edits, { label = "Edit metadata", exclude = [], kind = "
         assignments.push(`${def.column} = ?`);
         values.push(change.to);
         if (markCurated) curated.add(def.column);
-        tagChange = tagChange || def.tag;
+        tagChange = tagChange || def.tag || !!def.marksDirty;
         releaseChange = releaseChange || RELEASE_COLUMNS.has(def.column);
         logChange(db, operationId, { entityId: item.trackId, field: def.column, oldValue: change.from, newValue: change.to });
         changeCount += 1;

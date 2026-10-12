@@ -119,7 +119,7 @@ export function FileVersions({ track, playing, onPlayFile, onError, onUpgrade })
   );
 }
 
-export function TrackDetail({ trackId, revision, playing, onPlayFile, onClose, onOpenAlbum, onError, onChanged, onWriteTags, onUpgrade }) {
+export function TrackDetail({ trackId, revision, playing, onPlayFile, onClose, onOpenAlbum, onError, onChanged, onWriteTags, onUpgrade, onIdentify }) {
   const { data: track, error, loading } = useLoader(() => libraryApi.getTrack({ id: trackId }), [trackId, revision]);
 
   if (!trackId) return null;
@@ -172,6 +172,12 @@ export function TrackDetail({ trackId, revision, playing, onPlayFile, onClose, o
 
           <div className="lib-detail__meta">
             {formatDuration(track.duration_ms)} · added {formatDate(track.created_at)}
+            {track.mb_recording_id && " · identified"}
+            {onIdentify && (
+              <button type="button" className="btn btn--link lib-detail__identify" onClick={() => onIdentify(track.id)}>
+                {track.mb_recording_id ? "Identify again…" : "Identify…"}
+              </button>
+            )}
           </div>
           <QualitySection track={track} onUpgrade={onUpgrade} onChanged={onChanged} onError={onError} />
           <TrackEditor track={track} onChanged={onChanged} onError={onError} onWriteTags={onWriteTags} />

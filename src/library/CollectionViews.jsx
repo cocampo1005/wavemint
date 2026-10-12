@@ -107,7 +107,7 @@ export function AlbumsView({ revision, onOpenAlbum, filters = {}, chips = [], on
   );
 }
 
-export function AlbumHeader({ releaseId, revision, onEdit }) {
+export function AlbumHeader({ releaseId, revision, onEdit, onIdentify }) {
   const { data: album } = useLoader(() => libraryApi.getAlbum({ id: releaseId }), [releaseId, revision]);
   if (!album) return null;
 
@@ -140,6 +140,11 @@ export function AlbumHeader({ releaseId, revision, onEdit }) {
         {onEdit && (
           <button type="button" className="btn btn--secondary btn--sm lib-album-head__edit" onClick={() => onEdit(album)}>
             Edit Album…
+          </button>
+        )}
+        {onIdentify && (
+          <button type="button" className="btn btn--ghost btn--sm lib-album-head__edit" onClick={() => onIdentify(album)}>
+            Identify Album…
           </button>
         )}
       </div>

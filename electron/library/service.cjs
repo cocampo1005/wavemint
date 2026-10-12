@@ -19,6 +19,9 @@ const operations = require("./operations.cjs");
 const quality = require("./quality.cjs");
 const review = require("./review.cjs");
 const { createUpgrader } = require("./upgrade.cjs");
+const { createIdentifier } = require("./identify.cjs");
+const { createMusicBrainz } = require("./musicbrainz.cjs");
+const { createWebClient } = require("./webclient.cjs");
 const { readArtwork } = require("./tags.cjs");
 
 const SETTINGS_DEFAULTS = {
@@ -30,18 +33,30 @@ const SETTINGS_DEFAULTS = {
   musicBrainzEnabled: false,
 };
 
-function createLibraryService({ db, media, jobs, paths, logger = console }) {
+function createLibraryService({ db, media, jobs, paths, logger = console, appVersion = "dev", fetchImpl }) {
   const scanner = createScanner({ db, probe: media?.probe, logger });
   const artStore = createArtStore(path.join(paths.dataDir, "artwork-store"));
   const fileOps = createFileOps({ db, media, artStore, backupsRoot: paths.backupsDir, logger });
   const merge = createMerge({ db, contentHash, logger });
   const consolidator = createConsolidator({ db, media, artStore, logger });
   const upgrader = createUpgrader({ db, media, artStore, managedSource: consolidator.managedSource, getSettings, logger });
+  // MusicBrainz asks every application to identify itself with a contact URL.
+  const web = createWebClient({ db, userAgent: `WaveMint/${appVersion} ( https://github.com/cocampo1005/wavemint )`, fetchImpl, logger });
+  const identifier = createIdentifier({ db, mb: createMusicBrainz({ web }), artStore, getSettings, logger });
 
   // Anything interrupted last time (crash, power loss) is finished or rolled
   // back before any new work starts.
   const recovered = [...fileOps.recover(), ...consolidator.recover(), ...upgrader.recover()];
   if (recovered.length) logger.warn(`[library] Recovered ${recovered.length} interrupted file step(s)`);
+
+  // Online lookups only happen after the user turned them on.
+  function requireOnline() {
+    if (!getSettings().musicBrainzEnabled) {
+      const error = new Error("Turn on MusicBrainz lookups first (Library → Identify).");
+      error.code = "musicbrainz-off";
+      throw error;
+    }
+  }
 
   function requireIdle() {
     if (jobs.isBusy()) throw new Error("Wait for the current library task to finish first.");
@@ -250,6 +265,61 @@ function createLibraryService({ db, media, jobs, paths, logger = console }) {
     listUpgradeCandidates: (params) => upgrader.listCandidates(params),
     applyUpgrade: ({ candidateId, choices, artwork }) =>
       jobs.start("upgrade", "Upgrading song", ({ signal, progress }) => upgrader.applyJob({ candidateId, choices, artwork, signal, progress })),
+
+    // --- identification (MusicBrainz) ---------------------------------------------
+    identifySong: async ({ trackId }) => {
+      requireOnline();
+      const result = await identifier.identifyTrack(trackId);
+      review.refreshReview(db);
+      return result;
+    },
+    identifySongs: ({ trackIds, onlyNew }) => {
+      requireOnline();
+      return jobs.start("identify", "Identifying songs with MusicBrainz", async ({ signal, progress }) => {
+        const report = await identifier.identifyJob({ trackIds: trackIds?.length ? trackIds : null, onlyNew: onlyNew !== false, signal, progress });
+        review.refreshReview(db);
+        return report;
+      });
+    },
+    getIdentification: ({ trackId }) => identifier.view(trackId),
+    chooseIdentificationRelease: (params) => identifier.chooseRelease(params),
+    identificationCover: async ({ trackId }) => {
+      requireOnline();
+      return identifier.cover({ trackId });
+    },
+    applyIdentification: ({ trackId, fields, coverHash }) => {
+      // Only covers WaveMint itself stored can be used.
+      if (coverHash && !artStore.locate(coverHash)) throw new Error("That cover isn't available anymore. Load it again.");
+      const result = identifier.apply({ trackId, fields, coverHash: coverHash || null });
+      review.refreshReview(db);
+      return result;
+    },
+    dismissIdentifications: (params) => {
+      const result = identifier.dismiss(params);
+      review.refreshReview(db);
+      return result;
+    },
+    applyConfidentIdentifications: ({ minConfidence }) => {
+      const result = identifier.applyConfident({ minConfidence: minConfidence || 0.9 });
+      review.refreshReview(db);
+      return result;
+    },
+    listIdentifications: (params) => identifier.list(params),
+    identificationSummary: () => ({ ...identifier.summary(), enabled: !!getSettings().musicBrainzEnabled }),
+    identifyAlbumCandidates: async (params) => {
+      requireOnline();
+      return identifier.albumCandidates(params);
+    },
+    identifyAlbumProposal: async (params) => {
+      requireOnline();
+      return identifier.albumProposal(params);
+    },
+    applyAlbumIdentification: async (params) => {
+      requireOnline();
+      const result = await identifier.applyAlbum({ ...params, exclude: params.exclude || [] });
+      review.refreshReview(db);
+      return result;
+    },
 
     // --- genres ------------------------------------------------------------------
     listGenreTaxonomy: () => genres.listTaxonomy(db),

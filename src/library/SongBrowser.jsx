@@ -41,6 +41,7 @@ export function SongBrowser({
   onChanged,
   onWriteTags,
   onUpgrade,
+  onIdentify,
   selection: controlledSelection,
   onSelectionChange: setControlledSelection,
 }) {
@@ -170,6 +171,7 @@ export function SongBrowser({
           onChanged={onChanged}
           onWriteTags={onWriteTags}
           onUpgrade={onUpgrade}
+          onIdentify={onIdentify}
         />
       )}
     </div>

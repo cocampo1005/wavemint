@@ -2460,3 +2460,119 @@
   flex-direction: column;
   gap: var(--wm-space-2);
 }
+
+/* --- Identify ------------------------------------------------------------------- */
+
+.lib-consent {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--wm-space-3);
+}
+
+.lib-consent p {
+  margin: 0;
+  color: var(--wm-text-muted);
+  font-size: var(--wm-text-sm);
+}
+
+.lib-identify {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wm-space-3);
+}
+
+.lib-identify__head {
+  display: flex;
+  align-items: center;
+  gap: var(--wm-space-3);
+}
+
+.lib-identify__head > div {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.lib-identify__releases {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.lib-identify__release {
+  display: flex;
+  align-items: center;
+  gap: var(--wm-space-2);
+  padding: 6px var(--wm-space-3);
+  border: 1px solid transparent;
+  border-radius: var(--wm-radius-md);
+  color: inherit;
+  font-size: var(--wm-text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.lib-identify__release.is-button {
+  border-color: var(--wm-border-subtle);
+  background: rgba(10, 18, 48, 0.55);
+}
+
+.lib-identify__release:hover,
+.lib-identify__release.is-chosen {
+  border-color: rgba(31, 200, 255, 0.35);
+  background: rgba(31, 200, 255, 0.05);
+}
+
+.lib-identify__release-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lib-identify__release .settings-hint {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.lib-identify__field {
+  grid-template-columns: 24px 170px 1fr 1fr;
+}
+
+.lib-identify__field > span:nth-child(2) {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.lib-identify__album-row {
+  grid-template-columns: 24px 1fr 1fr 60px;
+}
+
+.lib-identify__id {
+  font-family: var(--wm-font-mono, ui-monospace, monospace);
+  font-size: var(--wm-text-xs);
+  overflow-wrap: anywhere;
+}
+
+.lib-identify__cover img {
+  width: 64px;
+  height: 64px;
+  border-radius: var(--wm-radius-sm);
+  object-fit: cover;
+}
+
+.lib-identify__fieldpicks {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--wm-space-1) var(--wm-space-3);
+}
+
+.lib-detail__identify {
+  margin-left: var(--wm-space-2);
+  font-size: inherit;
+}

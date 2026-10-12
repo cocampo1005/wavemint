@@ -92,7 +92,7 @@ const editList = v.array(v.obj({ trackId: id(), fields: editFields }, { optional
 const fieldNames = v.oneOf(["title", "artist", "albumArtist", "album", "genre", "year", "trackNo", "trackTotal", "discNo", "discTotal", "composer", "comment", "compilation", "rating", "notes"], { optional: false });
 const trackIdList = (options = {}) => v.array(id(), { max: 20000, ...options });
 const mergeCategories = v.oneOf(["already_curated", "legacy_only", "curated_only", "other_only", "conflict"]);
-const reviewKinds = v.oneOf(["missing_album", "missing_artist", "missing_album_artist", "unclassified_genre", "missing_artwork", "track_numbering", "inconsistent_album", "similar_albums", "file_problem", "possible_duplicate"]);
+const reviewKinds = v.oneOf(["missing_album", "missing_artist", "missing_album_artist", "unclassified_genre", "missing_artwork", "track_numbering", "inconsistent_album", "similar_albums", "file_problem", "possible_duplicate", "uncertain_match"]);
 
 /** Renderer-callable worker methods and their parameter schemas. */
 const WORKER_METHODS = {
@@ -175,7 +175,12 @@ const WORKER_METHODS = {
   consolidate: { trackIds: trackIdList() },
   updateSettings: {
     patch: v.obj(
-      { namingPattern: v.str({ max: 300, allowEmpty: false }), lowBitrateKbps: v.int({ min: 32, max: 512, optional: true }) },
+      {
+        namingPattern: v.str({ max: 300, allowEmpty: false }),
+        lowBitrateKbps: v.int({ min: 32, max: 512, optional: true }),
+        musicBrainzEnabled: v.bool(),
+        preferOriginalReleases: v.bool(),
+      },
       { optional: false },
     ),
   },
@@ -203,6 +208,35 @@ const WORKER_METHODS = {
   compareUpgrade: { candidateId: id() },
   discardUpgrade: { candidateId: id() },
   listUpgradeCandidates: { trackId: id() },
+  // Identification (MusicBrainz / Cover Art Archive; only when enabled).
+  identifySong: { trackId: id() },
+  identifySongs: { trackIds: trackIdList(), onlyNew: v.bool() },
+  getIdentification: { trackId: id() },
+  chooseIdentificationRelease: { trackId: id(), releaseGroupId: v.str({ max: 36, optional: false, allowEmpty: false }) },
+  identificationCover: { trackId: id() },
+  applyIdentification: {
+    trackId: id(),
+    fields: v.array(v.oneOf(["title", "artist", "album", "albumArtist", "year", "trackNo", "trackTotal", "discNo", "discTotal", "genre", "mbRecordingId", "mbReleaseId", "mbReleaseGroupId"], { optional: false }), { max: 20, optional: false }),
+    coverHash: v.str({ max: 40 }),
+  },
+  dismissIdentifications: { trackIds: trackIdList({ optional: false }) },
+  applyConfidentIdentifications: { minConfidence: v.oneOf([0.9, 0.95]) },
+  listIdentifications: {
+    status: v.oneOf(["suggested", "uncertain", "no_match", "applied", "dismissed"]),
+    offset: v.int({ min: 0, optional: true }),
+    limit: v.int({ min: 1, max: 500, optional: true }),
+  },
+  identificationSummary: {},
+  identifyAlbumCandidates: { releaseId: id() },
+  identifyAlbumProposal: { releaseId: id(), mbReleaseId: v.str({ max: 36, optional: false, allowEmpty: false }) },
+  applyAlbumIdentification: {
+    releaseId: id(),
+    mbReleaseId: v.str({ max: 36, optional: false, allowEmpty: false }),
+    fields: v.array(v.oneOf(["title", "artist", "album", "albumArtist", "year", "trackNo", "trackTotal", "discNo", "discTotal", "genre"], { optional: false }), { max: 20, optional: false }),
+    exclude: trackIdList(),
+    useCover: v.bool(),
+  },
+
   applyUpgrade: {
     candidateId: id(),
     choices: v.obj(Object.fromEntries(["title", "artist", "albumArtist", "album", "genre", "year", "trackNo", "trackTotal", "discNo", "discTotal", "composer"].map((field) => [field, v.oneOf(["current", "candidate"])]))),
@@ -233,6 +267,7 @@ function createLibraryHost({ app, ipcMain, dialog, shell, BrowserWindow, protoco
           ffmpegPath: binaries.resolve("ffmpeg").command,
           ffprobePath: binaries.resolve("ffprobe").command,
           childEnv: binaries.getChildEnv(),
+          appVersion: app.getVersion(),
         },
       });
 
