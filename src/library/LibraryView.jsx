@@ -1,11 +1,27 @@
 import { useCallback, useState } from "react";
-import { AlbumHeader, AlbumsView, ArtistsView, GenresView } from "./CollectionViews";
-import { AlbumIcon, ArtistIcon, CloseIcon, GenreIcon, OverviewIcon, SongsIcon, SourceIcon, WarningIcon } from "./icons";
+import { AlbumHeader, AlbumsView, ArtistsView } from "./CollectionViews";
+import { AlbumEditor, WriteTagsDialog } from "./Editors";
+import { pluralize } from "./format";
+import { GenreManager } from "./GenreManager";
+import { HistoryView } from "./HistoryView";
+import {
+  AlbumIcon,
+  ArtistIcon,
+  CloseIcon,
+  GenreIcon,
+  HistoryIcon,
+  OverviewIcon,
+  ReviewIcon,
+  SongsIcon,
+  SourceIcon,
+  WarningIcon,
+} from "./icons";
 import { OverviewView } from "./OverviewView";
 import { usePreviewPlayer } from "./Player";
+import { ReviewView } from "./ReviewView";
 import { SongBrowser } from "./SongBrowser";
 import { ScanProgress, SourcesView } from "./SourcesView";
-import { errorMessage, libraryApi, useLibraryJobs } from "./useLibrary";
+import { errorMessage, libraryApi, useLibraryJobs, useLoader } from "./useLibrary";
 import "./library.css";
 
 // Sections appear here only once they are implemented.
@@ -21,8 +37,15 @@ const NAV_GROUPS = [
     ],
   },
   {
+    label: "Maintain",
+    items: [{ id: "review", label: "Review", Icon: ReviewIcon, badge: "reviewOpen" }],
+  },
+  {
     label: "Manage",
-    items: [{ id: "sources", label: "Sources", Icon: SourceIcon }],
+    items: [
+      { id: "sources", label: "Sources", Icon: SourceIcon },
+      { id: "history", label: "History", Icon: HistoryIcon },
+    ],
   },
 ];
 
@@ -32,17 +55,25 @@ const TITLES = {
   albums: "Albums",
   artists: "Artists",
   genres: "Genres",
+  review: "Review",
   sources: "Library sources",
+  history: "History",
   album: "Album",
 };
+
+const JOB_LABELS = { scan: "scan", "write-tags": "write-tags" };
 
 export function LibraryView() {
   const [route, setRoute] = useState({ view: "overview", scope: {} });
   const [error, setError] = useState("");
+  const [writeTags, setWriteTags] = useState(null); // { trackIds } | null
+  const [editAlbum, setEditAlbum] = useState(null);
   const { running, revision, bump } = useLibraryJobs();
   const [playing, play, player] = usePreviewPlayer();
+  const { data: status } = useLoader(() => libraryApi.getStatus(), [revision]);
 
   const scanJob = running.find((job) => job.kind === "scan");
+  const otherJob = running.find((job) => job.kind !== "scan" && JOB_LABELS[job.kind]);
   const busy = running.length > 0;
 
   const navigate = useCallback((view, scope = {}) => setRoute({ view, scope }), []);
@@ -61,18 +92,18 @@ export function LibraryView() {
   };
 
   const cancelJob = (id) => libraryApi.cancelJob({ id }).catch(() => {});
-
   const openAlbum = (releaseId) => navigate("album", { releaseId });
-  const playTrack = (row) => play(row);
-  const playFile = (track, file) => play(track, file);
+  const openTrack = (trackId) => navigate("songs", { ids: [trackId], activeId: trackId, chip: "Song from review" });
 
   const browserProps = {
     revision,
     playing,
-    onPlay: playTrack,
-    onPlayFile: playFile,
+    onPlay: (row) => play(row),
+    onPlayFile: (track, file) => play(track, file),
     onOpenAlbum: openAlbum,
     onError: setError,
+    onChanged: bump,
+    onWriteTags: (trackIds) => setWriteTags({ trackIds }),
   };
 
   const { view, scope } = route;
@@ -85,12 +116,14 @@ export function LibraryView() {
     if (scope.sourceId) filters.sourceId = scope.sourceId;
     if (scope.artist !== undefined) filters.artist = scope.artist;
     if (scope.genre !== undefined) filters.genre = scope.genre;
+    if (scope.ids) filters.ids = scope.ids;
     content = (
       <SongBrowser
         key={JSON.stringify(scope)}
         {...browserProps}
         baseFilters={filters}
         initialQuick={scope.quick || []}
+        initialActiveId={scope.activeId}
         defaultSort={scope.sort || "artist"}
         chips={scope.chip ? [scope.chip] : []}
         onClearScope={() => navigate("songs")}
@@ -99,40 +132,29 @@ export function LibraryView() {
   } else if (view === "album") {
     content = (
       <div className="lib-album-view">
-        <AlbumHeader releaseId={scope.releaseId} revision={revision} />
-        <SongBrowser
-          key={scope.releaseId}
-          {...browserProps}
-          baseFilters={{ releaseId: scope.releaseId }}
-          defaultSort="track"
-          hideColumns={["album"]}
-        />
+        <AlbumHeader releaseId={scope.releaseId} revision={revision} onEdit={setEditAlbum} />
+        <SongBrowser key={scope.releaseId} {...browserProps} baseFilters={{ releaseId: scope.releaseId }} defaultSort="track" hideColumns={["album"]} />
       </div>
     );
   } else if (view === "albums") {
     content = <AlbumsView revision={revision} onOpenAlbum={openAlbum} />;
   } else if (view === "artists") {
-    content = (
-      <ArtistsView revision={revision} onOpenArtist={(artist) => navigate("songs", { artist: artist.key, chip: `Artist: ${artist.name}`, sort: "album" })} />
-    );
+    content = <ArtistsView revision={revision} onOpenArtist={(artist) => navigate("songs", { artist: artist.key, chip: `Artist: ${artist.name}`, sort: "album" })} />;
   } else if (view === "genres") {
     content = (
-      <GenresView
+      <GenreManager
         revision={revision}
+        onChanged={bump}
+        onError={setError}
         onOpenGenre={(name) => navigate("songs", { genre: name, chip: `Genre: ${name || "Unclassified"}` })}
       />
     );
+  } else if (view === "review") {
+    content = <ReviewView revision={revision} onChanged={bump} onOpenTrack={openTrack} onOpenAlbum={openAlbum} onError={setError} />;
+  } else if (view === "history") {
+    content = <HistoryView revision={revision} onChanged={bump} onError={setError} />;
   } else if (view === "sources") {
-    content = (
-      <SourcesView
-        revision={revision}
-        busy={busy}
-        scanJob={scanJob}
-        onCancelJob={cancelJob}
-        onAddSource={addSource}
-        onError={setError}
-      />
-    );
+    content = <SourcesView revision={revision} busy={busy} scanJob={scanJob} onCancelJob={cancelJob} onAddSource={addSource} onError={setError} />;
   }
 
   const activeNav = view === "album" ? "albums" : view;
@@ -145,6 +167,7 @@ export function LibraryView() {
             <span className="lib-nav__label">{group.label}</span>
             {group.items.map((item) => {
               const NavIcon = item.Icon;
+              const count = item.badge ? status?.[item.badge] : 0;
               return (
                 <button
                   key={item.id}
@@ -155,6 +178,7 @@ export function LibraryView() {
                 >
                   <NavIcon size={18} />
                   {item.label}
+                  {count > 0 && <span className="lib-nav__count">{count}</span>}
                 </button>
               );
             })}
@@ -166,6 +190,32 @@ export function LibraryView() {
         <div className="lib-content__head">
           <h1 className="heading-md">{TITLES[view]}</h1>
           {scanJob && view !== "sources" && <ScanProgress job={scanJob} onCancel={() => cancelJob(scanJob.id)} />}
+          {otherJob && (
+            <div className="lib-job" role="status">
+              <div className="lib-job__text">
+                <strong>{otherJob.label}</strong>
+                {otherJob.progress && (
+                  <span>
+                    {otherJob.progress.done ?? 0} of {otherJob.progress.total ?? "?"} · {otherJob.progress.current || ""}
+                  </span>
+                )}
+              </div>
+              <div className="progress__track is-indeterminate lib-job__bar">
+                <div className="progress__fill" />
+              </div>
+              <button type="button" className="btn btn--link" onClick={() => cancelJob(otherJob.id)}>
+                Stop
+              </button>
+            </div>
+          )}
+          {!otherJob && status?.unsavedWritable > 0 && (
+            <div className="lib-unsaved" role="status">
+              <span>{pluralize(status.unsavedWritable, "song")} with changes not yet written to files</span>
+              <button type="button" className="btn btn--secondary btn--sm" onClick={() => setWriteTags({ trackIds: null })}>
+                Write Tags…
+              </button>
+            </div>
+          )}
         </div>
 
         {error && (
@@ -181,6 +231,25 @@ export function LibraryView() {
         <div className="lib-content__body">{content}</div>
         {player}
       </div>
+
+      {writeTags && (
+        <WriteTagsDialog
+          trackIds={writeTags.trackIds}
+          onClose={() => setWriteTags(null)}
+          onStarted={() => {
+            setWriteTags(null);
+            bump();
+          }}
+        />
+      )}
+      {editAlbum && (
+        <AlbumEditor
+          album={editAlbum}
+          onClose={() => setEditAlbum(null)}
+          onChanged={bump}
+          onError={setError}
+        />
+      )}
     </div>
   );
 }

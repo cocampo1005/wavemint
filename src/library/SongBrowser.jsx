@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { pluralize } from "./format";
 import { CloseIcon, SearchIcon } from "./icons";
+import { BulkEditor } from "./Editors";
 import { TrackDetail } from "./TrackDetail";
 import { TrackTable } from "./TrackTable";
 import { QUICK_FILTERS, useDebounced } from "./useLibrary";
@@ -24,6 +25,7 @@ function toFilters(base, quick) {
 export function SongBrowser({
   baseFilters = {},
   initialQuick = [],
+  initialActiveId = null,
   chips = [],
   onClearScope,
   revision,
@@ -36,7 +38,8 @@ export function SongBrowser({
   hideColumns,
   defaultSort = "artist",
   toolbarExtra,
-  detailContent,
+  onChanged,
+  onWriteTags,
   selection: controlledSelection,
   onSelectionChange: setControlledSelection,
 }) {
@@ -44,7 +47,7 @@ export function SongBrowser({
   const [quick, setQuick] = useState(initialQuick);
   const [sort, setSort] = useState({ field: defaultSort, direction: "asc" });
   const [ownSelection, setOwnSelection] = useState(() => new Set());
-  const [activeId, setActiveId] = useState(null);
+  const [activeId, setActiveId] = useState(initialActiveId);
   const [total, setTotal] = useState(null);
   const debouncedSearch = useDebounced(search);
 
@@ -55,7 +58,7 @@ export function SongBrowser({
   // A different scope starts with a clean selection.
   useEffect(() => {
     setSelection(new Set());
-    setActiveId(null);
+    setActiveId(initialActiveId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [baseKey]);
 
@@ -82,7 +85,7 @@ export function SongBrowser({
     setQuick((current) => (current.includes(key) ? current.filter((item) => item !== key) : [...current, key]));
 
   return (
-    <div className={`lib-browser ${activeId ? "has-detail" : ""}`}>
+    <div className={`lib-browser ${activeId || selection.size > 1 ? "has-detail" : ""}`}>
       <div className="lib-browser__main">
         <div className="lib-toolbar">
           <label className="lib-search">
@@ -140,12 +143,21 @@ export function SongBrowser({
           onSort={handleSort}
           lowBitrate={lowBitrate}
           // The details panel shows the source, so the table gives up that column.
-          hideColumns={activeId ? [...(hideColumns || []), "source"] : hideColumns}
+          hideColumns={activeId || selection.size > 1 ? [...(hideColumns || []), "source"] : hideColumns}
           emptyText={search || quick.length ? "No songs match these filters." : "No songs here yet."}
         />
       </div>
 
-      {activeId && (
+      {selection.size > 1 ? (
+        <BulkEditor
+          trackIds={selection}
+          query={query}
+          onClose={() => setSelection(new Set())}
+          onChanged={onChanged}
+          onError={onError}
+          onWriteTags={onWriteTags}
+        />
+      ) : activeId && (
         <TrackDetail
           trackId={activeId}
           revision={revision}
@@ -154,9 +166,9 @@ export function SongBrowser({
           onClose={() => setActiveId(null)}
           onOpenAlbum={onOpenAlbum}
           onError={onError}
-        >
-          {detailContent}
-        </TrackDetail>
+          onChanged={onChanged}
+          onWriteTags={onWriteTags}
+        />
       )}
     </div>
   );

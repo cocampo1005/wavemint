@@ -67,9 +67,36 @@ const sourcePatch = v.obj(
   { optional: false },
 );
 
+// Editable fields (values are normalized again in edits.cjs).
+const editFields = v.obj(
+  {
+    title: text(500),
+    artist: text(500),
+    albumArtist: text(500),
+    album: text(500),
+    genre: text(200),
+    year: v.int({ min: 0, max: 9999, optional: true }),
+    trackNo: v.int({ min: 0, max: 999, optional: true }),
+    trackTotal: v.int({ min: 0, max: 999, optional: true }),
+    discNo: v.int({ min: 0, max: 99, optional: true }),
+    discTotal: v.int({ min: 0, max: 99, optional: true }),
+    composer: text(500),
+    comment: text(2000),
+    compilation: v.bool(),
+    rating: v.int({ min: 0, max: 5, optional: true }),
+    notes: text(2000),
+  },
+  { optional: false },
+);
+const editList = v.array(v.obj({ trackId: id(), fields: editFields }, { optional: false }), { max: 20000, optional: false });
+const fieldNames = v.oneOf(["title", "artist", "albumArtist", "album", "genre", "year", "trackNo", "trackTotal", "discNo", "discTotal", "composer", "comment", "compilation", "rating", "notes"], { optional: false });
+const trackIdList = (options = {}) => v.array(id(), { max: 20000, ...options });
+const reviewKinds = v.oneOf(["missing_album", "missing_artist", "missing_album_artist", "unclassified_genre", "missing_artwork", "track_numbering", "inconsistent_album", "similar_albums", "file_problem", "possible_duplicate"]);
+
 /** Renderer-callable worker methods and their parameter schemas. */
 const WORKER_METHODS = {
   getOverview: {},
+  getStatus: {},
   listTracks: listParams,
   listTrackIds: { search: text(200), filters: trackFilters },
   listAlbums: { search: text(200), sort: text(20), offset: v.int({ min: 0, optional: true }), limit: v.int({ min: 1, max: 1000, optional: true }), filters: v.obj({ artist: text(300), genre: text(200) }) },
@@ -84,6 +111,47 @@ const WORKER_METHODS = {
   listJobs: {},
   cancelJob: { id: id() },
   getSettings: {},
+
+  // Metadata editing.
+  previewEdits: { edits: editList },
+  applyEdits: { edits: editList, exclude: v.array(v.obj({ trackId: id(), field: fieldNames }, { optional: false }), { max: 50000 }), label: text(200) },
+  suggestTitleCase: { trackIds: trackIdList({ optional: false }) },
+  editAlbum: { releaseId: id(), fields: editFields, label: text(200) },
+  copyArtwork: { trackIds: trackIdList({ optional: false }), fromTrackId: id() },
+  clearArtwork: { trackIds: trackIdList({ optional: false }) },
+  albumTrackIds: { releaseId: id() },
+  previewTagWrite: { trackIds: trackIdList() },
+  writeTags: { trackIds: trackIdList() },
+
+  // History.
+  listOperations: { limit: v.int({ min: 1, max: 500, optional: true }), offset: v.int({ min: 0, optional: true }) },
+  getOperation: { id: id() },
+  undoOperation: { id: id() },
+
+  // Genres.
+  listGenreTaxonomy: {},
+  genreReport: {},
+  createGenre: { name: v.str({ max: 80, optional: false, allowEmpty: false }), parentId: id({ optional: true }), description: text(300) },
+  renameGenre: { id: id(), name: v.str({ max: 80, optional: false, allowEmpty: false }) },
+  mergeGenres: { targetId: id(), genreIds: v.array(id(), { max: 500 }), labels: v.array(text(200), { max: 500 }) },
+  deleteGenre: { id: id() },
+  setGenreParent: { id: id(), parentId: id({ optional: true }) },
+  addGenreAlias: { alias: v.str({ max: 80, optional: false, allowEmpty: false }), genreId: id() },
+  removeGenreAlias: { alias: v.str({ max: 200, optional: false }) },
+  adoptGenreLabels: { labels: v.array(text(200), { max: 2000 }) },
+  listGenreRules: {},
+  addGenreRule: { kind: v.oneOf(["artist", "album"], { optional: false }), artist: text(300), releaseId: id({ optional: true }), genreId: id() },
+  updateGenreRule: { id: id(), enabled: v.bool({ optional: false }) },
+  removeGenreRule: { id: id() },
+  previewGenreRules: {},
+  applyGenreRules: { exclude: trackIdList() },
+
+  // Review queue.
+  refreshReview: {},
+  reviewSummary: {},
+  listReviewItems: { kind: reviewKinds, status: v.oneOf(["open", "needs_review", "suggested", "approved", "ignored", "resolved"]), offset: v.int({ min: 0, optional: true }), limit: v.int({ min: 1, max: 500, optional: true }) },
+  setReviewStatus: { ids: v.array(id(), { max: 5000, optional: false }), status: v.oneOf(["needs_review", "ignored", "resolved"], { optional: false }) },
+  approveSuggestions: { ids: v.array(id(), { max: 5000, optional: false }) },
 };
 
 function createLibraryHost({ app, ipcMain, dialog, shell, BrowserWindow, protocol, binaries, logger = console }) {
@@ -205,6 +273,18 @@ function createLibraryHost({ app, ipcMain, dialog, shell, BrowserWindow, protoco
         return call("updateSource", { id: params.id, patch: { rootPath } });
       },
     },
+    setArtworkFromDialog: {
+      schema: { trackIds: trackIdList({ optional: false }) },
+      run: async (sender, params) => {
+        const result = await dialog.showOpenDialog(BrowserWindow.fromWebContents(sender), {
+          title: "Choose cover art",
+          properties: ["openFile", "dontAddToRecent"],
+          filters: [{ name: "Images (JPEG or PNG)", extensions: ["jpg", "jpeg", "png"] }],
+        });
+        if (result.canceled || !result.filePaths.length) return null;
+        return call("setArtworkFromPath", { trackIds: params.trackIds, filePath: result.filePaths[0] });
+      },
+    },
     showFileInFolder: {
       schema: { fileId: id() },
       run: async (_sender, params) => {
@@ -315,4 +395,7 @@ function registerLibrarySchemes(protocol) {
   ]);
 }
 
-module.exports = { HOST_SCHEMES: [MEDIA_SCHEME, ART_SCHEME], WORKER_METHODS, createLibraryHost, registerLibrarySchemes };
+// Host methods (dialogs, shell) handled in the main process itself.
+const HOST_METHOD_NAMES = ["addSourceFromDialog", "relinkSource", "setArtworkFromDialog", "showFileInFolder"];
+
+module.exports = { HOST_METHOD_NAMES, HOST_SCHEMES: [MEDIA_SCHEME, ART_SCHEME], WORKER_METHODS, createLibraryHost, registerLibrarySchemes };

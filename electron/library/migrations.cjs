@@ -151,6 +151,114 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 2,
+    name: "metadata editing: artwork, genres, rules, review queue, operations journal, change log",
+    up(db) {
+      db.exec(`
+        -- Artwork chosen in WaveMint (overrides the active file's embedded art).
+        ALTER TABLE tracks ADD COLUMN artwork_hash TEXT;
+
+        -- The user's genre taxonomy.
+        CREATE TABLE genres (
+          id          INTEGER PRIMARY KEY,
+          name        TEXT NOT NULL UNIQUE COLLATE NOCASE,
+          parent_id   INTEGER REFERENCES genres(id) ON DELETE SET NULL,
+          description TEXT NOT NULL DEFAULT '',
+          created_at  TEXT NOT NULL
+        );
+
+        -- Imported labels mapped to a taxonomy genre ("Alt Rock" -> "Alternative Rock").
+        CREATE TABLE genre_aliases (
+          alias_key  TEXT PRIMARY KEY,
+          alias      TEXT NOT NULL,
+          genre_id   INTEGER NOT NULL REFERENCES genres(id) ON DELETE CASCADE,
+          created_at TEXT NOT NULL
+        );
+
+        -- Deterministic classification rules (artist / album defaults).
+        CREATE TABLE genre_rules (
+          id          INTEGER PRIMARY KEY,
+          kind        TEXT NOT NULL CHECK (kind IN ('artist', 'album')),
+          match_key   TEXT NOT NULL,
+          match_label TEXT NOT NULL,
+          genre_id    INTEGER NOT NULL REFERENCES genres(id) ON DELETE CASCADE,
+          enabled     INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+          created_at  TEXT NOT NULL,
+          UNIQUE (kind, match_key)
+        );
+
+        -- Additional internal genre labels (the primary genre stays on tracks.genre).
+        CREATE TABLE track_genres (
+          track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+          genre_id INTEGER NOT NULL REFERENCES genres(id) ON DELETE CASCADE,
+          PRIMARY KEY (track_id, genre_id)
+        );
+
+        -- Library maintenance queue. Decisions persist across sessions and rescans.
+        CREATE TABLE review_items (
+          id          INTEGER PRIMARY KEY,
+          kind        TEXT NOT NULL,
+          entity_type TEXT NOT NULL CHECK (entity_type IN ('track', 'release', 'file')),
+          entity_id   INTEGER NOT NULL,
+          status      TEXT NOT NULL DEFAULT 'needs_review'
+                      CHECK (status IN ('needs_review', 'suggested', 'approved', 'ignored', 'resolved')),
+          details     TEXT,
+          suggestion  TEXT,
+          created_at  TEXT NOT NULL,
+          updated_at  TEXT NOT NULL,
+          UNIQUE (kind, entity_type, entity_id)
+        );
+        CREATE INDEX review_items_status ON review_items(status, kind);
+
+        -- Journal of every change WaveMint makes (database edits and file operations).
+        CREATE TABLE operations (
+          id          INTEGER PRIMARY KEY,
+          kind        TEXT NOT NULL,
+          label       TEXT NOT NULL,
+          status      TEXT NOT NULL
+                      CHECK (status IN ('running', 'completed', 'failed', 'partial', 'undone', 'interrupted')),
+          undoable    INTEGER NOT NULL DEFAULT 1 CHECK (undoable IN (0, 1)),
+          undo_of     INTEGER REFERENCES operations(id) ON DELETE SET NULL,
+          summary     TEXT,
+          created_at  TEXT NOT NULL,
+          finished_at TEXT
+        );
+
+        -- Per-file steps of a file operation; used for recovery after an interruption.
+        CREATE TABLE operation_steps (
+          id           INTEGER PRIMARY KEY,
+          operation_id INTEGER NOT NULL REFERENCES operations(id) ON DELETE CASCADE,
+          seq          INTEGER NOT NULL,
+          action       TEXT NOT NULL,
+          state        TEXT NOT NULL DEFAULT 'pending',
+          file_id      INTEGER,
+          track_id     INTEGER,
+          target_path  TEXT,
+          staged_path  TEXT,
+          backup_path  TEXT,
+          details      TEXT,
+          error        TEXT,
+          updated_at   TEXT NOT NULL
+        );
+        CREATE INDEX operation_steps_operation ON operation_steps(operation_id);
+
+        -- Field-level history of metadata changes (values JSON-encoded).
+        CREATE TABLE change_log (
+          id           INTEGER PRIMARY KEY,
+          operation_id INTEGER REFERENCES operations(id) ON DELETE SET NULL,
+          entity_type  TEXT NOT NULL,
+          entity_id    INTEGER NOT NULL,
+          field        TEXT NOT NULL,
+          old_value    TEXT,
+          new_value    TEXT,
+          created_at   TEXT NOT NULL
+        );
+        CREATE INDEX change_log_entity ON change_log(entity_type, entity_id);
+        CREATE INDEX change_log_operation ON change_log(operation_id);
+      `);
+    },
+  },
 ];
 
 module.exports = { MIGRATIONS };

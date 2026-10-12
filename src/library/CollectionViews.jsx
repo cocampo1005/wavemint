@@ -107,7 +107,7 @@ export function AlbumsView({ revision, onOpenAlbum, filters = {}, chips = [], on
   );
 }
 
-export function AlbumHeader({ releaseId, revision }) {
+export function AlbumHeader({ releaseId, revision, onEdit }) {
   const { data: album } = useLoader(() => libraryApi.getAlbum({ id: releaseId }), [releaseId, revision]);
   if (!album) return null;
 
@@ -137,6 +137,11 @@ export function AlbumHeader({ releaseId, revision }) {
           <span>{formatDuration(album.duration_ms)}</span>
         </div>
         {album.genres && <div className="lib-album-head__genres">{album.genres.split(",").join(" · ")}</div>}
+        {onEdit && (
+          <button type="button" className="btn btn--secondary btn--sm lib-album-head__edit" onClick={() => onEdit(album)}>
+            Edit Album…
+          </button>
+        )}
       </div>
     </div>
   );
@@ -172,26 +177,6 @@ export function ArtistsView({ revision, onOpenArtist }) {
       {data && data.total > data.rows.length && (
         <p className="lib-empty-note">Showing the first {formatNumber(data.rows.length)} artists. Search to narrow the list.</p>
       )}
-    </div>
-  );
-}
-
-export function GenresView({ revision, onOpenGenre }) {
-  const { data, error } = useLoader(() => libraryApi.listGenres(), [revision]);
-
-  return (
-    <div className="lib-collection">
-      <LoadError error={error} />
-      <div className="lib-genre-grid">
-        {data?.map((genre) => (
-          <button key={genre.name || "(none)"} type="button" className={`lib-genre ${genre.name ? "" : "is-unclassified"}`} onClick={() => onOpenGenre(genre.name)}>
-            <span className="lib-genre__name">{genre.name || "Unclassified"}</span>
-            <span className="lib-genre__meta">
-              {pluralize(genre.track_count, "song")} · {pluralize(genre.artist_count, "artist")}
-            </span>
-          </button>
-        ))}
-      </div>
     </div>
   );
 }

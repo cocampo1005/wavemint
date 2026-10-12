@@ -27,7 +27,7 @@ const TRACK_COLUMNS = `
   t.disc_total, t.year, t.genre, t.composer, t.compilation, t.duration_ms, t.review_status, t.quality_status,
   t.rating, t.tags_dirty, t.created_at,
   f.id AS file_id, f.codec, f.container, f.lossless, f.bitrate, f.sample_rate, f.bit_depth, f.size,
-  f.status AS file_status, f.artwork_hash, f.source_id, s.name AS source_name, s.role AS source_role,
+  f.status AS file_status, COALESCE(t.artwork_hash, f.artwork_hash) AS artwork_hash, f.source_id, s.name AS source_name, s.role AS source_role, s.read_only AS source_read_only,
   (SELECT COUNT(*) FROM files v WHERE v.track_id = t.id) AS version_count`;
 
 const TRACK_FROM = `
@@ -74,7 +74,7 @@ function trackFilterSql(filters = {}, search = "") {
   if (filters.lowBitrate) {
     where.push(`f.lossless = 0 AND f.bitrate > 0 AND f.bitrate < ${LOW_BITRATE_KBPS}`);
   }
-  if (filters.missingArtwork) where.push("(f.artwork_hash IS NULL)");
+  if (filters.missingArtwork) where.push("(t.artwork_hash IS NULL AND f.artwork_hash IS NULL)");
   if (filters.missingAlbum) where.push("t.album = ''");
   if (filters.missingAlbumArtist) where.push("t.album != '' AND t.album_artist = '' AND t.compilation = 0");
   if (filters.possibleDuplicates) {
@@ -160,8 +160,8 @@ function listAlbums(db, { search = "", sort = "artist", offset = 0, limit = 200,
     .prepare(
       `SELECT r.id, r.title, r.album_artist, r.year, r.edition, r.release_type, r.mb_release_id,
               COALESCE(r.artwork_hash,
-                (SELECT f.artwork_hash FROM tracks t JOIN files f ON f.id = t.active_file_id
-                 WHERE t.release_id = r.id AND t.state = 'active' AND f.artwork_hash IS NOT NULL LIMIT 1)) AS artwork_hash,
+                (SELECT COALESCE(t.artwork_hash, f.artwork_hash) FROM tracks t JOIN files f ON f.id = t.active_file_id
+                 WHERE t.release_id = r.id AND t.state = 'active' AND COALESCE(t.artwork_hash, f.artwork_hash) IS NOT NULL LIMIT 1)) AS artwork_hash,
               (SELECT COUNT(*) FROM tracks t WHERE t.release_id = r.id AND t.state = 'active') AS track_count,
               (SELECT SUM(t.duration_ms) FROM tracks t WHERE t.release_id = r.id AND t.state = 'active') AS duration_ms,
               (SELECT GROUP_CONCAT(DISTINCT t.genre) FROM tracks t WHERE t.release_id = r.id AND t.state = 'active' AND t.genre != '') AS genres
@@ -179,8 +179,8 @@ function getAlbum(db, id) {
       .prepare(
         `SELECT r.*,
                 COALESCE(r.artwork_hash,
-                  (SELECT f.artwork_hash FROM tracks t JOIN files f ON f.id = t.active_file_id
-                   WHERE t.release_id = r.id AND t.state = 'active' AND f.artwork_hash IS NOT NULL LIMIT 1)) AS artwork_hash,
+                  (SELECT COALESCE(t.artwork_hash, f.artwork_hash) FROM tracks t JOIN files f ON f.id = t.active_file_id
+                   WHERE t.release_id = r.id AND t.state = 'active' AND COALESCE(t.artwork_hash, f.artwork_hash) IS NOT NULL LIMIT 1)) AS artwork_hash,
                 (SELECT COUNT(*) FROM tracks t WHERE t.release_id = r.id AND t.state = 'active') AS track_count,
                 (SELECT SUM(t.duration_ms) FROM tracks t WHERE t.release_id = r.id AND t.state = 'active') AS duration_ms,
                 (SELECT GROUP_CONCAT(DISTINCT t.genre) FROM tracks t WHERE t.release_id = r.id AND t.state = 'active' AND t.genre != '') AS genres
@@ -209,8 +209,8 @@ function listArtists(db, { search = "", offset = 0, limit = 500 } = {}) {
                GROUP BY t2.artist ORDER BY COUNT(*) DESC LIMIT 1) AS name,
               COUNT(*) AS track_count,
               COUNT(DISTINCT t.release_id) AS album_count,
-              (SELECT f.artwork_hash FROM tracks t3 JOIN files f ON f.id = t3.active_file_id
-               WHERE t3.artist_key = t.artist_key AND f.artwork_hash IS NOT NULL LIMIT 1) AS artwork_hash
+              (SELECT COALESCE(t3.artwork_hash, f.artwork_hash) FROM tracks t3 JOIN files f ON f.id = t3.active_file_id
+               WHERE t3.artist_key = t.artist_key AND COALESCE(t3.artwork_hash, f.artwork_hash) IS NOT NULL LIMIT 1) AS artwork_hash
        FROM tracks t WHERE t.state = 'active' AND t.artist_key != '' ${filter}
        GROUP BY t.artist_key ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?`,
     )
@@ -266,6 +266,21 @@ function listSources(db) {
     .map((source) => ({ ...source, last_scan_stats: parseJson(source.last_scan_stats, null) }));
 }
 
+/** Small counts for navigation badges (cheap; called after every change). */
+function getStatus(db) {
+  const unsaved = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM tracks t
+       JOIN files f ON f.id = t.active_file_id JOIN sources s ON s.id = f.source_id
+       WHERE t.state = 'active' AND t.tags_dirty = 1 AND s.read_only = 0 AND f.status = 'ok'
+         AND f.ext IN ('.mp3', '.m4a', '.m4b', '.flac')`,
+    )
+    .get().n;
+  const review = db.prepare("SELECT COUNT(*) AS n FROM review_items WHERE status IN ('needs_review', 'suggested')").get().n;
+  const sources = db.prepare("SELECT COUNT(*) AS n FROM sources").get().n;
+  return { unsavedWritable: unsaved, reviewOpen: review, sources };
+}
+
 function getDashboard(db) {
   const one = (sql, ...params) => db.prepare(sql).get(...params);
   const totals = one(`
@@ -294,13 +309,15 @@ function getDashboard(db) {
       SUM(CASE WHEN t.artist = '' THEN 1 ELSE 0 END) AS missing_artist,
       SUM(CASE WHEN t.genre = '' THEN 1 ELSE 0 END) AS missing_genre,
       SUM(CASE WHEN t.album != '' AND t.album_artist = '' AND t.compilation = 0 THEN 1 ELSE 0 END) AS missing_album_artist,
-      SUM(CASE WHEN f.artwork_hash IS NULL THEN 1 ELSE 0 END) AS missing_artwork,
+      SUM(CASE WHEN t.artwork_hash IS NULL AND f.artwork_hash IS NULL THEN 1 ELSE 0 END) AS missing_artwork,
       SUM(CASE WHEN f.id IS NULL OR f.status != 'ok' THEN 1 ELSE 0 END) AS missing_files,
       SUM(CASE WHEN f.lossless = 0 AND f.bitrate > 0 AND f.bitrate < ${LOW_BITRATE_KBPS} THEN 1 ELSE 0 END) AS low_bitrate,
       SUM(CASE WHEN t.review_status = 'needs_review' THEN 1 ELSE 0 END) AS needs_review,
       SUM(CASE WHEN t.quality_status IN ('user_marked_poor', 'upgrade_available') THEN 1 ELSE 0 END) AS upgrade_queue,
-      SUM(CASE WHEN t.tags_dirty = 1 THEN 1 ELSE 0 END) AS unsaved_tags
-    FROM tracks t LEFT JOIN files f ON f.id = t.active_file_id
+      SUM(CASE WHEN t.tags_dirty = 1 THEN 1 ELSE 0 END) AS unsaved_tags,
+      SUM(CASE WHEN t.tags_dirty = 1 AND s.read_only = 0 AND f.status = 'ok'
+               AND f.ext IN ('.mp3', '.m4a', '.m4b', '.flac') THEN 1 ELSE 0 END) AS unsaved_writable
+    FROM tracks t LEFT JOIN files f ON f.id = t.active_file_id LEFT JOIN sources s ON s.id = f.source_id
     WHERE t.state = 'active'`);
 
   // Same artist + title (including version markers) more than once. These
@@ -325,6 +342,7 @@ module.exports = {
   LOW_BITRATE_KBPS,
   getAlbum,
   getDashboard,
+  getStatus,
   getTrack,
   listAlbums,
   listArtists,

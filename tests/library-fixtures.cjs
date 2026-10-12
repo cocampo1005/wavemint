@@ -97,4 +97,53 @@ function makeTempDir(t, prefix = "wavemint-lib-") {
   return dir;
 }
 
-module.exports = { HAVE_FFMPEG, SKIP_REASON, coverBytes, ensureBase, makeTempDir, makeTrack, snapshotFolder };
+const quietLogger = { log() {}, warn() {}, error() {} };
+
+/** A migrated library database in a temp folder, closed and deleted after the test. */
+async function createTestLibrary(t) {
+  const { migrate, openDatabase } = require("../electron/library/db.cjs");
+  const { createScanner } = require("../electron/library/scanner.cjs");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wavemint-db-"));
+  const file = path.join(dir, "library.db");
+  const { db } = openDatabase(file);
+  t.after(() => {
+    try {
+      db.close();
+    } catch {}
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  await migrate(db, { filePath: file, logger: quietLogger });
+  return { db, dir, scanner: createScanner({ db, logger: quietLogger }) };
+}
+
+/** Adds a folder as a source and scans it. Returns the source id. */
+async function addAndScan(db, scanner, rootPath, options = {}) {
+  const { addSource } = require("../electron/library/sources.cjs");
+  const { id } = addSource(db, { rootPath, ...options });
+  if (options.writable) db.prepare("UPDATE sources SET read_only = 0 WHERE id = ?").run(id);
+  await scanner.scanSource(id);
+  return id;
+}
+
+function mediaForTests() {
+  const { createMedia } = require("../electron/library/media.cjs");
+  return createMedia({
+    ffmpegPath: FFMPEG,
+    ffprobePath: path.join(BIN, process.platform === "win32" ? "ffprobe.exe" : "ffprobe"),
+    cacheDir: path.join(os.tmpdir(), "wavemint-test-media-cache"),
+  });
+}
+
+module.exports = {
+  HAVE_FFMPEG,
+  SKIP_REASON,
+  addAndScan,
+  coverBytes,
+  createTestLibrary,
+  ensureBase,
+  makeTempDir,
+  makeTrack,
+  mediaForTests,
+  quietLogger,
+  snapshotFolder,
+};

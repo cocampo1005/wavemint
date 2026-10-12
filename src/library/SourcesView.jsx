@@ -48,6 +48,7 @@ export function ScanProgress({ job, onCancel }) {
 
 function SourceCard({ source, busy, onChanged, onError }) {
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [confirmWritable, setConfirmWritable] = useState(false);
   const stats = source.last_scan_stats;
 
   const run = async (action) => {
@@ -143,6 +144,40 @@ function SourceCard({ source, busy, onChanged, onError }) {
           </>
         )}
       </div>
+
+      {source.role !== "managed" && (
+        <div className="lib-source__writable">
+          {source.read_only ? (
+            confirmWritable ? (
+              <span className="lib-confirm">
+                WaveMint will be allowed to write tags into files in this folder (each file is backed up first). Other apps
+                that use these files, such as iTunes, may show the changes.
+                <button type="button" className="btn btn--ghost btn--sm" onClick={() => setConfirmWritable(false)}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--danger btn--sm"
+                  onClick={() => run(() => libraryApi.updateSource({ id: source.id, patch: { readOnly: false } })).then(() => setConfirmWritable(false))}
+                >
+                  Allow Writing
+                </button>
+              </span>
+            ) : (
+              <button type="button" className="btn btn--link" onClick={() => setConfirmWritable(true)}>
+                Allow WaveMint to write tags in this folder…
+              </button>
+            )
+          ) : (
+            <span className="settings-hint">
+              WaveMint may write tags here.{" "}
+              <button type="button" className="btn btn--link" onClick={() => run(() => libraryApi.updateSource({ id: source.id, patch: { readOnly: true } }))}>
+                Make read-only again
+              </button>
+            </span>
+          )}
+        </div>
+      )}
 
       <div className="lib-source__actions">
         <button

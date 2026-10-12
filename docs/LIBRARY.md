@@ -163,3 +163,35 @@ is exercised by real code.
   rescan takes 0.2 s.
 - Verified in the packaged app (isolated profile): worker thread and taglib
   load from app.asar, artwork and audio protocols work.
+
+### Phase 2 — Metadata and genre editing: done
+
+- Migration 2: genres, aliases, rules, secondary genres, review items, the
+  operations journal (operations + operation_steps) and a field-level change
+  log; tracks gain WaveMint-chosen artwork.
+- Editing (`electron/library/edits.cjs`): single, bulk and album edits with a
+  preview of existing → proposed values per song and field; untick anything
+  to keep it. Bulk edits only change fields you fill in. Edited fields become
+  curated and survive rescans. Title Case and track numbering tools.
+- Artwork (`artstore.cjs`): JPEG/PNG stored once by hash with the original
+  bytes (no recompression); per song or per album; revert to the file's own art.
+- Writing tags (`fileops.cjs`): only in writable sources (imported folders are
+  read-only unless you allow writing, with a warning) and editable formats
+  (MP3 as ID3v2.3, M4A/ALAC, FLAC). Per file: verified backup → staged copy →
+  tags read back and audio-stream hash compared → swap with a rollback path →
+  database. Interrupted writes are rolled back at the next start; Undo
+  restores files from their backups. Files changed outside WaveMint since the
+  last scan are never overwritten.
+- Genres (`genres.cjs`): your own taxonomy with parents, rename/merge (old
+  names kept as aliases), unrecognized labels with suggestions, near-duplicate
+  names, and rules (album > artist > alias mapping; a genre you set by hand
+  always wins and rule results never count as manual).
+- Review queue (`review.cjs`): missing album/artist/album artist, unclassified
+  genres, missing artwork, suspicious track numbers, inconsistent album
+  details and similar album names (with suggested fixes), missing or
+  unreadable files, possible duplicates. Ignored stays ignored, fixed issues
+  resolve themselves, returning issues reopen.
+- History: every change with details and Undo (metadata changes field by
+  field, conflicts with later edits reported instead of overwritten).
+- Verified in the real app on synthetic libraries: legacy folder byte-identical
+  throughout; a written AAC file kept a bit-identical audio stream.

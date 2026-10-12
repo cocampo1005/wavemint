@@ -5,7 +5,6 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { runCommand } = require("../processes.cjs");
-const { readArtwork } = require("./tags.cjs");
 
 const THUMB_SIZES = new Set([64, 160, 320, 600]);
 
@@ -93,9 +92,9 @@ function createMedia({ ffmpegPath, ffprobePath, cacheDir, env = process.env }) {
 
   /**
    * Returns the path of a cached JPEG thumbnail for an artwork hash, making
-   * it from `sourceFile` (a file that embeds that artwork) when needed.
+   * it from the bytes `loadArt()` returns ({ data }) when needed.
    */
-  async function thumbnail(hash, size, sourceFile) {
+  async function thumbnail(hash, size, loadArt) {
     const px = THUMB_SIZES.has(size) ? size : 160;
     if (!/^[a-f0-9]{40}$/.test(hash)) throw new Error("Invalid artwork id");
     const target = path.join(thumbsDir, hash.slice(0, 2), `${hash}-${px}.jpg`);
@@ -106,8 +105,8 @@ function createMedia({ ffmpegPath, ffprobePath, cacheDir, env = process.env }) {
       inFlight.set(
         key,
         (async () => {
-          const art = readArtwork(sourceFile);
-          if (!art) throw new Error("This file has no embedded artwork");
+          const art = loadArt();
+          if (!art) throw new Error("This artwork is no longer available");
           fs.mkdirSync(path.dirname(target), { recursive: true });
           const temp = path.join(thumbsDir, `${key}-${crypto.randomBytes(4).toString("hex")}.src`);
           const tempOut = `${target}.${process.pid}.tmp.jpg`;

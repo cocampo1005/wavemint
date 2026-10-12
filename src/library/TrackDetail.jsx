@@ -1,17 +1,9 @@
 import { artworkUrl, formatBytes, formatDate, formatDuration, formatQuality } from "./format";
 import { CloseIcon, FolderOpenIcon, PauseIcon, PlayIcon, WarningIcon } from "./icons";
+import { TrackEditor } from "./Editors";
 import { errorMessage, libraryApi, useLoader } from "./useLibrary";
 
 const ROLE_LABELS = { legacy: "Legacy", curated: "Curated", managed: "Managed", other: "Library" };
-
-function Field({ label, children }) {
-  return (
-    <div className="lib-field">
-      <span className="lib-field__label">{label}</span>
-      <span className="lib-field__value">{children || <em className="lib-empty">—</em>}</span>
-    </div>
-  );
-}
 
 export function FileVersions({ track, playing, onPlayFile, onError }) {
   return (
@@ -68,10 +60,11 @@ export function FileVersions({ track, playing, onPlayFile, onError }) {
   );
 }
 
-export function TrackDetail({ trackId, revision, playing, onPlayFile, onClose, onOpenAlbum, onError, children }) {
+export function TrackDetail({ trackId, revision, playing, onPlayFile, onClose, onOpenAlbum, onError, onChanged, onWriteTags }) {
   const { data: track, error, loading } = useLoader(() => libraryApi.getTrack({ id: trackId }), [trackId, revision]);
 
   if (!trackId) return null;
+  const artwork = track ? track.artwork_hash || track.files.find((file) => file.id === track.active_file_id)?.artwork_hash : null;
 
   return (
     <aside className="lib-detail" aria-label="Song details">
@@ -92,11 +85,8 @@ export function TrackDetail({ trackId, revision, playing, onPlayFile, onClose, o
         <div className="lib-detail__body">
           <div className="lib-detail__hero">
             <div className="lib-detail__art">
-              {track.files.find((file) => file.id === track.active_file_id)?.artwork_hash ? (
-                <img
-                  src={artworkUrl(track.files.find((file) => file.id === track.active_file_id).artwork_hash, 320)}
-                  alt={`${track.album || track.title} artwork`}
-                />
+              {artwork ? (
+                <img src={artworkUrl(artwork, 320)} alt={`${track.album || track.title} artwork`} />
               ) : (
                 <span className="lib-art-placeholder lib-art-placeholder--lg">No artwork</span>
               )}
@@ -121,24 +111,10 @@ export function TrackDetail({ trackId, revision, playing, onPlayFile, onClose, o
             </div>
           </div>
 
-          {children ? (
-            children(track)
-          ) : (
-            <div className="lib-fields">
-              <Field label="Album artist">{track.album_artist}</Field>
-              <Field label="Genre">{track.genre}</Field>
-              <Field label="Year">{track.year}</Field>
-              <Field label="Track">
-                {track.track_no ? `${track.track_no}${track.track_total ? ` of ${track.track_total}` : ""}` : ""}
-              </Field>
-              <Field label="Disc">
-                {track.disc_no ? `${track.disc_no}${track.disc_total ? ` of ${track.disc_total}` : ""}` : ""}
-              </Field>
-              <Field label="Composer">{track.composer}</Field>
-              <Field label="Duration">{formatDuration(track.duration_ms)}</Field>
-              <Field label="Added">{formatDate(track.created_at)}</Field>
-            </div>
-          )}
+          <div className="lib-detail__meta">
+            {formatDuration(track.duration_ms)} · added {formatDate(track.created_at)}
+          </div>
+          <TrackEditor track={track} onChanged={onChanged} onError={onError} onWriteTags={onWriteTags} />
 
           <span className="section-label lib-detail__section">
             File versions ({track.files.length})

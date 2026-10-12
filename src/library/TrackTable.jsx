@@ -29,7 +29,8 @@ function StatusBadges({ row, lowBitrate }) {
   if (row.file_status === "missing") badges.push(["missing", "File missing"]);
   else if (row.file_status === "unreadable") badges.push(["error", "Unreadable"]);
   if (row.version_count > 1) badges.push(["info", `${row.version_count} versions`]);
-  if (row.tags_dirty) badges.push(["warn", "Unsaved tags"]);
+  // Edits to read-only sources wait for consolidation: not a warning.
+  if (row.tags_dirty) badges.push(row.source_read_only ? ["quiet", "Edited"] : ["warn", "Unsaved tags"]);
   if (lowBitrate && !row.lossless && row.bitrate && row.bitrate < lowBitrate) badges.push(["quiet", "Low bitrate"]);
   return badges.map(([tone, text]) => (
     <span key={text} className={`lib-badge is-${tone}`}>
