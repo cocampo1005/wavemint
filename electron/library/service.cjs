@@ -5,6 +5,7 @@
 const fs = require("fs");
 const path = require("path");
 const { createArtStore } = require("./artstore.cjs");
+const { createAudioEditor } = require("./audioedit.cjs");
 const { getSetting, setSetting } = require("./db.cjs");
 const queries = require("./queries.cjs");
 const sources = require("./sources.cjs");
@@ -22,6 +23,8 @@ const { createUpgrader } = require("./upgrade.cjs");
 const { createIdentifier } = require("./identify.cjs");
 const { createImporter } = require("./importer.cjs");
 const { createExporter } = require("./exporter.cjs");
+const { createRemoval } = require("./removal.cjs");
+const { DEFAULT_RETENTION, createStorage } = require("./storage.cjs");
 const playlists = require("./playlists.cjs");
 const { createMusicBrainz } = require("./musicbrainz.cjs");
 const { createWebClient } = require("./webclient.cjs");
@@ -36,9 +39,12 @@ const SETTINGS_DEFAULTS = {
   convertWavAiff: true,
   appleAutoAddFolder: "",
   musicBrainzEnabled: false,
+  // How long previous versions and tag-write backups are kept (storage.cjs).
+  keepPreviousVersions: DEFAULT_RETENTION,
+  autoCleanup: true,
 };
 
-function createLibraryService({ db, media, jobs, paths, logger = console, appVersion = "dev", fetchImpl }) {
+function createLibraryService({ db, media, jobs, paths, logger = console, emit = () => {}, appVersion = "dev", fetchImpl }) {
   const scanner = createScanner({ db, probe: media?.probe, logger });
   const artStore = createArtStore(path.join(paths.dataDir, "artwork-store"));
   const fileOps = createFileOps({ db, media, artStore, backupsRoot: paths.backupsDir, logger });
@@ -50,6 +56,10 @@ function createLibraryService({ db, media, jobs, paths, logger = console, appVer
   const identifier = createIdentifier({ db, mb: createMusicBrainz({ web }), artStore, getSettings, logger });
   const importer = createImporter({ db, media, artStore, upgrader, managedSource: consolidator.managedSource, getSettings, paths, logger });
   const exporter = createExporter({ db, media, artStore, getSettings, logger });
+  const audioEditor = createAudioEditor({ db, media, artStore, upgrader, importer, managedSource: consolidator.managedSource, getSettings, paths, logger });
+  audioEditor.cleanup();
+  const removal = createRemoval({ db });
+  const storage = createStorage({ db, managedSource: consolidator.managedSource, getSettings, paths, importer, logger });
 
   // Anything interrupted last time (crash, power loss) is finished or rolled
   // back before any new work starts.
@@ -97,6 +107,32 @@ function createLibraryService({ db, media, jobs, paths, logger = console, appVer
   }
 
   const refreshQuality = (trackIds = null) => quality.refreshQuality(db, { trackIds, lowBitrateKbps: getSettings().lowBitrateKbps });
+
+  // Songs added or removed one at a time refresh the review queue once
+  // things settle, not after every song of a playlist.
+  let reviewTimer = null;
+  function songsAdded(trackIds) {
+    refreshQuality(trackIds);
+    emit("library-changed", { added: trackIds });
+    scheduleReview();
+  }
+  function songsRemoved(trackIds) {
+    if (!trackIds.length) return;
+    emit("library-changed", { removed: trackIds });
+    scheduleReview();
+  }
+  function scheduleReview() {
+    clearTimeout(reviewTimer);
+    reviewTimer = setTimeout(() => {
+      try {
+        review.refreshReview(db);
+        emit("library-changed", { review: true });
+      } catch (error) {
+        logger.warn(`[library] Review refresh failed: ${error.message}`);
+      }
+    }, 3000);
+    reviewTimer.unref?.();
+  }
 
   const methods = {
     // --- overview and browsing -------------------------------------------
@@ -177,8 +213,12 @@ function createLibraryService({ db, media, jobs, paths, logger = console, appVer
     getOperation: ({ id }) => operations.getOperationDetail(db, id),
     undoOperation: async ({ id }) => {
       requireIdle();
-      const operation = db.prepare("SELECT kind FROM operations WHERE id = ?").get(Number(id));
+      const operation = db.prepare("SELECT kind, undoable, summary FROM operations WHERE id = ?").get(Number(id));
       if (!operation) throw new Error("This change no longer exists.");
+      if (!operation.undoable) {
+        const expired = JSON.parse(operation.summary || "{}").expired;
+        throw new Error(expired ? `This change can no longer be undone: ${expired.reason}` : "This change can't be undone.");
+      }
       if (operation.kind === "tag-write") return fileOps.undoTagWrite(id);
       if (operation.kind === "merge") return merge.undoMerge(id);
       if (operation.kind === "consolidate") {
@@ -190,6 +230,12 @@ function createLibraryService({ db, media, jobs, paths, logger = console, appVer
       if (operation.kind === "import") {
         const result = importer.undoImport(id);
         review.refreshReview(db);
+        return result;
+      }
+      if (operation.kind === "remove") {
+        const result = edits.undoMetadataOperation(db, id);
+        emit("library-changed", { restored: true });
+        scheduleReview();
         return result;
       }
       if (operation.kind === "quality") {
@@ -291,10 +337,42 @@ function createLibraryService({ db, media, jobs, paths, logger = console, appVer
       const image = await media.spectrogram(filePath, key);
       return `data:image/png;base64,${fs.readFileSync(image).toString("base64")}`;
     },
-    discardUpgrade: (params) => upgrader.discard(params),
+    discardUpgrade: (params) => {
+      const discarded = upgrader.discard(params);
+      // A replacement extracted from a URL only lived in staging.
+      if (discarded.kind === "extraction") audioEditor.releaseStagedPath(discarded.path);
+      return { discarded: true };
+    },
     listUpgradeCandidates: (params) => upgrader.listCandidates(params),
-    applyUpgrade: ({ candidateId, choices, artwork }) =>
-      jobs.start("upgrade", "Upgrading song", ({ signal, progress }) => upgrader.applyJob({ candidateId, choices, artwork, signal, progress })),
+    applyUpgrade: ({ candidateId, metadata, choices, artwork, artworkHash }) => {
+      const staged = upgrader.resolveCandidateFile({ candidateId });
+      return jobs.start("upgrade", "Upgrading song", async ({ signal, progress }) => {
+        const result = await upgrader.applyJob({ candidateId, metadata, choices, artwork, artworkHash, signal, progress });
+        // WaveMint's copy is in the library now; a staged extraction can go.
+        // The upgrade is complete at this point: tidying up must never turn
+        // it into a reported failure.
+        try {
+          if (staged) audioEditor.releaseStagedPath(staged.path);
+        } catch (error) {
+          logger.warn(`[library] Upgrade cleanup: ${error.message}`);
+        }
+        return result;
+      });
+    },
+    // Host only: an extraction made for an upgrade (main process, download-mp3
+    // with upgradeTrackId) becomes the song's replacement candidate.
+    prepareStagedUpgrade: async ({ token, trackId, source }) => {
+      requireIdle();
+      const staged = audioEditor.resolveExtraction({ token });
+      if (!staged) throw new Error("The extracted audio is no longer available. Extract it again.");
+      return upgrader.prepare({ trackId, filePath: staged.path, kind: "extraction", source });
+    },
+    // Host only: an image chosen in a main-process dialog, stored for later use
+    // (an upgrade's custom artwork). Nothing is assigned to any song.
+    storeArtworkFile: ({ filePath }) => {
+      const { hash } = artStore.saveFromFile(filePath);
+      return { hash };
+    },
 
     // --- identification (MusicBrainz) ---------------------------------------------
     identifySong: async ({ trackId }) => {
@@ -367,6 +445,66 @@ function createLibraryService({ db, media, jobs, paths, logger = console, appVer
     // Host only: the main process saves extractions into staging.
     prepareImportStaging: (params) => importer.prepareStaging(params),
     addStagedImport: (params) => importer.addStaged(params),
+
+    // --- adding extractions and editing audio --------------------------------------
+    checkLibraryMatches: (params) => audioEditor.checkMatches(params),
+    getStagedExtraction: (params) => audioEditor.extractionInfo(params),
+    commitStagedExtraction: async (params) => {
+      const added = await audioEditor.commitExtraction(params);
+      songsAdded([added.trackId]);
+      return added;
+    },
+    discardStagedExtraction: (params) => audioEditor.discardExtraction(params),
+    getAudioEditSource: (params) => audioEditor.editSource(params),
+    audioWaveform: (params) => audioEditor.waveform(params),
+    applyAudioEdit: ({ trackId, edits }) => {
+      // Fail fast (before the job starts) on edits that can't be saved.
+      audioEditor.editSource({ trackId });
+      return jobs.start("audio-edit", "Saving audio edits", async ({ signal, progress }) => {
+        const result = await audioEditor.editTrackJob({ trackId, edits, signal, progress });
+        refreshQuality([trackId]);
+        return result;
+      });
+    },
+    // Host only: the main process saves extractions into staging.
+    prepareExtractionStaging: () => audioEditor.prepareExtraction(),
+    resolveStagedExtraction: (params) => audioEditor.resolveExtraction(params),
+
+    // --- favorites and removal ------------------------------------------------------
+    setFavorite: ({ trackIds, favorite }) => {
+      const ids = [...new Set(trackIds)];
+      const result = db
+        .prepare(`UPDATE tracks SET favorite = ? WHERE state = 'active' AND id IN (${ids.map(() => "?").join(",")})`)
+        .run(favorite ? 1 : 0, ...ids);
+      return { updated: Number(result.changes) };
+    },
+    removeFromLibrary: ({ trackIds }) => {
+      const result = removal.removeFromLibrary({ trackIds });
+      songsRemoved(result.trackIds);
+      return result;
+    },
+    previewFileDeletion: ({ trackIds }) => removal.deletionPlan({ trackIds }),
+    // Host only: the main process moves the files to the Recycle Bin in between.
+    planFileDeletion: ({ trackIds }) => removal.deletionPlan({ trackIds, withPaths: true }),
+    finishFileDeletion: (params) => {
+      const result = removal.finishDeletion(params);
+      songsRemoved(result.trackIds);
+      return result;
+    },
+
+    // --- storage -------------------------------------------------------------------
+    storageReport: () => storage.report(),
+    // Host only: the main process removes what the plan lists, then reports back.
+    planStorageCleanup: ({ categories, auto }) => {
+      if (jobs.isBusy()) {
+        const error = new Error("Wait for the current library task to finish before cleaning up.");
+        error.code = "busy";
+        throw error;
+      }
+      return storage.plan({ categories, auto });
+    },
+    finishStorageCleanup: (params) => storage.finish(params),
+    storageSchedule: () => ({ ...storage.schedule(), busy: jobs.isBusy() }),
 
     // --- playlists -------------------------------------------------------------------
     listPlaylists: () => playlists.listPlaylists(db),

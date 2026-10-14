@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const test = require("node:test");
 
-const { isAutoImportFolder, moveIntoOutputFolder } = require("../electron/outputFiles.cjs");
+const { moveIntoOutputFolder } = require("../electron/outputFiles.cjs");
 const { makeTempDir, writeFile } = require("./helpers.cjs");
 
 test("same-drive moves are a single rename", (t) => {
@@ -55,18 +55,4 @@ test("other failures are reported, not hidden", (t) => {
     () => moveIntoOutputFolder(path.join(dir, "missing.mp3"), path.join(dir, "out.mp3")),
     (error) => error.code === "ENOENT",
   );
-});
-
-test("iTunes and Music auto-import folders are recognized", () => {
-  for (const folder of [
-    "C:\\Users\\Me\\Music\\iTunes\\iTunes Media\\Automatically Add to iTunes",
-    "C:\\Users\\Me\\Music\\iTunes\\iTunes Media\\Automatically Add to iTunes\\",
-    "D:\\Media\\Automatically Add to Music",
-  ]) {
-    assert.equal(isAutoImportFolder(folder), true, folder);
-  }
-
-  for (const folder of ["C:\\Users\\Me\\Music", "C:\\Automatically Add to iTunes\\Albums", "", null]) {
-    assert.equal(isAutoImportFolder(folder), false, String(folder));
-  }
 });

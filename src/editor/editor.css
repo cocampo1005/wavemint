@@ -1,0 +1,322 @@
+/* Audio editor (trim and fades). Tokens from src/index.css; dialog frame
+   from library.css (.lib-dialog). */
+
+.wm-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wm-space-4);
+}
+
+.wm-editor__loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--wm-space-3);
+  min-height: 240px;
+  color: var(--wm-text-muted);
+}
+
+.wm-editor__head {
+  display: flex;
+  align-items: center;
+  gap: var(--wm-space-3);
+}
+
+.wm-editor__art {
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  border-radius: var(--wm-radius-sm);
+  object-fit: cover;
+}
+
+.wm-editor__title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.wm-editor__title strong,
+.wm-editor__title span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-editor__title span {
+  font-size: var(--wm-text-sm);
+}
+
+.wm-editor__lengths {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  margin-left: auto;
+  font-size: var(--wm-text-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---------- Waveform ---------- */
+
+.wm-wave {
+  user-select: none;
+}
+
+.wm-wave__frame {
+  padding: 0 10px;
+  overflow: hidden;
+  border: 1px solid var(--wm-border-subtle);
+  border-radius: var(--wm-radius-md);
+  background: var(--wm-surface-input);
+}
+
+.wm-wave__canvas-wrap {
+  position: relative;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.wm-wave__canvas {
+  display: block;
+}
+
+.wm-wave__removed {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(135deg, rgba(4, 7, 20, 0.45) 0 6px, rgba(4, 7, 20, 0.6) 6px 12px);
+  pointer-events: none;
+}
+
+.wm-wave__envelope {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.wm-wave__envelope polyline {
+  fill: none;
+  stroke: var(--wm-cyan);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+  opacity: 0.9;
+}
+
+.wm-wave__playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--wm-text);
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.5);
+  pointer-events: none;
+}
+
+.wm-wave__handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 16px;
+  margin-left: -8px;
+  cursor: ew-resize;
+  z-index: 2;
+  outline: none;
+}
+
+.wm-wave__handle::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 7px;
+  width: 2px;
+  background: var(--wm-violet);
+}
+
+.wm-wave__grip {
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 12px;
+  height: 36px;
+  margin-top: -18px;
+  border-radius: 6px;
+  background: var(--wm-gradient);
+  box-shadow: 0 2px 8px rgba(2, 5, 18, 0.6);
+  transition: transform var(--wm-dur) var(--wm-ease);
+}
+
+.wm-wave__handle:hover .wm-wave__grip,
+.wm-wave__handle:active .wm-wave__grip {
+  transform: scaleX(1.25);
+}
+
+.wm-wave__handle:focus-visible .wm-wave__grip {
+  box-shadow: var(--wm-focus-ring);
+}
+
+.wm-wave__timeline {
+  position: relative;
+  overflow: hidden;
+  height: 20px;
+  margin: var(--wm-space-1) 11px 0;
+  color: var(--wm-text-subtle);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.wm-wave__tick {
+  position: absolute;
+  top: 0;
+  padding-left: 4px;
+  border-left: 1px solid var(--wm-border);
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+/* ---------- Controls ---------- */
+
+.wm-editor__transport {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--wm-space-2);
+}
+
+.wm-editor__play {
+  min-width: 104px;
+}
+
+.wm-editor__clock {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.wm-editor__controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: var(--wm-space-4);
+}
+
+.wm-editor__group {
+  min-width: 0;
+  margin: 0;
+  padding: var(--wm-space-4);
+  border: 1px solid var(--wm-border-subtle);
+  border-radius: var(--wm-radius-lg);
+  background: rgba(8, 13, 36, 0.3);
+}
+
+.wm-editor__group legend {
+  padding: 0 var(--wm-space-1);
+  margin: 0;
+}
+
+.wm-editor__trim {
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) auto;
+  align-items: end;
+  gap: var(--wm-space-2) var(--wm-space-2);
+}
+
+.wm-editor__time .field {
+  font-variant-numeric: tabular-nums;
+}
+
+.wm-editor__group .settings-hint {
+  margin-top: var(--wm-space-3);
+}
+
+.wm-editor__fade + .wm-editor__fade {
+  margin-top: var(--wm-space-3);
+}
+
+.wm-editor__fade-row {
+  display: flex;
+  align-items: center;
+  gap: var(--wm-space-2);
+}
+
+.wm-editor__slider {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--wm-azure);
+}
+
+.wm-editor__seconds {
+  width: 76px;
+  font-variant-numeric: tabular-nums;
+}
+
+.wm-editor__unit {
+  color: var(--wm-text-subtle);
+  font-size: var(--wm-text-sm);
+}
+
+.wm-editor__note {
+  margin: 0;
+}
+
+.wm-editor__reset {
+  margin-right: auto;
+}
+
+.lib-dialog__footer .wm-editor__saving {
+  margin-right: var(--wm-space-2);
+}
+
+@media (max-width: 760px) {
+  .wm-editor__controls {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---------- Zoom ---------- */
+
+.wm-zoom {
+  display: flex;
+  align-items: center;
+  gap: var(--wm-space-3);
+  margin-top: calc(-1 * var(--wm-space-2));
+}
+
+.wm-zoom__buttons {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--wm-space-1);
+  flex-shrink: 0;
+}
+
+.wm-zoom__buttons .btn--sm:not(:last-child) {
+  min-width: 32px;
+  padding-inline: 0;
+  font-size: var(--wm-text-md);
+}
+
+.wm-zoom__level {
+  min-width: 78px;
+  color: var(--wm-text-muted);
+  font-size: var(--wm-text-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.wm-zoom__scroll {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--wm-azure);
+}
+
+.wm-zoom__range {
+  color: var(--wm-text-subtle);
+  font-size: var(--wm-text-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.wm-wave__playhead {
+  left: 0;
+  will-change: transform;
+}

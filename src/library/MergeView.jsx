@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Dialog } from "./Dialog";
-import { artworkUrl, formatBytes, formatDate, formatDuration, formatNumber, formatQuality, pluralize } from "./format";
+import { formatBytes, formatDate, formatDuration, formatNumber, formatQuality, pluralize } from "./format";
 import { CheckIcon, MergeIcon, PauseIcon, PlayIcon, RefreshIcon } from "./icons";
 import { errorMessage, libraryApi, useLoader } from "./useLibrary";
+import { Artwork } from "./Artwork";
 
 const CATEGORIES = [
   { id: "conflict", label: "Needs a decision", help: "Probably different versions (a remaster, a different length). Nothing happens until you choose." },
@@ -59,11 +60,7 @@ function MergeGroup({ group, editable, playing, onPlay, onAction }) {
           const isPlaying = playing?.fileId === member.file_id && playing.isPlaying;
           return (
             <div key={member.id} className={`lib-merge-member ${multi && preferred ? "is-preferred" : ""}`}>
-              {member.artwork_hash ? (
-                <img className="lib-merge-member__art" src={artworkUrl(member.artwork_hash, 64)} alt="" loading="lazy" />
-              ) : (
-                <span className="lib-merge-member__art lib-art-placeholder" />
-              )}
+              <Artwork className="lib-merge-member__art" hash={member.artwork_hash} size={64} loading="lazy" />
               <button type="button" className="lib-play" aria-label={isPlaying ? "Pause" : `Play ${member.title}`} onClick={() => onPlay(member)}>
                 {isPlaying ? <PauseIcon size={12} /> : <PlayIcon size={12} />}
               </button>

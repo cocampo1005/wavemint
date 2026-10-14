@@ -75,6 +75,7 @@ const LIBRARY_METHODS = [
   "setQualityStatus",
   "prepareUpgrade",
   "chooseUpgradeFile",
+  "chooseUpgradeArtwork",
   "compareUpgrade",
   "spectrogram",
   "discardUpgrade",
@@ -99,6 +100,19 @@ const LIBRARY_METHODS = [
   "listImports",
   "commitImport",
   "discardImport",
+  "checkLibraryMatches",
+  "getStagedExtraction",
+  "commitStagedExtraction",
+  "discardStagedExtraction",
+  "getAudioEditSource",
+  "audioWaveform",
+  "applyAudioEdit",
+  "setFavorite",
+  "removeFromLibrary",
+  "previewFileDeletion",
+  "deleteTrackFiles",
+  "storageReport",
+  "cleanUpStorage",
   "listPlaylists",
   "getPlaylist",
   "createPlaylist",
@@ -126,14 +140,11 @@ function subscribe(channel, callback) {
 
 contextBridge.exposeInMainWorld("waveMintAPI", {
   analyzeUrl: (payload) => ipcRenderer.invoke("analyze-url", payload),
-  chooseOutputFolder: () => ipcRenderer.invoke("choose-output-folder"),
   chooseArtworkFile: () => ipcRenderer.invoke("choose-artwork-file"),
   generateSquareCropPreview: (payload) =>
     ipcRenderer.invoke("generate-square-crop-preview", payload),
   downloadMp3: (payload) => ipcRenderer.invoke("download-mp3", payload),
   cancelOperations: () => ipcRenderer.invoke("cancel-operations"),
-  openFile: (filePath) => ipcRenderer.invoke("open-file", filePath),
-  openFolder: (folderPath) => ipcRenderer.invoke("open-folder", folderPath),
 
   getAppStatus: (options) => ipcRenderer.invoke("get-app-status", options),
 

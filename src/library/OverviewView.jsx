@@ -1,14 +1,19 @@
-import { codecLabel, formatBytes, formatDate, formatLongDuration, formatNumber } from "./format";
-import { SourceIcon, WarningIcon } from "./icons";
+import { usePlayer } from "../player/usePlayer";
+import { formatAddedAgo, formatBytes, formatLongDuration, formatNumber, pluralize } from "./format";
+import { AddMusicIcon, PauseIcon, PlayIcon, WarningIcon } from "./icons";
 import { libraryApi, useLoader } from "./useLibrary";
+import { Artwork } from "./Artwork";
 
-function Stat({ label, value, hint }) {
+const RECENT_SHOWN = 12;
+const GENRES_SHOWN = 10;
+
+function Stat({ label, value, onClick }) {
+  const Tag = onClick ? "button" : "div";
   return (
-    <div className="lib-stat">
+    <Tag type={onClick ? "button" : undefined} className={`lib-stat ${onClick ? "is-link" : ""}`} onClick={onClick}>
       <span className="lib-stat__value">{value}</span>
       <span className="lib-stat__label">{label}</span>
-      {hint && <span className="lib-stat__hint">{hint}</span>}
-    </div>
+    </Tag>
   );
 }
 
@@ -22,7 +27,173 @@ function IssueRow({ label, count, onOpen, tone = "warn" }) {
   );
 }
 
-export function OverviewView({ revision, onNavigate, onAddSource }) {
+/** Shown while the library is empty (Overview and Songs). */
+export function EmptyLibrary({ onAddMusic, onAddSource }) {
+  return (
+    <div className="lib-empty-library">
+      <span className="eyebrow">Your music library</span>
+      <h2 className="heading-lg">Start your collection</h2>
+      <p className="text-muted">
+        Add songs from YouTube, or bring in the music folders you already have (for example your iTunes Media folder). WaveMint only reads
+        your folders: nothing in them is moved, renamed or changed.
+      </p>
+      <div className="lib-welcome__actions">
+        <button type="button" className="btn btn--primary" onClick={onAddMusic}>
+          <AddMusicIcon size={16} /> Add Music
+        </button>
+        <button type="button" className="btn btn--secondary" onClick={() => onAddSource("legacy")}>
+          Add iTunes / Legacy Folder
+        </button>
+        <button type="button" className="btn btn--ghost" onClick={() => onAddSource("other")}>
+          Add Other Folder
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function RecentlyAdded({ rows, onOpenTrack, onTrackMenu, onViewAll }) {
+  const player = usePlayer();
+  const ids = rows.map((row) => row.id);
+  return (
+    <section className="lib-recent" aria-labelledby="lib-recent-title">
+      <div className="lib-section-head">
+        <h2 id="lib-recent-title" className="heading-md">
+          Recently Added
+        </h2>
+        <button type="button" className="btn btn--ghost btn--sm" onClick={onViewAll}>
+          View All
+        </button>
+      </div>
+      <div className="lib-recent__grid">
+        {rows.map((row) => {
+          const isCurrent = player.playing?.trackId === row.id;
+          const isPlaying = isCurrent && player.playing.isPlaying;
+          return (
+            <article
+              key={row.id}
+              className={`lib-card ${isCurrent ? "is-playing" : ""}`}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                onTrackMenu?.({ x: event.clientX, y: event.clientY, row, rows: [row], ids: [row.id], onPlayNow: () => player.playList({ label: "Recently Added", ids, rows, startId: row.id }) });
+              }}
+            >
+              <div className="lib-card__art">
+                <button type="button" className="lib-card__cover" onClick={() => onOpenTrack(row.id)} aria-label={`Show ${row.title || "song"} details`} tabIndex={-1}>
+                  <Artwork hash={row.artwork_hash} size={320} loading="lazy" draggable={false} />
+                </button>
+                {row.file_id && row.file_status !== "missing" && (
+                  <button
+                    type="button"
+                    className="lib-card__play"
+                    aria-label={isPlaying ? `Pause ${row.title}` : `Play ${row.title}`}
+                    onClick={() => (isCurrent ? player.togglePlay() : player.playList({ label: "Recently Added", ids, rows, startId: row.id }))}
+                  >
+                    {isPlaying ? <PauseIcon size={18} /> : <PlayIcon size={18} />}
+                  </button>
+                )}
+              </div>
+              <button type="button" className="lib-card__open" onClick={() => onOpenTrack(row.id)} title="Show song details">
+                <strong className="lib-card__title">{row.title || "Untitled"}</strong>
+                <span className="lib-card__meta">{[row.artist || "Unknown artist", row.album].filter(Boolean).join(" · ")}</span>
+                <span className="lib-card__when">{formatAddedAgo(row.created_at)}</span>
+              </button>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+/** Genre composition as one-hue bars with direct labels (count and share). */
+function GenreBars({ genres, total, onOpenGenre, onAllGenres }) {
+  const named = genres.filter((genre) => genre.name);
+  const unclassified = genres.find((genre) => !genre.name);
+  const shown = named.slice(0, GENRES_SHOWN);
+  const others = named.slice(GENRES_SHOWN).reduce((sum, genre) => sum + genre.count, 0);
+  const max = Math.max(1, ...shown.map((genre) => genre.count));
+  const percent = (count) => (total ? `${Math.round((count / total) * 100)}%` : "");
+  const share = (count) => (total ? Math.round((count / total) * 1000) / 10 : 0);
+
+  return (
+    <section className="panel lib-genres-card" aria-labelledby="lib-genres-title">
+      <div className="lib-section-head">
+        <h2 id="lib-genres-title" className="section-label">
+          Genres
+        </h2>
+        <button type="button" className="btn btn--ghost btn--sm" onClick={onAllGenres}>
+          All Genres
+        </button>
+      </div>
+      {shown.length ? (
+        <ul className="lib-genre-bars">
+          {shown.map((genre) => (
+            <li key={genre.name}>
+              <button
+                type="button"
+                className="lib-genre-bar"
+                onClick={() => onOpenGenre(genre.name)}
+                title={`${genre.name}: ${pluralize(genre.count, "song")} (${share(genre.count)}% of your library) by ${pluralize(genre.artists, "artist")}, ${formatLongDuration(genre.duration_ms)}`}
+              >
+                <span className="lib-genre-bar__name">{genre.name}</span>
+                <span className="lib-genre-bar__track" aria-hidden="true">
+                  <span style={{ width: `${Math.max(2, (genre.count / max) * 100)}%` }} />
+                </span>
+                <span className="lib-genre-bar__count">
+                  {formatNumber(genre.count)} <span>{percent(genre.count)}</span>
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="settings-hint">Your songs don&apos;t have genres yet.</p>
+      )}
+      {(others > 0 || unclassified) && (
+        <p className="settings-hint lib-genres-card__foot">
+          {others > 0 && `${pluralize(named.length - GENRES_SHOWN, "more genre")} with ${pluralize(others, "song")}. `}
+          {unclassified && (
+            <button type="button" className="btn btn--link" onClick={() => onOpenGenre("")}>
+              {pluralize(unclassified.count, "song")} without a genre
+            </button>
+          )}
+        </p>
+      )}
+    </section>
+  );
+}
+
+function TopArtists({ artists, onOpenArtist }) {
+  if (!artists.length) return null;
+  return (
+    <section className="panel lib-top-artists" aria-labelledby="lib-artists-title">
+      <h2 id="lib-artists-title" className="section-label">
+        Most songs by
+      </h2>
+      <ul>
+        {artists.map((artist) => (
+          <li key={artist.key}>
+            <button type="button" className="lib-top-artist" onClick={() => onOpenArtist(artist)}>
+              <Artwork hash={artist.artwork_hash} size={64} loading="lazy" />
+              <span className="lib-top-artist__name">{artist.name}</span>
+              <span className="lib-top-artist__meta">
+                {pluralize(artist.track_count, "song")} · {pluralize(artist.album_count, "album")}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/**
+ * Overview: the home of the collection. Totals, Recently Added (artwork
+ * first), what the library is made of (genres, top artists), and a short
+ * list of things that may need attention.
+ */
+export function OverviewView({ revision, onNavigate, onAddMusic, onAddSource, onOpenTrack, onTrackMenu }) {
   const { data, error, loading } = useLoader(() => libraryApi.getOverview(), [revision]);
 
   if (error) {
@@ -35,117 +206,65 @@ export function OverviewView({ revision, onNavigate, onAddSource }) {
   }
 
   if (!data) return <div className="lib-loading">{loading ? "Loading your library…" : ""}</div>;
+  const { totals, issues, duplicates, genres, recent, topArtists } = data;
+  if (!totals.tracks) return <EmptyLibrary onAddMusic={onAddMusic} onAddSource={onAddSource} />;
 
-  const { totals, issues, formats, duplicates, sources } = data;
-
-  if (!sources.length) {
-    return (
-      <section className="panel lib-welcome">
-        <span className="eyebrow">Your music library</span>
-        <h2 className="heading-lg">Bring your music into WaveMint</h2>
-        <p className="text-muted">
-          Add the folders where your music lives, for example your old iTunes Media folder and your newer curated
-          collection. WaveMint only reads them: nothing is moved, renamed or changed.
-        </p>
-        <div className="lib-welcome__actions">
-          <button type="button" className="btn btn--primary" onClick={() => onAddSource("legacy")}>
-            Add iTunes / Legacy Folder
-          </button>
-          <button type="button" className="btn btn--secondary" onClick={() => onAddSource("curated")}>
-            Add Curated Folder
-          </button>
-          <button type="button" className="btn btn--ghost" onClick={() => onAddSource("other")}>
-            Add Other Folder
-          </button>
-        </div>
-      </section>
-    );
-  }
-
-  const totalFormats = formats.reduce((sum, item) => sum + item.count, 0) || 1;
+  const attention = [
+    ["Songs without a genre", issues.missing_genre, () => onNavigate("songs", { quick: ["unclassified"] })],
+    ["Songs without artwork", issues.missing_artwork, () => onNavigate("songs", { quick: ["missingArtwork"] })],
+    ["Songs without an album", issues.missing_album, () => onNavigate("songs", { quick: ["missingAlbum"] })],
+    ["Possible duplicates", duplicates.tracks, () => onNavigate("songs", { quick: ["possibleDuplicates"], sort: "title" }), "info"],
+    ["Missing or unreadable files", issues.missing_files, () => onNavigate("songs", { quick: ["missingFile"] }), "error"],
+  ].filter(([, count]) => count > 0);
 
   return (
     <div className="lib-overview">
-      <section className="panel lib-stats" aria-label="Library totals">
-        <Stat label="Songs" value={formatNumber(totals.tracks)} />
-        <Stat label="Albums" value={formatNumber(totals.albums)} />
-        <Stat label="Artists" value={formatNumber(totals.artists)} />
-        <Stat label="Genres" value={formatNumber(totals.genres)} />
-        <Stat label="Storage" value={formatBytes(totals.storage_bytes)} hint={`${formatNumber(totals.file_count)} files`} />
+      <section className="lib-stats" aria-label="Library totals">
+        <Stat label="Songs" value={formatNumber(totals.tracks)} onClick={() => onNavigate("songs")} />
+        <Stat label="Albums" value={formatNumber(totals.albums)} onClick={() => onNavigate("albums")} />
+        <Stat label="Artists" value={formatNumber(totals.artists)} onClick={() => onNavigate("artists")} />
+        <Stat label="Genres" value={formatNumber(totals.genres)} onClick={() => onNavigate("genres")} />
+        <Stat label="Favorites" value={formatNumber(totals.favorites)} onClick={() => onNavigate("favorites")} />
         <Stat label="Listening time" value={formatLongDuration(totals.duration_ms)} />
+        <Stat label="Library size" value={formatBytes(totals.active_size)} />
       </section>
 
+      {recent.length > 0 && (
+        <RecentlyAdded
+          rows={recent.slice(0, RECENT_SHOWN)}
+          onOpenTrack={onOpenTrack}
+          onTrackMenu={onTrackMenu}
+          onViewAll={() => onNavigate("songs", { sort: "added", direction: "desc", chip: "Newest first" })}
+        />
+      )}
+
       <div className="lib-overview__grid">
-        <section className="panel" aria-labelledby="lib-health">
-          <span id="lib-health" className="section-label">
-            Library health
-          </span>
-          <div className="lib-issues">
-            <IssueRow label="Songs without an album" count={issues.missing_album} onOpen={() => onNavigate("songs", { quick: ["missingAlbum"] })} />
-            <IssueRow label="Songs without a genre" count={issues.missing_genre} onOpen={() => onNavigate("songs", { quick: ["unclassified"] })} />
-            <IssueRow label="Songs without artwork" count={issues.missing_artwork} onOpen={() => onNavigate("songs", { quick: ["missingArtwork"] })} />
-            <IssueRow label="Albums missing an album artist" count={issues.missing_album_artist} onOpen={() => onNavigate("songs", { quick: ["missingAlbumArtist"] })} tone="quiet" />
-            <IssueRow
-              label="Possible duplicates"
-              count={duplicates.tracks}
-              onOpen={() => onNavigate("songs", { quick: ["possibleDuplicates"], sort: "title" })}
-              tone="info"
-            />
-            <IssueRow
-              label={`Low bitrate (under ${data.lowBitrateKbps} kbps, lossy)`}
-              count={issues.low_bitrate}
-              onOpen={() => onNavigate("songs", { quick: ["lowBitrate"] })}
-              tone="quiet"
-            />
-            <IssueRow label="Missing or unreadable files" count={issues.missing_files} onOpen={() => onNavigate("songs", { quick: ["missingFile"] })} tone="error" />
-          </div>
-          <p className="settings-note">
-            Low bitrate is only a hint: a well-encoded file can sound better than a high-bitrate copy of a poor source.
-          </p>
-        </section>
-
-        <section className="panel" aria-labelledby="lib-formats">
-          <span id="lib-formats" className="section-label">
-            Formats
-          </span>
-          <div className="lib-formats">
-            {formats.map((item) => (
-              <div key={item.codec} className="lib-format">
-                <span className="lib-format__label">{codecLabel(item.codec)}</span>
-                <span className="lib-format__bar">
-                  <span style={{ width: `${Math.max(2, (item.count / totalFormats) * 100)}%` }} />
-                </span>
-                <span className="lib-format__count">{formatNumber(item.count)}</span>
+        <GenreBars
+          genres={genres}
+          total={totals.tracks}
+          onOpenGenre={(name) => onNavigate("songs", { genre: name, chip: `Genre: ${name || "Unclassified"}` })}
+          onAllGenres={() => onNavigate("genres")}
+        />
+        <div className="lib-overview__side">
+          <TopArtists artists={topArtists} onOpenArtist={(artist) => onNavigate("songs", { artist: artist.key, chip: `Artist: ${artist.name}`, sort: "album" })} />
+          {attention.length > 0 && (
+            <section className="panel" aria-labelledby="lib-attention">
+              <div className="lib-section-head">
+                <h2 id="lib-attention" className="section-label">
+                  Needs attention
+                </h2>
+                <button type="button" className="btn btn--ghost btn--sm" onClick={() => onNavigate("review")}>
+                  Review
+                </button>
               </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="panel lib-overview__sources" aria-labelledby="lib-sources">
-          <div className="lib-section-head">
-            <span id="lib-sources" className="section-label">
-              Sources
-            </span>
-            <button type="button" className="btn btn--ghost btn--sm" onClick={() => onNavigate("sources")}>
-              Manage
-            </button>
-          </div>
-          <div className="lib-source-mini">
-            {sources.map((source) => (
-              <button key={source.id} type="button" className="lib-source-mini__row" onClick={() => onNavigate("songs", { sourceId: source.id, chip: source.name })}>
-                <SourceIcon size={16} />
-                <span className="lib-source-mini__name">{source.name}</span>
-                <span className={`lib-badge is-${source.status === "ok" ? "quiet" : "missing"}`}>
-                  {source.status === "ok" ? source.role : "Unavailable"}
-                </span>
-                <span className="lib-source-mini__meta">
-                  {formatNumber(source.file_count)} files · {formatBytes(source.total_size)}
-                  {source.last_scan_completed_at ? ` · scanned ${formatDate(source.last_scan_completed_at)}` : " · not scanned yet"}
-                </span>
-              </button>
-            ))}
-          </div>
-        </section>
+              <div className="lib-issues">
+                {attention.map(([label, count, open, tone]) => (
+                  <IssueRow key={label} label={label} count={count} onOpen={open} tone={tone} />
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
       </div>
     </div>
   );

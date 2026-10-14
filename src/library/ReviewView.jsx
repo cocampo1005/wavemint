@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { artworkUrl, formatDate, pluralize } from "./format";
+import { formatDate, pluralize } from "./format";
 import { CheckIcon, RefreshIcon } from "./icons";
 import { errorMessage, libraryApi, useLoader } from "./useLibrary";
+import { Artwork } from "./Artwork";
 
 function describe(item) {
   const d = item.details || {};
@@ -154,11 +155,7 @@ export function ReviewView({ revision, onChanged, onOpenTrack, onOpenAlbum, onEr
           <div className="lib-review__list">
             {(data?.rows || []).map((item) => (
               <div key={item.id} className={`lib-review-item is-${item.status}`}>
-                {item.entity_type === "track" && item.track_artwork ? (
-                  <img className="lib-review-item__art" src={artworkUrl(item.track_artwork, 64)} alt="" loading="lazy" />
-                ) : (
-                  <span className="lib-review-item__art lib-art-placeholder" />
-                )}
+                <Artwork className="lib-review-item__art" hash={item.entity_type === "track" ? item.track_artwork : null} size={64} loading="lazy" />
                 <div className="lib-review-item__body">
                   <div className="lib-review-item__title">
                     <span className="lib-badge is-quiet">{item.label}</span>

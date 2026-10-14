@@ -239,7 +239,16 @@ function createMedia({ ffmpegPath, ffprobePath, cacheDir, env = process.env }) {
    */
   async function previewFile({ fileId, filePath, mtimeMs }) {
     const target = path.join(cacheDir, "previews", `${fileId}-${Math.round(mtimeMs)}.flac`);
-    if (fs.existsSync(target)) return target;
+    if (fs.existsSync(target)) {
+      // Marks it as recently used (the cache keeps those).
+      try {
+        const now = new Date();
+        fs.utimesSync(target, now, now);
+      } catch {
+        // Only affects which copies are dropped first.
+      }
+      return target;
+    }
 
     const key = `preview-${fileId}`;
     if (!inFlight.has(key)) {
@@ -269,7 +278,86 @@ function createMedia({ ffmpegPath, ffprobePath, cacheDir, env = process.env }) {
     return inFlight.get(key);
   }
 
-  return { audioStreamHash, convertToAlac, decodeCheck, previewFile, probe, qualityCheck, spectrogram, thumbnail };
+  /**
+   * Peak levels for drawing a waveform: the audio is decoded once to mono
+   * 16-bit PCM at a low sample rate (into a temp file, since child output is
+   * text) and reduced to `points` maximum absolute levels between 0 and 1.
+   * With `startMs`/`endMs` only that stretch is decoded, at a higher rate
+   * (for zooming in); the samples are freed as soon as the peaks exist.
+   */
+  async function waveform(filePath, { points = 1600, startMs = null, endMs = null, signal } = {}) {
+    const ranged = Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs;
+    const rate = ranged ? 16000 : 6000;
+    const range = ranged ? ["-ss", (startMs / 1000).toFixed(3), "-t", ((endMs - startMs) / 1000).toFixed(3)] : [];
+    fs.mkdirSync(path.join(cacheDir, "waveforms"), { recursive: true });
+    const temp = path.join(cacheDir, "waveforms", `${crypto.randomBytes(8).toString("hex")}.raw`);
+    try {
+      const result = await runCommand(
+        ffmpegPath,
+        ["-v", "error", "-y", ...range, "-i", filePath, "-map", "0:a:0", "-ac", "1", "-ar", String(rate), "-f", "s16le", "-acodec", "pcm_s16le", temp],
+        { label: "FFmpeg", env, timeoutMs: 300000, signal },
+      );
+      if (result.code !== 0 || !fs.existsSync(temp)) throw new Error("The waveform couldn't be read from this file");
+      // Read in chunks: a long mix never sits in memory as a whole.
+      const total = Math.floor(fs.statSync(temp).size / 2);
+      const count = Math.max(1, Math.min(points, total));
+      const peaks = new Array(count).fill(0);
+      const bucket = total / count;
+      const chunk = Buffer.alloc(1 << 20);
+      const handle = fs.openSync(temp, "r");
+      try {
+        let sample = 0;
+        for (let read = fs.readSync(handle, chunk, 0, chunk.length, 0); read > 1; read = fs.readSync(handle, chunk, 0, chunk.length, sample * 2)) {
+          const samples = new Int16Array(chunk.buffer, chunk.byteOffset, Math.floor(read / 2));
+          for (let i = 0; i < samples.length; i += 1, sample += 1) {
+            const index = Math.min(count - 1, Math.floor(sample / bucket));
+            const value = Math.abs(samples[i]);
+            if (value > peaks[index]) peaks[index] = value;
+          }
+        }
+      } finally {
+        fs.closeSync(handle);
+      }
+      for (let index = 0; index < count; index += 1) peaks[index] = Math.round((peaks[index] / 32768) * 1000) / 1000;
+      return { startMs: ranged ? startMs : 0, durationMs: Math.round((total / rate) * 1000), peaks };
+    } finally {
+      fs.rmSync(temp, { force: true });
+    }
+  }
+
+  /**
+   * Renders a trimmed (and optionally faded) copy of `input` into `output`.
+   * `plan` comes from audioedit.cjs: { startMs, endMs, fadeInMs, fadeOutMs,
+   * copy, codecArgs }. A plain trim of a lossy file is a stream copy (no
+   * re-encoding, cut on frame boundaries); fades and lossless formats go
+   * through the filter graph (sample-accurate). Only the audio and the
+   * container's text tags are carried over; artwork is restored by the caller.
+   */
+  async function renderEdit(input, output, plan, { signal } = {}) {
+    const seconds = (ms) => (ms / 1000).toFixed(3);
+    const lengthMs = plan.endMs - plan.startMs;
+    let args;
+    if (plan.copy) {
+      args = ["-v", "error", "-y", "-ss", seconds(plan.startMs), "-to", seconds(plan.endMs), "-i", input, "-map", "0:a:0", "-map_metadata", "0", "-c:a", "copy"];
+    } else {
+      const filters = [`atrim=start=${seconds(plan.startMs)}:end=${seconds(plan.endMs)}`, "asetpts=PTS-STARTPTS"];
+      if (plan.fadeInMs > 0) filters.push(`afade=t=in:st=0:d=${seconds(plan.fadeInMs)}`);
+      if (plan.fadeOutMs > 0) filters.push(`afade=t=out:st=${seconds(lengthMs - plan.fadeOutMs)}:d=${seconds(plan.fadeOutMs)}`);
+      args = ["-v", "error", "-y", "-i", input, "-map", "0:a:0", "-map_metadata", "0", "-af", filters.join(","), ...plan.codecArgs];
+    }
+    if (path.extname(output).toLowerCase() === ".mp3") args.push("-id3v2_version", "3", "-write_xing", "1");
+    args.push(output);
+
+    const result = await runCommand(ffmpegPath, args, { label: "FFmpeg", env, timeoutMs: 900000, signal });
+    if (result.cancelled) throw new Error("Cancelled");
+    if (result.code !== 0 || !fs.existsSync(output)) {
+      fs.rmSync(output, { force: true });
+      throw new Error(`FFmpeg couldn't process the audio${result.stderr ? `: ${String(result.stderr).trim().split(/\r?\n/).pop()}` : ""}`);
+    }
+    return output;
+  }
+
+  return { audioStreamHash, convertToAlac, decodeCheck, previewFile, probe, qualityCheck, renderEdit, spectrogram, thumbnail, waveform };
 }
 
 module.exports = { THUMB_SIZES, createMedia };

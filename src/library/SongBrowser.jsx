@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { usePlayer } from "../player/usePlayer";
 import { pluralize } from "./format";
 import { CloseIcon, SearchIcon } from "./icons";
 import { BulkEditor } from "./Editors";
@@ -6,6 +7,20 @@ import { TrackDetail } from "./TrackDetail";
 import { TrackTable } from "./TrackTable";
 import { QUICK_FILTERS, useDebounced } from "./useLibrary";
 
+const SORT_OPTIONS = [
+  ["added:desc", "Recently Added"],
+  ["added:asc", "Oldest Added"],
+  ["title:asc", "Title A–Z"],
+  ["title:desc", "Title Z–A"],
+  ["artist:asc", "Artist A–Z"],
+  ["artist:desc", "Artist Z–A"],
+  ["album:asc", "Album"],
+  ["genre:asc", "Genre"],
+  ["duration:desc", "Longest"],
+  ["duration:asc", "Shortest"],
+  ["size:desc", "Largest Files"],
+];
+const SORT_KEY = "wavemint.sort.v1";
 
 function toFilters(base, quick) {
   const filters = { ...base };
@@ -16,11 +31,30 @@ function toFilters(base, quick) {
   return filters;
 }
 
+function storedSort(key) {
+  if (!key) return null;
+  try {
+    return JSON.parse(localStorage.getItem(SORT_KEY))?.[key] || null;
+  } catch {
+    return null;
+  }
+}
+
+function storeSort(key, sort) {
+  if (!key) return;
+  try {
+    const all = JSON.parse(localStorage.getItem(SORT_KEY)) || {};
+    localStorage.setItem(SORT_KEY, JSON.stringify({ ...all, [key]: sort }));
+  } catch {
+    // The sort order is a convenience.
+  }
+}
 
 /**
  * Searchable, filterable, sortable song list with a details panel.
- * `baseFilters` scopes it (album, artist, genre, source…); `chips` describe
- * that scope and can be cleared with `onClearScope`.
+ * `baseFilters` scopes it (album, artist, genre, favorites…); `chips`
+ * describe that scope and can be cleared with `onClearScope`. Playing a song
+ * plays the list as shown (same filters and order) from that song.
  */
 export function SongBrowser({
   baseFilters = {},
@@ -29,25 +63,34 @@ export function SongBrowser({
   chips = [],
   onClearScope,
   revision,
-  playing,
-  onPlay,
+  contextLabel = "Songs",
+  sortStorageKey = null,
+  explicitSort = false,
   onPlayFile,
   onOpenAlbum,
   onError,
   lowBitrate,
   hideColumns,
   defaultSort = "artist",
+  defaultDirection = "asc",
   toolbarExtra,
   onChanged,
   onWriteTags,
   onUpgrade,
   onIdentify,
+  onEditAudio,
+  onToggleFavorite,
+  onTrackMenu,
+  emptyState = null,
   selection: controlledSelection,
   onSelectionChange: setControlledSelection,
 }) {
+  const player = usePlayer();
   const [search, setSearch] = useState("");
   const [quick, setQuick] = useState(initialQuick);
-  const [sort, setSort] = useState({ field: defaultSort, direction: "asc" });
+  // An explicit order from the caller (e.g. "View All" newest first) wins
+  // over the order remembered for this list.
+  const [sort, setSort] = useState(() => (!explicitSort && storedSort(sortStorageKey)) || { field: defaultSort, direction: defaultDirection });
   const [ownSelection, setOwnSelection] = useState(() => new Set());
   const [activeId, setActiveId] = useState(initialActiveId);
   const [total, setTotal] = useState(null);
@@ -64,6 +107,8 @@ export function SongBrowser({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [baseKey]);
 
+  useEffect(() => storeSort(sortStorageKey, sort), [sortStorageKey, sort]);
+
   const query = useMemo(
     () => ({
       search: debouncedSearch,
@@ -74,17 +119,21 @@ export function SongBrowser({
     [debouncedSearch, baseKey, quick, sort],
   );
 
+  // A column header: same column flips the direction; dates and sizes start newest/largest first.
   const handleSort = useCallback(
     (field) =>
       setSort((current) => ({
         field,
-        direction: current.field === field && current.direction === "asc" ? "desc" : "asc",
+        direction: current.field === field ? (current.direction === "asc" ? "desc" : "asc") : field === "added" || field === "size" ? "desc" : "asc",
       })),
     [],
   );
 
-  const toggleQuick = (key) =>
-    setQuick((current) => (current.includes(key) ? current.filter((item) => item !== key) : [...current, key]));
+  const toggleQuick = (key) => setQuick((current) => (current.includes(key) ? current.filter((item) => item !== key) : [...current, key]));
+
+  const playRow = (row) => player.playQuery({ label: contextLabel, query, startId: row.id, rows: [row] });
+  const sortValue = `${sort.field}:${sort.direction}`;
+  const knownSort = SORT_OPTIONS.some(([value]) => value === sortValue);
 
   return (
     <div className={`lib-browser ${activeId || selection.size > 1 ? "has-detail" : ""}`}>
@@ -105,7 +154,31 @@ export function SongBrowser({
             {total === null ? "…" : pluralize(total, "song")}
             {selection.size > 0 && ` · ${pluralize(selection.size, "selected", "selected")}`}
           </span>
+          {total > 0 && (
+            <button type="button" className="btn btn--secondary btn--sm" onClick={() => player.playQuery({ label: contextLabel, query })} title={`Play ${contextLabel} in this order`}>
+              Play All
+            </button>
+          )}
           {toolbarExtra?.({ selection, query, clearSelection: () => setSelection(new Set()) })}
+          <label className="lib-toolbar__sort">
+            Sort
+            <select
+              className="field"
+              value={sortValue}
+              onChange={(event) => {
+                const [field, direction] = event.target.value.split(":");
+                setSort({ field, direction });
+              }}
+              aria-label="Sort songs"
+            >
+              {!knownSort && <option value={sortValue}>By column</option>}
+              {SORT_OPTIONS.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
         <div className="lib-chips">
@@ -119,7 +192,7 @@ export function SongBrowser({
               )}
             </span>
           ))}
-          {QUICK_FILTERS.map((filter) => (
+          {QUICK_FILTERS.filter((filter) => !(filter.key in baseFilters)).map((filter) => (
             <button
               key={filter.key}
               type="button"
@@ -140,13 +213,23 @@ export function SongBrowser({
           activeId={activeId}
           onActivate={(row) => setActiveId(row.id)}
           onTotalChange={setTotal}
-          playing={playing}
-          onPlay={onPlay}
+          playing={player.playing}
+          onPlay={playRow}
+          onToggleFavorite={onToggleFavorite}
+          onRowMenu={
+            onTrackMenu &&
+            ((request) =>
+              onTrackMenu({
+                ...request,
+                onPlayNow: request.ids.length === 1 ? () => playRow(request.row) : null,
+                onEditMetadata: () => setActiveId(request.row.id),
+              }))
+          }
           onSort={handleSort}
           lowBitrate={lowBitrate}
-          // The details panel shows the source, so the table gives up that column.
-          hideColumns={activeId || selection.size > 1 ? [...(hideColumns || []), "source"] : hideColumns}
-          emptyText={search || quick.length ? "No songs match these filters." : "No songs here yet."}
+          // The details panel takes room: the table gives up the least-used columns.
+          hideColumns={activeId || selection.size > 1 ? [...(hideColumns || []), "genre", "added", "size"] : hideColumns}
+          emptyText={search || quick.length ? "No songs match these filters." : emptyState || "No songs here yet."}
         />
       </div>
 
@@ -159,20 +242,24 @@ export function SongBrowser({
           onError={onError}
           onWriteTags={onWriteTags}
         />
-      ) : activeId && (
-        <TrackDetail
-          trackId={activeId}
-          revision={revision}
-          playing={playing}
-          onPlayFile={onPlayFile}
-          onClose={() => setActiveId(null)}
-          onOpenAlbum={onOpenAlbum}
-          onError={onError}
-          onChanged={onChanged}
-          onWriteTags={onWriteTags}
-          onUpgrade={onUpgrade}
-          onIdentify={onIdentify}
-        />
+      ) : (
+        activeId && (
+          <TrackDetail
+            trackId={activeId}
+            revision={revision}
+            playing={player.playing}
+            onPlayFile={onPlayFile}
+            onClose={() => setActiveId(null)}
+            onOpenAlbum={onOpenAlbum}
+            onError={onError}
+            onChanged={onChanged}
+            onWriteTags={onWriteTags}
+            onUpgrade={onUpgrade}
+            onIdentify={onIdentify}
+            onEditAudio={onEditAudio}
+            onToggleFavorite={onToggleFavorite}
+          />
+        )
       )}
     </div>
   );

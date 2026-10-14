@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { artworkUrl, formatDuration, formatNumber, pluralize } from "./format";
+import { formatDuration, formatNumber, pluralize } from "./format";
 import { SearchIcon, WarningIcon } from "./icons";
 import { libraryApi, useDebounced, useLoader } from "./useLibrary";
+import { Artwork } from "./Artwork";
 
 const ALBUM_PAGE = 120;
 
@@ -83,11 +84,7 @@ export function AlbumsView({ revision, onOpenAlbum, filters = {}, chips = [], on
         {data?.rows.map((album) => (
           <button key={album.id} type="button" className="lib-album" onClick={() => onOpenAlbum(album.id)}>
             <span className="lib-album__art">
-              {album.artwork_hash ? (
-                <img src={artworkUrl(album.artwork_hash, 320)} alt="" loading="lazy" draggable={false} />
-              ) : (
-                <span className="lib-art-placeholder lib-art-placeholder--lg" />
-              )}
+              <Artwork hash={album.artwork_hash} size={320} loading="lazy" draggable={false} />
             </span>
             <span className="lib-album__title">{album.title}</span>
             <span className="lib-album__artist">{album.album_artist || "Various artists"}</span>
@@ -114,11 +111,7 @@ export function AlbumHeader({ releaseId, revision, onEdit, onIdentify }) {
   return (
     <div className="lib-album-head">
       <span className="lib-album-head__art">
-        {album.artwork_hash ? (
-          <img src={artworkUrl(album.artwork_hash, 320)} alt="" />
-        ) : (
-          <span className="lib-art-placeholder lib-art-placeholder--lg" />
-        )}
+        <Artwork hash={album.artwork_hash} size={320} />
       </span>
       <div>
         <span className="eyebrow">{album.release_type === "compilation" ? "Compilation" : "Album"}</span>
@@ -167,11 +160,7 @@ export function ArtistsView({ revision, onOpenArtist }) {
       <div className="lib-list">
         {data?.rows.map((artist) => (
           <button key={artist.key} type="button" className="lib-list__row" onClick={() => onOpenArtist(artist)}>
-            {artist.artwork_hash ? (
-              <img className="lib-list__art is-round" src={artworkUrl(artist.artwork_hash, 64)} alt="" loading="lazy" />
-            ) : (
-              <span className="lib-list__art is-round lib-art-placeholder" />
-            )}
+            <Artwork className="lib-list__art is-round" hash={artist.artwork_hash} size={64} loading="lazy" />
             <span className="lib-list__name">{artist.name}</span>
             <span className="lib-list__meta">
               {pluralize(artist.track_count, "song")} · {pluralize(artist.album_count, "album")}

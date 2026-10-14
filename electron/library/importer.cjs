@@ -513,7 +513,7 @@ function createImporter({ db, media, artStore, upgrader, managedSource, getSetti
     return db.prepare("SELECT id, status, title, created_at, committed_at, report FROM import_sessions ORDER BY id DESC LIMIT 20").all().map((row) => ({ ...row, report: parseJson(row.report, null) }));
   }
 
-  return { addStaged, commitJob, discard, listSessions, prepareStaging, recover, startSession, undoImport, updateSession, view };
+  return { addStaged, commitJob, discard, listSessions, matchInLibrary, prepareStaging, recover, startSession, undoImport, updateSession, view };
 }
 
 module.exports = { ACTIONS, DECISIONS, createImporter };

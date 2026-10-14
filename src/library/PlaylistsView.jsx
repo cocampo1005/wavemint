@@ -1,7 +1,9 @@
 import { useState } from "react";
-import { artworkUrl, formatDuration, formatLongDuration, pluralize } from "./format";
-import { CloseIcon, PauseIcon, PlayIcon, PlaylistIcon } from "./icons";
+import { usePlayer } from "../player/usePlayer";
+import { formatDuration, formatLongDuration, pluralize } from "./format";
+import { CloseIcon, MoreIcon, PauseIcon, PlayIcon, PlaylistIcon, ShuffleIcon } from "./icons";
 import { errorMessage, libraryApi, useLoader } from "./useLibrary";
+import { Artwork } from "./Artwork";
 
 const FIELDS = {
   genre: { label: "Genre", ops: [["is", "is"], ["is_not", "is not"], ["contains", "contains"]], input: "text" },
@@ -149,7 +151,8 @@ const cleanRules = (rules) => ({
   })),
 });
 
-function PlaylistDetail({ id, revision, playing, onPlay, onOpenTrack, onChanged, onDeleted, onError }) {
+function PlaylistDetail({ id, revision, playing, onOpenTrack, onTrackMenu, onChanged, onDeleted, onError }) {
+  const player = usePlayer();
   const { data: playlist, reload } = useLoader(() => libraryApi.getPlaylist({ id }), [id, revision]);
   const [rules, setRules] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -170,6 +173,23 @@ function PlaylistDetail({ id, revision, playing, onPlay, onOpenTrack, onChanged,
   const manual = playlist.kind === "manual";
   const editing = rules || (playlist.kind === "smart" ? playlist.rules : null);
   const total = playlist.tracks.reduce((sum, row) => sum + (row.duration_ms || 0), 0);
+  const ids = playlist.tracks.map((row) => row.id);
+  // Playing a playlist plays its songs in its order (shuffle shuffles within it).
+  const playFrom = (row = null) =>
+    row && playing?.trackId === row.id ? player.togglePlay() : player.playList({ label: playlist.name, ids, rows: playlist.tracks, startId: row?.id ?? null });
+  const removeFromPlaylist = (trackIds) => act(() => libraryApi.removeFromPlaylist({ id, trackIds }));
+  const openMenu = (event, row, x = event.clientX, y = event.clientY) => {
+    event.preventDefault();
+    onTrackMenu?.({
+      x,
+      y,
+      row,
+      rows: [row],
+      ids: [row.id],
+      onPlayNow: () => player.playList({ label: playlist.name, ids, rows: playlist.tracks, startId: row.id }),
+      onRemoveFromPlaylist: manual ? () => removeFromPlaylist([row.id]) : null,
+    });
+  };
 
   return (
     <div className="lib-playlist">
@@ -196,6 +216,20 @@ function PlaylistDetail({ id, revision, playing, onPlay, onOpenTrack, onChanged,
           </span>
         </div>
         <div className="lib-playlist__actions">
+          <button type="button" className="btn btn--primary btn--sm" onClick={() => playFrom()} disabled={!ids.length}>
+            <PlayIcon size={14} /> Play
+          </button>
+          <button
+            type="button"
+            className="btn btn--secondary btn--sm"
+            onClick={() => {
+              if (!player.shuffle) player.toggleShuffle();
+              playFrom();
+            }}
+            disabled={!ids.length}
+          >
+            <ShuffleIcon size={14} /> Shuffle
+          </button>
           <button
             type="button"
             className="btn btn--secondary btn--sm"
@@ -242,12 +276,12 @@ function PlaylistDetail({ id, revision, playing, onPlay, onOpenTrack, onChanged,
         {playlist.tracks.map((row, index) => {
           const isPlaying = playing?.fileId === row.file_id && playing.isPlaying;
           return (
-            <div key={row.id} className="lib-playlist__row">
+            <div key={row.id} className={`lib-playlist__row ${playing?.trackId === row.id ? "is-playing" : ""}`} onContextMenu={(event) => openMenu(event, row)} onDoubleClick={() => playFrom(row)}>
               <span className="lib-playlist__pos">{index + 1}</span>
-              <button type="button" className="lib-play" aria-label={isPlaying ? "Pause" : `Play ${row.title}`} onClick={() => onPlay(row)}>
+              <button type="button" className="lib-play" aria-label={isPlaying ? "Pause" : `Play ${row.title}`} onClick={() => playFrom(row)}>
                 {isPlaying ? <PauseIcon size={12} /> : <PlayIcon size={12} />}
               </button>
-              {row.artwork_hash ? <img className="lib-playlist__art" src={artworkUrl(row.artwork_hash, 64)} alt="" loading="lazy" /> : <span className="lib-playlist__art lib-art-placeholder" />}
+              <Artwork className="lib-playlist__art" hash={row.artwork_hash} size={64} loading="lazy" />
               <button type="button" className="lib-playlist__text" onClick={() => onOpenTrack(row.id)}>
                 <strong>{row.title || "Untitled"}</strong>
                 <span>
@@ -270,10 +304,30 @@ function PlaylistDetail({ id, revision, playing, onPlay, onOpenTrack, onChanged,
                   >
                     ↓
                   </button>
-                  <button type="button" className="btn btn--ghost btn--icon btn--sm" aria-label={`Remove ${row.title}`} onClick={() => act(() => libraryApi.removeFromPlaylist({ id, trackIds: [row.id] }))}>
+                  <button
+                    type="button"
+                    className="btn btn--ghost btn--icon btn--sm"
+                    aria-label={`Remove ${row.title} from this playlist`}
+                    title="Remove from this playlist (the song stays in your library)"
+                    onClick={() => removeFromPlaylist([row.id])}
+                  >
                     <CloseIcon size={12} />
                   </button>
                 </span>
+              )}
+              {onTrackMenu && (
+                <button
+                  type="button"
+                  className="lib-actions-button lib-playlist__more"
+                  aria-label={`Actions for ${row.title}`}
+                  aria-haspopup="menu"
+                  onClick={(event) => {
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    openMenu(event, row, rect.left - 180, rect.bottom + 4);
+                  }}
+                >
+                  <MoreIcon size={16} />
+                </button>
               )}
             </div>
           );
@@ -286,7 +340,7 @@ function PlaylistDetail({ id, revision, playing, onPlay, onOpenTrack, onChanged,
   );
 }
 
-export function PlaylistsView({ revision, playing, onPlay, onOpenTrack, onChanged, onError }) {
+export function PlaylistsView({ revision, playing, onOpenTrack, onTrackMenu, onChanged, onError }) {
   const { data: lists, reload } = useLoader(() => libraryApi.listPlaylists(), [revision]);
   const [selected, setSelected] = useState(null);
   const [notice, setNotice] = useState("");
@@ -355,8 +409,8 @@ export function PlaylistsView({ revision, playing, onPlay, onOpenTrack, onChange
             id={active}
             revision={revision}
             playing={playing}
-            onPlay={onPlay}
             onOpenTrack={onOpenTrack}
+            onTrackMenu={onTrackMenu}
             onChanged={() => {
               reload();
               onChanged();

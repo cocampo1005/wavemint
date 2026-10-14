@@ -40,6 +40,11 @@ export function useLibraryJobs() {
   }, []);
 
   useLibraryEvent(({ name, data }) => {
+    // Songs added from Add Music (outside a job).
+    if (name === "library-changed") {
+      setRevision((value) => value + 1);
+      return;
+    }
     if (name !== "job") return;
     setJobs((current) => [...current.filter((job) => job.id !== data.id), data].slice(-20));
     if (data.status !== "running") setRevision((value) => value + 1);
@@ -75,6 +80,7 @@ export function useLoader(load, deps) {
 }
 
 export const QUICK_FILTERS = [
+  { key: "favorite", label: "Favorites" },
   { key: "missingArtwork", label: "No artwork" },
   { key: "missingAlbum", label: "No album" },
   { key: "unclassified", label: "No genre" },

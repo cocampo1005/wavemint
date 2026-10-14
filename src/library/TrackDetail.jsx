@@ -1,8 +1,9 @@
-import { artworkUrl, formatBytes, formatDate, formatDuration, formatQuality } from "./format";
-import { CloseIcon, FolderOpenIcon, PauseIcon, PlayIcon, UpgradeIcon, WarningIcon } from "./icons";
+import { formatBytes, formatDate, formatDuration, formatQuality } from "./format";
+import { CloseIcon, FolderOpenIcon, HeartIcon, PauseIcon, PlayIcon, UpgradeIcon, WarningIcon, WaveformIcon } from "./icons";
 import { TrackEditor } from "./Editors";
 import { AddToPlaylist } from "./PlaylistsView";
 import { errorMessage, libraryApi, useLoader } from "./useLibrary";
+import { Artwork } from "./Artwork";
 
 const ROLE_LABELS = { legacy: "Legacy", curated: "Curated", managed: "Managed", other: "Library" };
 
@@ -120,11 +121,13 @@ export function FileVersions({ track, playing, onPlayFile, onError, onUpgrade })
   );
 }
 
-export function TrackDetail({ trackId, revision, playing, onPlayFile, onClose, onOpenAlbum, onError, onChanged, onWriteTags, onUpgrade, onIdentify }) {
+export function TrackDetail({ trackId, revision, playing, onPlayFile, onClose, onOpenAlbum, onError, onChanged, onWriteTags, onUpgrade, onIdentify, onEditAudio, onToggleFavorite }) {
   const { data: track, error, loading } = useLoader(() => libraryApi.getTrack({ id: trackId }), [trackId, revision]);
 
   if (!trackId) return null;
-  const artwork = track ? track.artwork_hash || track.files.find((file) => file.id === track.active_file_id)?.artwork_hash : null;
+  const activeFile = track?.files.find((file) => file.id === track.active_file_id);
+  const artwork = track ? track.artwork_hash || activeFile?.artwork_hash : null;
+  const isPlaying = !!activeFile && playing?.fileId === activeFile.id && playing.isPlaying;
 
   return (
     <aside className="lib-detail" aria-label="Song details">
@@ -141,15 +144,13 @@ export function TrackDetail({ trackId, revision, playing, onPlayFile, onClose, o
         </div>
       )}
 
-      {track && (
+      {track && track.state !== "active" && <div className="lib-detail__loading">This song is no longer in your library.</div>}
+
+      {track && track.state === "active" && (
         <div className="lib-detail__body">
           <div className="lib-detail__hero">
             <div className="lib-detail__art">
-              {artwork ? (
-                <img src={artworkUrl(artwork, 320)} alt={`${track.album || track.title} artwork`} />
-              ) : (
-                <span className="lib-art-placeholder lib-art-placeholder--lg">No artwork</span>
-              )}
+              <Artwork hash={artwork} size={320} alt={artwork ? `${track.album || track.title} artwork` : "No artwork"} />
             </div>
             <div>
               <h3 className="heading-md">{track.title || "Untitled"}</h3>
@@ -180,6 +181,29 @@ export function TrackDetail({ trackId, revision, playing, onPlayFile, onClose, o
               </button>
             )}
           </div>
+          {activeFile && activeFile.status === "ok" && (
+            <div className="lib-detail__actions">
+              <button type="button" className="btn btn--secondary btn--sm" onClick={() => onPlayFile(track, activeFile)}>
+                {isPlaying ? <PauseIcon size={14} /> : <PlayIcon size={14} />}
+                {isPlaying ? "Pause" : "Play"}
+              </button>
+              {onEditAudio && (
+                <button type="button" className="btn btn--secondary btn--sm" onClick={() => onEditAudio(track.id)}>
+                  <WaveformIcon size={14} /> Edit Audio…
+                </button>
+              )}
+              {onToggleFavorite && (
+                <button
+                  type="button"
+                  className={`btn btn--ghost btn--sm lib-detail__favorite ${track.favorite ? "is-on" : ""}`}
+                  aria-pressed={!!track.favorite}
+                  onClick={() => onToggleFavorite(track)}
+                >
+                  <HeartIcon size={14} filled={!!track.favorite} /> {track.favorite ? "Favorite" : "Add to Favorites"}
+                </button>
+              )}
+            </div>
+          )}
           <QualitySection track={track} onUpgrade={onUpgrade} onChanged={onChanged} onError={onError} />
           <AddToPlaylist trackIds={[track.id]} onDone={onChanged} onError={onError} />
           <TrackEditor track={track} onChanged={onChanged} onError={onError} onWriteTags={onWriteTags} />

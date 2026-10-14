@@ -1,6 +1,12 @@
 // Upgrade Track: replace a song's audio with a preferred version while the
 // logical song (its identity, curated metadata, playlists) stays the same.
 //
+// The replacement is a chosen file, another version already in the library,
+// or a fresh extraction from a URL (the main process extracts it into the
+// library's staging folder with the same pipeline as Add Music). Either way
+// the result is a complete new file: the final metadata and artwork chosen
+// in the upgrade dialog are written into WaveMint's copy of it.
+//
 //   1. prepare(): the replacement is read (never modified), compared with the
 //      current version, and quality-checked. Nothing else changes.
 //   2. apply job (journaled, one operation):
@@ -30,6 +36,7 @@ const { DEFAULT_PATTERN, planPaths } = require("./organize.cjs");
 const { describeFile, fileSignals, refreshQuality, technicalTier } = require("./quality.cjs");
 const { guessFromPath } = require("./scanner.cjs");
 const { refreshTrackSearch } = require("./search.cjs");
+const { retentionLabel } = require("./storage.cjs");
 const { canWriteTags, isAudioFile, readArtwork, readTags, writeTags } = require("./tags.cjs");
 
 // Fields offered in the metadata comparison (API name -> label).
@@ -49,10 +56,44 @@ const MERGE_FIELDS = [
 
 const empty = (value) => value === null || value === undefined || value === "";
 
+// Artwork for the upgraded song: the song's current artwork, the
+// replacement's own (for an extraction: its square-cropped thumbnail), an
+// image the user chose (stored in the art store first), or none.
+const ARTWORK_CHOICES = ["current", "candidate", "custom", "none"];
+
+// Words that suggest a replacement is a different performance or edit.
+const ALTERNATE_VERSION = /\b(live|remix(?:ed)?|instrumental|acoustic|karaoke|cover|sped[ -]?up|slowed|nightcore|demo|unplugged|extended|radio edit|reprise|mashup|bootleg|8d audio|a ?cappella)\b/gi;
+
+function alternateWords(text) {
+  return new Set([...String(text || "").matchAll(ALTERNATE_VERSION)].map((match) => match[1].toLowerCase().replace(/[ -]+/g, " ")));
+}
+
+function minutes(ms) {
+  const total = Math.round(Math.abs(Number(ms) || 0) / 1000);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+/** Where an extraction came from (shown in the comparison; never trusted as a path). */
+function cleanSource(source) {
+  if (!source || typeof source !== "object") return null;
+  const text = (value, max) => (typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, max) : "");
+  const url = text(source.url, 2000);
+  return { title: text(source.title, 500), uploader: text(source.uploader, 300), url: /^https?:\/\//i.test(url) ? url : "" };
+}
+
 function moveFile(from, to) {
   if (fs.existsSync(to)) throw new Error(`"${path.basename(to)}" already exists; nothing was overwritten`);
   fs.mkdirSync(path.dirname(to), { recursive: true });
   fs.renameSync(from, to);
+}
+
+/** `target`, or "name (2).ext", "name (3).ext"… if it's taken. */
+function freePath(target) {
+  const ext = path.extname(target);
+  const base = target.slice(0, target.length - ext.length);
+  let candidate = target;
+  for (let counter = 2; fs.existsSync(candidate); counter += 1) candidate = `${base} (${counter})${ext}`;
+  return candidate;
 }
 
 function createUpgrader({ db, media, artStore, managedSource, getSettings, logger = console }) {
@@ -101,7 +142,7 @@ function createUpgrader({ db, media, artStore, managedSource, getSettings, logge
   }
 
   /** Adds a replacement for a song: a file chosen by the user, or another version. */
-  async function prepare({ trackId, filePath = null, fileId = null, kind: requestedKind = null }) {
+  async function prepare({ trackId, filePath = null, fileId = null, kind: requestedKind = null, source = null }) {
     const track = trackRow(trackId);
     let kind = "file";
     let candidatePath = filePath;
@@ -134,6 +175,7 @@ function createUpgrader({ db, media, artStore, managedSource, getSettings, logge
 
     if (kind === "file" && requestedKind === "extraction") kind = "extraction";
     const info = await describeReplacement(candidatePath);
+    if (kind === "extraction") info.source = cleanSource(source);
     try {
       info.check = await media.qualityCheck(candidatePath, { durationMs: info.tags.durationMs, sampleRate: info.tags.sampleRate });
     } catch (error) {
@@ -177,7 +219,8 @@ function createUpgrader({ db, media, artStore, managedSource, getSettings, logge
       pattern,
       exists: (target) => pathKey(target) !== freed && fs.existsSync(target),
     });
-    const archive = currentManaged ? path.join(managed.root_path, ARCHIVE_DIR, "upgrades", `track-${track.id}`, current.rel_path) : null;
+    // A song replaced more than once keeps every earlier version.
+    const archive = currentManaged ? freePath(path.join(managed.root_path, ARCHIVE_DIR, "upgrades", `track-${track.id}`, current.rel_path)) : null;
     return {
       mode: "copy",
       target: planned.target,
@@ -186,6 +229,8 @@ function createUpgrader({ db, media, artStore, managedSource, getSettings, logge
       currentManaged,
       archive,
       freeBytes: freeBytes(managed.root_path),
+      // How long the archived version is kept (Storage settings).
+      keptFor: retentionLabel(getSettings().keepPreviousVersions),
     };
   }
 
@@ -215,9 +260,11 @@ function createUpgrader({ db, media, artStore, managedSource, getSettings, logge
       bitrate: tags.bitrate,
       sample_rate: tags.sampleRate,
       bit_depth: tags.bitDepth,
+      channels: tags.channels,
       duration_ms: tags.durationMs,
       status: "ok",
     };
+    const source = candidate.info.source || null;
 
     const match = compareTracks(
       { title: track.title, artist: track.artist, album: track.album, duration_ms: current?.duration_ms ?? track.duration_ms, mb_recording_id: track.mb_recording_id },
@@ -225,7 +272,12 @@ function createUpgrader({ db, media, artStore, managedSource, getSettings, logge
     );
 
     const warnings = [];
-    if (match.verdict === "different") {
+    const currentMs = current?.duration_ms ?? track.duration_ms;
+    const lengthDiff = currentMs && tags.durationMs ? Math.abs(currentMs - tags.durationMs) : null;
+    if (match.verdict === "different" && candidate.kind === "extraction" && lengthDiff !== null && lengthDiff <= 3000) {
+      // Video titles rarely match a curated title; the length is the better clue.
+      warnings.push({ level: "caution", text: "The source's title doesn't match this song, but the lengths match, so it's probably the same recording. Listen to be sure." });
+    } else if (match.verdict === "different") {
       warnings.push({ level: "strong", text: `These may be different recordings: ${match.evidence.map((item) => item.text).join("; ")}. Listen to both before upgrading.` });
     } else if (match.verdict === "uncertain") {
       warnings.push({ level: "caution", text: `Possibly a different version: ${match.evidence.filter((item) => item.weight <= 0).map((item) => item.text).join("; ") || "check the length and title"}.` });
@@ -238,6 +290,20 @@ function createUpgrader({ db, media, artStore, managedSource, getSettings, logge
     }
     const candidateSignals = fileSignals(candidateFile, candidateCheck, { lowBitrateKbps: settings.lowBitrateKbps });
     for (const signal of candidateSignals.filter((item) => item.level >= 3)) warnings.push({ level: "strong", text: `Replacement: ${signal.text}.` });
+    if (lengthDiff !== null && lengthDiff > 2000 && !match.evidence.some((item) => item.type === "duration")) {
+      warnings.push({ level: "caution", text: `The lengths differ by ${minutes(lengthDiff)} (${minutes(currentMs)} now, ${minutes(tags.durationMs)} for the replacement).` });
+    }
+    const currentWords = alternateWords([track.title, track.album].join(" "));
+    const flagged = [...alternateWords([tags.title, tags.album, source?.title].join(" "))].filter((word) => !currentWords.has(word));
+    if (flagged.length) {
+      warnings.push({ level: "caution", text: `The replacement may be an alternate version ("${flagged.join('", "')}" in its title). Listen before upgrading.` });
+    }
+    if (candidate.kind === "extraction") {
+      warnings.push({
+        level: "note",
+        text: "Streaming audio is already compressed before WaveMint converts it to MP3, so the bitrate shown overstates its quality. Compare by listening.",
+      });
+    }
 
     const fields = MERGE_FIELDS.map(([field, label]) => {
       const def = FIELDS[field];
@@ -272,6 +338,7 @@ function createUpgrader({ db, media, artStore, managedSource, getSettings, logge
         bitrate: current.bitrate,
         sampleRate: current.sample_rate,
         bitDepth: current.bit_depth,
+        channels: current.channels,
         durationMs: current.duration_ms,
         size: current.size,
         artworkHash: currentArt,
@@ -291,8 +358,10 @@ function createUpgrader({ db, media, artStore, managedSource, getSettings, logge
         bitrate: tags.bitrate,
         sampleRate: tags.sampleRate,
         bitDepth: tags.bitDepth,
+        channels: tags.channels,
         durationMs: tags.durationMs,
         size: candidate.info.size,
+        source,
         artworkHash: candidate.info.artworkHash,
         title: tags.title,
         artist: tags.artist,
@@ -310,9 +379,11 @@ function createUpgrader({ db, media, artStore, managedSource, getSettings, logge
     };
   }
 
+  /** Returns the discarded replacement's kind and path (so its staged copy can go). */
   function discard({ candidateId }) {
+    const row = db.prepare("SELECT kind, path, status FROM upgrade_candidates WHERE id = ?").get(Number(candidateId));
     db.prepare("UPDATE upgrade_candidates SET status = 'discarded' WHERE id = ? AND status = 'pending'").run(Number(candidateId));
-    return { discarded: true };
+    return { discarded: true, kind: row?.kind ?? null, path: row?.status === "pending" ? row.path : null };
   }
 
   function listCandidates({ trackId }) {
@@ -320,6 +391,39 @@ function createUpgrader({ db, media, artStore, managedSource, getSettings, logge
       .prepare("SELECT id, kind, path, status, created_at FROM upgrade_candidates WHERE track_id = ? AND status = 'pending' ORDER BY id DESC")
       .all(Number(trackId))
       .map((row) => ({ ...row, fileName: path.basename(row.path) }));
+  }
+
+  /**
+   * The final metadata as { field: value } (only fields that change):
+   * `metadata` is the edited form (the tag fields the user saw); older
+   * callers pass `choices` to take fields from the replacement instead.
+   */
+  function finalFields(track, candidate, { metadata = null, choices = {} } = {}) {
+    if (!metadata) return chosenFields(track, candidate, choices);
+    const out = {};
+    for (const [field, def] of TAG_FIELDS) {
+      if (!Object.hasOwn(metadata, field)) continue;
+      const value = normalizeValue(field, metadata[field]);
+      const old = track[def.column] ?? null;
+      if (value !== old && !(empty(value) && empty(old))) out[field] = value;
+    }
+    return out;
+  }
+
+  /** The artwork that goes into the file, and the song's artwork in the library. */
+  function chosenArtwork(track, candidate, previous, artwork, customHash) {
+    if (!ARTWORK_CHOICES.includes(artwork)) throw new Error("Choose the artwork for the upgraded song.");
+    if (artwork === "none") return { embed: null, track: null };
+    if (artwork === "candidate") {
+      if (!candidate.info.artworkHash) throw new Error("The replacement has no artwork of its own.");
+      return { embed: candidate.info.artworkHash, track: candidate.info.artworkHash };
+    }
+    if (artwork === "custom") {
+      if (!/^[a-f0-9]{40}$/.test(String(customHash || "")) || !artStore.read(customHash, db)) throw new Error("Choose the artwork image again.");
+      return { embed: customHash, track: customHash };
+    }
+    // The song's own artwork: the image chosen for it, or the current file's.
+    return { embed: track.artwork_hash || previous?.artwork_hash || null, track: track.artwork_hash };
   }
 
   /** The chosen metadata as { field: value } (only fields that change). */
@@ -335,16 +439,21 @@ function createUpgrader({ db, media, artStore, managedSource, getSettings, logge
   }
 
   /**
-   * Activates the replacement. `choices` maps field -> "candidate" for the
-   * fields to take from the replacement; `artwork` is "current" or "candidate".
+   * Activates the replacement. `metadata` is the final, edited metadata
+   * ({ field: value } for the tag fields); older callers pass `choices`
+   * (field -> "candidate" to take a field from the replacement). `artwork`
+   * is one of ARTWORK_CHOICES (`artworkHash` for "custom").
+   * `purpose: "edit"` is used by the audio editor: the replacement is an
+   * edited copy of the song's own audio, so its quality status stays.
    */
-  async function applyJob({ candidateId, choices = {}, artwork = "current", signal, progress }) {
+  async function applyJob({ candidateId, metadata = null, choices = {}, artwork = "current", artworkHash: customArtwork = null, purpose = "upgrade", signal, progress }) {
+    const isEdit = purpose === "edit";
     const candidate = candidateRow(candidateId);
     if (candidate.status !== "pending") throw new Error("This replacement was already used or discarded.");
     const track = trackRow(candidate.track_id);
-    const fields = chosenFields(track, candidate, choices);
+    const fields = finalFields(track, candidate, { metadata, choices });
     const target = plan(track, candidate, fields);
-    if (target.mode === "needs_library") throw new Error("Choose a folder for your WaveMint Library first; upgrades are copied there.");
+    if (target.mode === "needs_library") throw new Error(`Choose a folder for your WaveMint Library first; ${isEdit ? "edited songs" : "upgrades"} are saved there.`);
     if (!fs.existsSync(candidate.path)) throw new Error("The replacement file is no longer there.");
     const stat = fs.statSync(candidate.path);
     if (stat.size !== candidate.info.size || Math.round(stat.mtimeMs) !== candidate.info.mtimeMs) {
@@ -355,12 +464,13 @@ function createUpgrader({ db, media, artStore, managedSource, getSettings, logge
     }
 
     const previous = fileRow(track.active_file_id);
-    const artworkHash = artwork === "candidate" && candidate.info.artworkHash ? candidate.info.artworkHash : track.artwork_hash;
-    const operationId = startOperation(db, { kind: "upgrade", label: `Upgrade "${track.title || "Untitled"}"` });
-    const details = { candidateId: candidate.id, previousFileId: previous?.id ?? null, sourcePath: candidate.path };
+    const art = chosenArtwork(track, candidate, previous, artwork, customArtwork);
+    const artworkHash = art.track;
+    const operationId = startOperation(db, { kind: "upgrade", label: `${isEdit ? "Edit audio of" : "Upgrade"} "${track.title || "Untitled"}"` });
+    const details = { candidateId: candidate.id, previousFileId: previous?.id ?? null, sourcePath: candidate.path, purpose };
 
     if (target.mode === "switch") {
-      activate({ operationId, track, candidate, fields, artworkHash, newFileId: candidate.file_id, previous, moved: null });
+      activate({ operationId, track, candidate, fields, artworkHash, newFileId: candidate.file_id, previous, moved: null, isEdit });
       return { operationId, mode: "switch" };
     }
 
@@ -385,25 +495,34 @@ function createUpgrader({ db, media, artStore, managedSource, getSettings, logge
       if (signal?.aborted) throw new Error("Cancelled");
 
       // The final metadata goes into the copy (never into the chosen file).
+      // Every tag field is written (empty ones cleared), so nothing the
+      // replacement carried in its own tags overrides the final values.
       progress?.({ phase: "tagging", current: track.title });
-      const final = { ...track, artwork_hash: artworkHash };
+      const final = { ...track, artwork_hash: art.embed };
       for (const [field, value] of Object.entries(fields)) final[FIELDS[field].column] = value;
       if (canWriteTags(staged)) {
         const wanted = {};
         for (const [field, def] of TAG_FIELDS) wanted[field] = final[def.column];
-        if (artworkHash) {
-          const art = artStore.read(artworkHash, db);
-          if (art) wanted.artwork = art;
+        let picture = null;
+        if (art.embed) {
+          picture = artStore.read(art.embed, db);
+          if (!picture) throw new Error("The chosen artwork couldn't be read");
         }
-        if (tagDifferences(final, readTags(staged)).length) {
+        wanted.artwork = picture;
+        const before = readTags(staged);
+        if (tagDifferences(final, before).length || (before.artworkHash || null) !== art.embed) {
           const audioBefore = await media.audioStreamHash(staged);
           writeTags(staged, wanted);
-          const remaining = tagDifferences({ ...final, artwork_hash: null }, readTags(staged)).map((change) => change.field);
+          const after = readTags(staged);
+          const remaining = tagDifferences({ ...final, artwork_hash: null }, after).map((change) => change.field);
+          if ((after.artworkHash || null) !== art.embed) remaining.push("artwork");
           if (remaining.length) throw new Error(`Tags didn't read back correctly (${remaining.join(", ")})`);
           if ((await media.audioStreamHash(staged)) !== audioBefore) throw new Error("The audio stream changed while writing tags");
         }
       }
       updateStep(db, stepId, { state: "tagged" });
+      // The last point to cancel: after this, files move.
+      if (signal?.aborted) throw new Error("Cancelled");
 
       // The previous version leaves the library's main folders only if
       // WaveMint owns it; files in your other folders stay where they are.
@@ -419,7 +538,7 @@ function createUpgrader({ db, media, artStore, managedSource, getSettings, logge
 
       const snapshot = readTags(target.target, { size: fs.statSync(target.target).size });
       const newFile = { trackId: track.id, sourceId: managedSource().id, target: target.target, relRoot: target.root, snapshot, role: "alternate" };
-      activate({ operationId, track, candidate, fields, artworkHash, newFile, previous, moved: archived, stepId, details });
+      activate({ operationId, track, candidate, fields, artworkHash, newFile, previous, moved: archived, stepId, details, isEdit });
       return { operationId, mode: "copy", target: target.relPath, archived: !!archived };
     } catch (error) {
       // Put everything back the way it was.
@@ -435,7 +554,7 @@ function createUpgrader({ db, media, artStore, managedSource, getSettings, logge
       }
       updateStep(db, stepId, { state: "failed", error: error.message });
       finishOperation(db, operationId, "failed", { error: error.message });
-      throw new Error(`The upgrade didn't complete; the current version is unchanged. ${error.message}`);
+      throw new Error(`The ${isEdit ? "edit" : "upgrade"} didn't complete; the current version is unchanged. ${error.message}`);
     }
   }
 
@@ -443,7 +562,7 @@ function createUpgrader({ db, media, artStore, managedSource, getSettings, logge
    * One transaction: the new version becomes active. `newFile` describes a
    * copy to register; `newFileId` an existing version.
    */
-  function activate({ operationId, track, candidate, fields, artworkHash, newFileId = null, newFile: copy = null, previous, moved, stepId = null, details = {} }) {
+  function activate({ operationId, track, candidate, fields, artworkHash, newFileId = null, newFile: copy = null, previous, moved, stepId = null, details = {}, isEdit = false }) {
     transaction(db, () => {
       const now = nowIso();
       // The previous file's row moves first: the copy may take over its path.
@@ -467,8 +586,10 @@ function createUpgrader({ db, media, artStore, managedSource, getSettings, logge
       const newFile = db.prepare("SELECT * FROM files WHERE id = ?").get(newFileId);
       set("duration_ms", newFile.duration_ms ?? track.duration_ms);
       set("active_file_id", newFileId);
-      set("quality_status", "upgraded");
-      set("quality_set_by", "upgrade");
+      if (!isEdit) {
+        set("quality_status", "upgraded");
+        set("quality_set_by", "upgrade");
+      }
 
       db.prepare("UPDATE files SET role = 'active' WHERE id = ?").run(newFileId);
       if (previous) {
@@ -608,4 +729,4 @@ function createUpgrader({ db, media, artStore, managedSource, getSettings, logge
   return { applyJob, compare, discard, listCandidates, prepare, recover, resolveCandidateFile, undoUpgrade };
 }
 
-module.exports = { MERGE_FIELDS, createUpgrader };
+module.exports = { ARTWORK_CHOICES, MERGE_FIELDS, createUpgrader };

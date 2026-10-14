@@ -27,7 +27,7 @@ function serializeError(error) {
 }
 
 async function start() {
-  const { dataDir, ffmpegPath, ffprobePath, childEnv, appVersion } = workerData;
+  const { dataDir, ffmpegPath, ffprobePath, childEnv, appVersion, tempWorkDir } = workerData;
   const dbPath = path.join(dataDir, "wavemint-library.db");
   const { db, existed } = openDatabase(dbPath, { logger });
   await migrate(db, { filePath: dbPath, backupDir: path.join(dataDir, "db-backups"), logger, existed });
@@ -38,6 +38,7 @@ async function start() {
     dataDir,
     backupsDir: path.join(dataDir, "backups"),
     stagingDir: path.join(dataDir, "staging"),
+    tempWorkDir: tempWorkDir || null,
   };
   const service = createLibraryService({ db, media, jobs, paths, logger, emit, appVersion });
 

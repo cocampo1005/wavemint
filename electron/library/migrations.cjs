@@ -478,6 +478,19 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 8,
+    name: "favorites and sorting by date added",
+    up(db) {
+      db.exec(`
+        ALTER TABLE tracks ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0 CHECK (favorite IN (0, 1));
+        CREATE INDEX tracks_favorite ON tracks(favorite) WHERE favorite = 1;
+        -- created_at is when the song entered the library (scan or import),
+        -- never the file's modification time.
+        CREATE INDEX tracks_created ON tracks(state, created_at);
+      `);
+    },
+  },
 ];
 
 module.exports = { MIGRATIONS };

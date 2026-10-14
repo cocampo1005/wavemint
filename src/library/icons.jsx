@@ -191,3 +191,124 @@ export const UpgradeIcon = (props) => (
     <path d="M5 21h14" />
   </Icon>
 );
+
+export const PlusIcon = (props) => (
+  <Icon {...props}>
+    <path d="M12 5v14M5 12h14" />
+  </Icon>
+);
+
+// Add Music: a download arrow into a note.
+export const AddMusicIcon = (props) => (
+  <Icon {...props}>
+    <path d="M9 18V6l10-2v11" />
+    <circle cx="6.5" cy="18" r="2.5" />
+    <circle cx="16.5" cy="15" r="2.5" />
+  </Icon>
+);
+
+// Edit Audio: a waveform between trim brackets.
+export const WaveformIcon = (props) => (
+  <Icon {...props}>
+    <path d="M4 5v14M20 5v14" />
+    <path d="M8 10v4M11 7v10M14 9v6M17 11v2" />
+  </Icon>
+);
+
+export const HeartIcon = ({ filled = false, ...props }) => (
+  <Icon {...props}>
+    <path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z" fill={filled ? "currentColor" : "none"} />
+  </Icon>
+);
+
+export const MoreIcon = (props) => (
+  <Icon {...props}>
+    <circle cx="5.5" cy="12" r="1.2" fill="currentColor" />
+    <circle cx="12" cy="12" r="1.2" fill="currentColor" />
+    <circle cx="18.5" cy="12" r="1.2" fill="currentColor" />
+  </Icon>
+);
+
+export const ShuffleIcon = (props) => (
+  <Icon {...props}>
+    <path d="M4 7h3.5c2 0 3.2 1 4.3 2.6l2.4 4.8C15.3 16 16.5 17 18.5 17H20" />
+    <path d="M4 17h3.5c1.4 0 2.4-.5 3.2-1.4M14.2 8.4c.8-.9 1.8-1.4 3.3-1.4H20" />
+    <path d="M17.5 4.5L20 7l-2.5 2.5M17.5 14.5L20 17l-2.5 2.5" />
+  </Icon>
+);
+
+export const RepeatIcon = ({ one = false, ...props }) => (
+  <Icon {...props}>
+    <path d="M17 3.5L19.5 6 17 8.5" />
+    <path d="M4.5 11.5V10a4 4 0 0 1 4-4h11" />
+    <path d="M7 20.5L4.5 18 7 15.5" />
+    <path d="M19.5 12.5V14a4 4 0 0 1-4 4h-11" />
+    {one && <path d="M11.3 10.5l1.2-.8v4.6" strokeWidth="1.6" />}
+  </Icon>
+);
+
+export const PreviousIcon = (props) => (
+  <Icon {...props}>
+    <path d="M6 5v14" />
+    <path d="M18 5.5v13L9 12z" fill="currentColor" />
+  </Icon>
+);
+
+export const NextIcon = (props) => (
+  <Icon {...props}>
+    <path d="M18 5v14" />
+    <path d="M6 5.5v13l9-6.5z" fill="currentColor" />
+  </Icon>
+);
+
+export const QueueIcon = (props) => (
+  <Icon {...props}>
+    <path d="M4 6h12M4 11h12M4 16h7" />
+    <path d="M15 14.5v5l4.5-2.5z" fill="currentColor" />
+  </Icon>
+);
+
+export const VolumeIcon = ({ level = 1, ...props }) => (
+  <Icon {...props}>
+    <path d="M4 9.5h3l4.5-4v13L7 14.5H4z" />
+    {level > 0 && <path d="M15 9.5a3.5 3.5 0 0 1 0 5" />}
+    {level > 0.5 && <path d="M17.5 7a7 7 0 0 1 0 10" />}
+    {level === 0 && <path d="M16 10l4 4M20 10l-4 4" />}
+  </Icon>
+);
+
+// Listen Mode: a "now playing" frame.
+export const ListenIcon = (props) => (
+  <Icon {...props}>
+    <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+    <rect x="7.5" y="8" width="5.5" height="5.5" rx="1" />
+    <path d="M15.5 9h2M15.5 12h2M7.5 16.5h10" />
+  </Icon>
+);
+
+export const FullscreenIcon = ({ exit = false, ...props }) => (
+  <Icon {...props}>
+    {exit ? <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" /> : <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />}
+  </Icon>
+);
+
+export const TrashIcon = (props) => (
+  <Icon {...props}>
+    <path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13" />
+  </Icon>
+);
+
+export const GripIcon = (props) => (
+  <Icon {...props}>
+    <path d="M9 6v.1M15 6v.1M9 12v.1M15 12v.1M9 18v.1M15 18v.1" strokeWidth="2.6" />
+  </Icon>
+);
+
+// Storage: a disk.
+export const StorageIcon = (props) => (
+  <Icon {...props}>
+    <rect x="3.5" y="5" width="17" height="14" rx="2.5" />
+    <path d="M3.5 13.5h17" />
+    <path d="M7 16.3h.1M10 16.3h.1" strokeWidth="2.4" />
+  </Icon>
+);

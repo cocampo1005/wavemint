@@ -2,9 +2,9 @@
 
 <img src="src/assets/Horizontal%20Logo.png" alt="WaveMint" width="420" />
 
-### Turn YouTube videos and playlists into clean, tagged MP3s.
+### Your music library, with YouTube as a way to add to it.
 
-Paste a link, review the metadata, pick your cover art, and extract. WaveMint handles the rest.
+Organize your collection, then add songs from YouTube videos and playlists as clean, tagged MP3s, trimmed and faded if you like. WaveMint handles the rest.
 
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-4A8DFF?style=flat-square)
 ![Electron](https://img.shields.io/badge/Electron-41-1FC8FF?style=flat-square&logo=electron&logoColor=white)
@@ -47,12 +47,15 @@ Paste a link, review the metadata, pick your cover art, and extract. WaveMint ha
 
 | | |
 |---|---|
-| 🎵 **Single videos & playlists** | Analyze one video, or a whole playlist and choose which tracks to extract. |
+| 📚 **Library first** | WaveMint opens on an Overview of your collection (Recently Added, genres, top artists); browse, sort, search and edit songs, albums, artists, genres, favorites and playlists. |
+| 🎧 **A real player** | Shuffle, repeat, a play queue (Play Next, Add to Queue, drag to reorder) and a fullscreen **Listen Mode** with large artwork for big screens. |
+| 🎵 **Add Music from YouTube** | Analyze one video, or a whole playlist and choose which songs to add to your library. |
+| ✂️ **Built-in audio editor** | Trim intros, outros and silence, and add fade-ins and fade-outs, with a waveform and live preview. Works on songs in your library and on new songs before they're added. |
 | 🏷️ **Smart metadata** | Title, artist, album and genre are pre-filled, including details parsed from YouTube Music's *"Provided to YouTube by…"* descriptions. Everything stays editable. |
 | 🖼️ **Cover art your way** | Use the **Original** thumbnail, a centered **Square** 1000 × 1000 crop, or a **Custom** image from your computer, with a live preview before you extract. |
-| 📚 **Bulk editing** | Apply an artist, album, genre, or cover image to every track in a playlist at once. |
+| 🗂️ **Bulk editing** | Apply an artist, album, genre, or cover image to every track in a playlist at once. |
 | 🎧 **High-quality MP3s** | Best available audio, encoded to MP3 with ID3v2.3 tags and embedded cover art. |
-| ▶️ **Straight to your library** | Open finished files in your default player (e.g. iTunes) with one click, individually or all at once. |
+| ▶️ **Straight to your library** | Finished songs go straight into your WaveMint Library folder, with their details and artwork, ready to browse. |
 | 🚀 **No setup for public videos** | Install, paste a link, extract. No account, cookies or configuration needed. |
 | 🔄 **Self-updating engine** | Install newer, signature-verified versions of the YouTube extraction engine from Settings, without reinstalling. |
 | 💬 **Clear messages** | Problems are explained in plain language with a next step (Retry, YouTube Access, Check for Updates). Technical details are one click away. |
@@ -79,17 +82,23 @@ That's it. You don't need Node.js, Python, FFmpeg, yt-dlp, or a terminal.
 
 ## Using WaveMint
 
-1. **Choose a source.** Select **Single Video** or **Playlist**.
-2. **Paste a YouTube URL** and click **Analyze**.
-3. **Review the details.** Edit the title, artist, album, and genre as needed.
-4. **Pick your artwork.** Choose **Original**, **Square**, or **Custom** under the preview.
-5. **Choose an output folder** where your MP3s will be saved.
-6. **Extract.**
-   - *Single video:* click **Extract MP3**.
-   - *Playlist:* tick the tracks you want (use **Select All** / **Clear All**), optionally fill in **Apply to all tracks**, then click **Extract Selected**.
-7. **Open your music.** When extraction finishes, click **Open in iTunes** (or **Open All in iTunes** for playlists). Files open in whichever app is your default for MP3s.
+WaveMint opens on your library. To add songs from YouTube:
 
-You can **Cancel** an analysis or extraction from its progress bar. If a playlist track can't be extracted (for example, it was removed or is private), WaveMint skips it, finishes the others and tells you which ones were skipped.
+1. Click **+ Add Music** (top right, or at the top of the navigation).
+2. **Choose a source.** Select **Single Video** or **Playlist**.
+3. **Paste a YouTube URL** and click **Analyze**.
+4. **Review the details.** Edit the title, artist, album, and genre as needed.
+5. **Pick your artwork.** Choose **Original**, **Square**, or **Custom** under the preview.
+6. **Add to Library.**
+   - *Single video:* click **Add to Library**.
+   - *Playlist:* tick the songs you want (use **Select All** / **Clear All**), optionally fill in **Apply to all songs**, then click **Add Selected to Library**.
+7. A short confirmation appears; **View in Library** takes you to the new songs.
+
+The first time, WaveMint asks where to keep your **WaveMint Library** folder; added songs are saved there and appear in the library right away.
+
+**Trimming and fades.** Tick **Edit audio before adding** to trim the song or add fades before it's added: the audio editor opens when the extraction finishes, with **Save & Add to Library** and **Skip Editing & Add to Library**. In a playlist, tick it on individual songs: they wait (marked in the list) while the others are added, and you edit them when you're ready. For songs already in your library, select a song and click **Edit Audio…** in its details. Edits are undoable from **History**.
+
+You can **Cancel** an analysis or extraction from its progress bar. If a playlist song can't be added (for example, it was removed or is private), WaveMint skips it, adds the others and marks the ones that failed.
 
 > [!TIP]
 > Analyzing a new URL resets the previous results, so you can work through links one after another.
@@ -211,13 +220,6 @@ WaveMint already tried the safe alternatives automatically. YouTube changes ofte
 </details>
 
 <details>
-<summary><b>Saving straight into iTunes</b></summary>
-
-You can choose iTunes' **Automatically Add to iTunes** folder (usually `MusiciTunesiTunes MediaAutomatically Add to iTunes`) as the output folder. WaveMint only places the finished, tagged MP3 there, iTunes imports it right away, and WaveMint shows "added to iTunes automatically".
-
-</details>
-
-<details>
 <summary><b>"WaveMint couldn't connect to YouTube"</b></summary>
 
 WaveMint retries brief connection problems by itself. If you still see this, check your internet connection (and any VPN or proxy), then click **Retry**.
@@ -285,9 +287,13 @@ wavemint/
 │   ├── pgp.cjs           # OpenPGP signature check for yt-dlp releases (Node crypto only)
 │   ├── trust/            # yt-dlp's release signing key (pinned by fingerprint)
 │   ├── settings.cjs      # Per-user settings (validated JSON in %APPDATA%)
+│   ├── library/          # Music library (worker thread + SQLite), imports, audio editing
 │   └── assets/icon.png   # Window icon in development
 ├── src/
-│   ├── App.jsx           # The main interface (single-video + playlist flows)
+│   ├── App.jsx / AppNav.jsx # App shell and navigation (Library, Add Music, Settings)
+│   ├── addMusic/         # Add Music: YouTube single-video + playlist flows
+│   ├── editor/           # Audio editor (trim, fades, waveform, preview)
+│   ├── library/          # Library views
 │   ├── SettingsDialog.jsx# Settings: YouTube Access, Extraction Engine, About
 │   ├── ipcErrors.js      # Reads error categories and diagnostics ids from main-process errors
 │   ├── App.css / index.css
@@ -307,7 +313,7 @@ wavemint/
 └── .github/workflows/release.yml
 ```
 
-The UI never touches the file system or runs commands directly. Everything goes through `window.waveMintAPI` (defined in `preload.cjs`), which calls narrowly scoped handlers in `main.cjs`. Paths for cookies files, profiles, output folders and artwork are chosen through main-process dialogs. The UI can only open MP3s that WaveMint created.
+The UI never touches the file system or runs commands directly. Everything goes through `window.waveMintAPI` (defined in `preload.cjs`), which calls narrowly scoped handlers in `main.cjs`. Paths for cookies files, profiles, the library folder and artwork are chosen through main-process dialogs; songs waiting to be added are referred to by random tokens, never by paths.
 
 ---
 

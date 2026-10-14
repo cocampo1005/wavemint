@@ -32,15 +32,16 @@ const {
 const { createDiagnosticsStore, formatDiagnostics } = require("./diagnostics.cjs");
 const { createExtractionManager } = require("./extraction.cjs");
 const { CHANNELS, createEngineStore, createEngineUpdater } = require("./engine.cjs");
-const { isAutoImportFolder, moveIntoOutputFolder } = require("./outputFiles.cjs");
+const { moveIntoOutputFolder } = require("./outputFiles.cjs");
 const { createLibraryHost, registerLibrarySchemes } = require("./library/host.cjs");
 
 const APP_USER_MODEL_ID = "com.wavemint.app";
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL || "http://localhost:5173";
 
 // Development runs keep their own settings so experimenting never touches an
-// installed copy's configuration. Must run before the app is ready.
-if (!app.isPackaged) {
+// installed copy's configuration (an explicit --user-data-dir, as tests use,
+// wins). Must run before the app is ready.
+if (!app.isPackaged && !app.commandLine.hasSwitch("user-data-dir")) {
   app.setPath("userData", path.join(app.getPath("appData"), "WaveMint-Dev"));
 }
 
@@ -281,6 +282,8 @@ const libraryHost = createLibraryHost({
   BrowserWindow,
   protocol,
   binaries,
+  // Storage cleanup never runs during an extraction.
+  isExtractionBusy: () => extraction.isBusy(),
 });
 libraryHost.register();
 
@@ -305,6 +308,7 @@ app.whenReady().then(async () => {
   // The library worker starts on first use, so Extract-only sessions never
   // open the database.
   libraryHost.registerProtocols();
+  libraryHost.startStorageMaintenance();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -1204,31 +1208,17 @@ ipcMain.handle("analyze-url", async (event, payload) => {
   }
 });
 
-// Paths the renderer may hand back to the main process. They can only enter
-// these sets through main-process dialogs or WaveMint's own output, so the UI
-// can never direct writes, reads or shell.openPath at arbitrary locations.
-const approvedOutputFolders = new Set();
+// Artwork files the renderer may hand back to the main process. They can
+// only enter this set through a main-process dialog, so the UI can never
+// direct reads at arbitrary locations. (Finished songs always go into the
+// WaveMint Library, whose folder is chosen the same way.)
 const approvedArtworkFiles = new Set();
-const producedFiles = new Set();
 
 function normalizeApprovedPath(value) {
   return typeof value === "string" && value.trim()
     ? path.resolve(value.trim())
     : "";
 }
-
-ipcMain.handle("choose-output-folder", async () => {
-  const result = await dialog.showOpenDialog({
-    properties: ["openDirectory"],
-  });
-
-  if (result.canceled || !result.filePaths.length) {
-    return null;
-  }
-
-  approvedOutputFolders.add(normalizeApprovedPath(result.filePaths[0]));
-  return result.filePaths[0];
-});
 
 ipcMain.handle("choose-artwork-file", async () => {
   const result = await dialog.showOpenDialog({
@@ -1389,8 +1379,7 @@ function createPostProcessingError(message, error, url) {
 }
 
 ipcMain.handle("download-mp3", async (event, payload) => {
-  const { url, metadata, thumbnail, artwork, importSessionId, importEntryKey } = payload || {};
-  let { outputFolder } = payload || {};
+  const { url, metadata, thumbnail, artwork, importSessionId, importEntryKey, holdForEditing, upgradeTrackId } = payload || {};
 
   extraction.assertAvailable();
 
@@ -1398,25 +1387,36 @@ ipcMain.handle("download-mp3", async (event, payload) => {
     throw new Error("No URL provided for download");
   }
 
-  // Library import: the finished MP3 goes to the import's private staging
-  // folder (decided by the library, never by the renderer) and is handed
-  // to the library for checking. Otherwise the chosen output folder.
-  const libraryImport = importSessionId !== undefined && importSessionId !== null;
-  if (libraryImport) {
+  // Every finished MP3 goes into a private staging folder decided by the
+  // library (never by the renderer):
+  // - album import: the import session's folder; the library checks the
+  //   file and the user reviews the whole import before anything is added;
+  // - Add to Library: a one-song folder; the song is added to the library
+  //   right away, or (holdForEditing) kept there until the user has edited
+  //   it or chosen to skip editing;
+  // - Upgrade Track (upgradeTrackId): a one-song folder; the file becomes a
+  //   replacement candidate for that song, compared and confirmed in the
+  //   upgrade dialog (which writes the final metadata and artwork).
+  const albumImport = importSessionId !== undefined && importSessionId !== null;
+  const upgradeTrack =
+    !albumImport && Number.isInteger(Number(upgradeTrackId)) && Number(upgradeTrackId) > 0
+      ? Number(upgradeTrackId)
+      : null;
+  let outputFolder;
+  let stagedToken = null;
+  if (albumImport) {
     const staging = await libraryHost.call("prepareImportStaging", {
       sessionId: Number(importSessionId),
       entryKey: String(importEntryKey || ""),
     });
     outputFolder = staging.folder;
   } else {
-    if (!outputFolder || !outputFolder.trim()) {
-      throw new Error("No output folder selected");
-    }
-
-    if (!approvedOutputFolders.has(normalizeApprovedPath(outputFolder))) {
-      throw new Error("Choose the output folder again before extracting");
-    }
+    const staging = await libraryHost.call("prepareExtractionStaging", {});
+    outputFolder = staging.folder;
+    stagedToken = staging.token;
   }
+  // Removed unless the song was added to the library or is held for editing.
+  let keepStaged = false;
 
   if (
     artwork?.mode === "custom_file" &&
@@ -1565,19 +1565,19 @@ ipcMain.handle("download-mp3", async (event, payload) => {
       );
     }
 
-    // The finished file is the only thing that ever reaches the output folder.
+    // Only the finished file ever reaches the staging folder.
     const finalOutputPath = getUniqueFilePath(path.join(outputFolder, finalFileName));
     try {
       moveIntoOutputFolder(taggedMp3Path, finalOutputPath);
     } catch (saveError) {
       throw createPostProcessingError(
-        "WaveMint couldn't save the MP3 to the output folder. Check that the folder still exists and that you can save files there, then try again.",
+        "WaveMint couldn't save the finished MP3. Check that there is free space on the drive, then try again.",
         saveError,
         url,
       );
     }
 
-    if (libraryImport) {
+    if (albumImport) {
       sendProgress({ phase: "checking", title: finalMetadata.title || progressTitle });
       const staged = await libraryHost.call("addStagedImport", {
         sessionId: Number(importSessionId),
@@ -1585,27 +1585,59 @@ ipcMain.handle("download-mp3", async (event, payload) => {
         filePath: finalOutputPath,
       });
       sendProgress({ phase: "complete", title: finalMetadata.title || progressTitle });
-      return { success: true, staged, metadata: finalMetadata, artworkMode, autoImported: false };
+      return { success: true, staged, metadata: finalMetadata, artworkMode };
     }
 
-    producedFiles.add(normalizeApprovedPath(finalOutputPath));
-    const autoImported = isAutoImportFolder(outputFolder);
+    if (upgradeTrack) {
+      sendProgress({ phase: "checking", title: finalMetadata.title || progressTitle });
+      let upgrade;
+      try {
+        upgrade = await libraryHost.call("prepareStagedUpgrade", {
+          token: stagedToken,
+          trackId: upgradeTrack,
+          source: {
+            title: extractedInfo?.title || "",
+            uploader: extractedInfo?.uploader || extractedInfo?.channel || "",
+            url: extractedInfo?.webpage_url || url,
+          },
+        });
+      } catch (prepareError) {
+        throw createPostProcessingError(
+          `WaveMint extracted the audio but couldn't prepare it as the replacement: ${prepareError.message}`,
+          prepareError,
+          url,
+        );
+      }
+      keepStaged = true; // the replacement candidate; removed when it's used or discarded
+      sendProgress({ phase: "complete", title: finalMetadata.title || progressTitle });
+      return { success: true, upgrade, metadata: finalMetadata, artworkMode };
+    }
 
+    if (holdForEditing) {
+      keepStaged = true;
+      sendProgress({ phase: "complete", title: finalMetadata.title || progressTitle });
+      return { success: true, held: true, token: stagedToken, metadata: finalMetadata, artworkMode };
+    }
+
+    sendProgress({ phase: "saving", title: finalMetadata.title || progressTitle });
+    let added;
+    try {
+      added = await libraryHost.call("commitStagedExtraction", { token: stagedToken });
+    } catch (addError) {
+      throw createPostProcessingError(
+        `WaveMint extracted the song but couldn't add it to your library: ${addError.message}`,
+        addError,
+        url,
+      );
+    }
+    keepStaged = true; // already removed by the library
     sendProgress({ phase: "complete", title: finalMetadata.title || progressTitle });
-
-    return {
-      success: true,
-      message: "MP3 extraction and metadata tagging completed successfully",
-      outputFolder,
-      filePath: finalOutputPath,
-      fileName: path.basename(finalOutputPath),
-      metadata: finalMetadata,
-      artworkMode,
-      // iTunes/Music takes the file from this folder by itself.
-      autoImported,
-    };
+    return { success: true, added, metadata: finalMetadata, artworkMode };
   } finally {
     removeFolderQuietly(workFolder);
+    if (stagedToken && !keepStaged) {
+      libraryHost.call("discardStagedExtraction", { token: stagedToken }).catch(() => {});
+    }
     operation.end();
   }
 });
@@ -1617,47 +1649,6 @@ ipcMain.handle("cancel-operations", async (event) => {
   const count = controllers?.size || 0;
   for (const controller of controllers || []) controller.abort();
   return { cancelled: count };
-});
-
-ipcMain.handle("open-file", async (_, filePath) => {
-  if (!filePath || !filePath.trim()) {
-    throw new Error("No file path provided");
-  }
-
-  // Only MP3s that WaveMint itself created can be opened from the UI.
-  if (!producedFiles.has(normalizeApprovedPath(filePath))) {
-    throw new Error("Only files extracted by WaveMint can be opened");
-  }
-
-  if (!fileExists(filePath)) {
-    throw new Error(
-      "This MP3 is no longer where WaveMint saved it. Another app (such as iTunes) may have already moved it into its library.",
-    );
-  }
-
-  const openError = await shell.openPath(filePath);
-  if (openError) {
-    throw new Error(openError);
-  }
-
-  return { success: true };
-});
-
-ipcMain.handle("open-folder", async (_, folderPath) => {
-  if (!folderPath || !folderPath.trim()) {
-    throw new Error("No folder path provided");
-  }
-
-  if (!approvedOutputFolders.has(normalizeApprovedPath(folderPath))) {
-    throw new Error("Only the selected output folder can be opened");
-  }
-
-  const openError = await shell.openPath(folderPath);
-  if (openError) {
-    throw new Error(openError);
-  }
-
-  return { success: true };
 });
 
 // ---------------------------------------------------------------------------

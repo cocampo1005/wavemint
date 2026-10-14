@@ -63,7 +63,7 @@ file.") with the FFmpeg output kept in diagnostics.
 
 ### Work folders
 
-Each extraction runs in its own folder under `%TEMP%WaveMint<token>`: yt-dlp's download, `.info.json`, the MP3 conversion, artwork and the tagged result all stay there. Only the finished, tagged MP3 is moved into the output folder (`electron/outputFiles.cjs`: a rename on the same drive, otherwise a non-overwriting copy), and the work folder is always removed. Leftovers from a crash are removed at startup after 24 hours.
+Each extraction runs in its own folder under `%TEMP%WaveMint<token>`: yt-dlp's download, `.info.json`, the MP3 conversion, artwork and the tagged result all stay there. Only the finished, tagged MP3 is moved out (`electron/outputFiles.cjs`: a rename on the same drive, otherwise a non-overwriting copy) into a staging folder the library chose, and the work folder is always removed. Since 2.1 there is no output folder: the library copies the finished song into the WaveMint Library (see `docs/LIBRARY.md`, "Library-first app, Add to Library and audio editing"). Leftovers from a crash are removed at startup after 24 hours.
 
 This fixed a real failure: with iTunes' **Automatically Add to iTunes** folder as the output folder, iTunes moved yt-dlp's temporary `.webm` into `Not Added` before FFprobe could read it ("unable to obtain file audio codec with ffprobe"), and would otherwise have imported an untagged temporary MP3. When the output folder is an iTunes/Music auto-add folder, WaveMint now reports "added to iTunes automatically" instead of offering **Open in iTunes** for a file iTunes has already moved.
 
@@ -159,8 +159,8 @@ A batch skips tracks with per-video problems (`unavailable`, `private`,
 `unsupported-url`, `unknown`) and continues; it stops on problems that would
 affect every remaining track (connection, rate limit, authentication source,
 bot check, outdated extractor, missing component, cancel). Finished tracks are
-remembered, so **Retry** / **Extract Remaining** continues instead of
-re-extracting them, and **Open All in iTunes** includes every finished file.
+remembered, so **Retry** / **Add Remaining to Library** continues instead of
+re-extracting them (songs held for editing count as finished).
 
 ### Diagnostics sanitization
 

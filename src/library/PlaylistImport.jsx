@@ -416,7 +416,7 @@ export function PlaylistImport({ playlist, entries, downloadStatus, onBusyChange
               {failure.title}: {failure.error}
             </p>
           ))}
-          <p className="settings-hint">The songs are in the Library tab. Undo the import from Library → History if needed.</p>
+          <p className="settings-hint">The songs are in your library (Songs). Undo the import from History if needed.</p>
           <button type="button" className="btn btn--secondary" onClick={discard}>
             Start Over
           </button>

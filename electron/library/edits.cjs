@@ -220,7 +220,7 @@ function setTrackArtwork(db, trackIds, artworkHash, { label = "Change artwork" }
 function undoMetadataOperation(db, operationId) {
   const operation = db.prepare("SELECT * FROM operations WHERE id = ?").get(Number(operationId));
   if (!operation) throw new Error("This change no longer exists.");
-  if (!["metadata", "artwork", "genre", "quality"].includes(operation.kind)) {
+  if (!["metadata", "artwork", "genre", "quality", "remove"].includes(operation.kind)) {
     throw new Error("This kind of change is undone differently.");
   }
   if (db.prepare("SELECT 1 FROM operations WHERE undo_of = ? AND status IN ('completed', 'partial')").get(operation.id)) {

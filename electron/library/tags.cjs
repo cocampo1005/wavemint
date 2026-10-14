@@ -11,6 +11,7 @@ const {
   Picture,
   PictureType,
   ReadStyle,
+  TagTypes,
 } = require("node-taglib-sharp");
 
 const AUDIO_EXTENSIONS = new Set([".mp3", ".m4a", ".m4b", ".aac", ".mp4", ".flac", ".wav", ".aif", ".aiff", ".alac"]);
@@ -61,6 +62,23 @@ function positiveOrNull(value) {
   return Number.isFinite(number) && number > 0 ? Math.round(number) : null;
 }
 
+/**
+ * The file's genres. An ID3v2.3 genre frame holds one text: "/" is only a
+ * list separator for people (artist, composer…) in v2.3, but TagLib# splits
+ * every v2.3 text frame on it, which turned "Hip Hop/R&B" into "Hip Hop".
+ * WaveMint writes v2.3 for Apple compatibility, so v2.3 genres are read whole.
+ */
+function readGenres(file) {
+  const genres = (file.tag.genres || []).map(clean).filter(Boolean);
+  const id3 = file.getTag(TagTypes.Id3v2, false);
+  if (id3 && id3.version <= 3) {
+    // A v2.3 genre that starts with "(" is written escaped as "((".
+    const whole = genres.join("/").replace(/^\(\(/, "(");
+    return whole ? [whole] : [];
+  }
+  return genres;
+}
+
 function describeCodec(description, ext) {
   const text = String(description || "").toLowerCase();
   if (text.includes("alac")) return { codec: "alac", lossless: 1 };
@@ -104,14 +122,15 @@ function readTags(filePath, { size = 0 } = {}) {
     }
 
     const year = positiveOrNull(tag.year);
+    const genres = readGenres(file);
 
     return {
       title: clean(tag.title),
       artist: joinList(tag.performers),
       albumArtist: joinList(tag.albumArtists),
       album: clean(tag.album),
-      genre: clean((tag.genres || [])[0]),
-      genres: (tag.genres || []).map(clean).filter(Boolean),
+      genre: genres[0] || "",
+      genres,
       year: year && year < 10000 ? year : null,
       trackNo: positiveOrNull(tag.track),
       trackTotal: positiveOrNull(tag.trackCount),

@@ -75,3 +75,21 @@ export function formatDate(iso) {
     ? new Date(time).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
     : "";
 }
+
+/** "Oct 13, 2026" */
+export function formatShortDate(iso) {
+  const time = Date.parse(iso || "");
+  return time ? new Date(time).toLocaleDateString(undefined, { dateStyle: "medium" }) : "";
+}
+
+/** "Today", "Yesterday", "3 days ago", or the date. */
+export function formatAddedAgo(iso) {
+  const time = Date.parse(iso || "");
+  if (!time) return "";
+  const startOfToday = new Date().setHours(0, 0, 0, 0);
+  const days = Math.floor((startOfToday - new Date(time).setHours(0, 0, 0, 0)) / 86400000);
+  if (days <= 0) return "Added today";
+  if (days === 1) return "Added yesterday";
+  if (days < 7) return `Added ${days} days ago`;
+  return `Added ${formatShortDate(iso)}`;
+}

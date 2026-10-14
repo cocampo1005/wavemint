@@ -1,13 +1,10 @@
-// Moving finished files into the user's output folder.
+// Moving finished files out of the private work folder.
 //
 // Extractions work in a private folder under %TEMP%\WaveMint; only the
-// finished, tagged MP3 is moved into the output folder, so nothing
-// half-finished ever appears there. That matters for folders other apps
-// watch: iTunes' "Automatically Add to iTunes" folder grabs (or rejects)
-// files the moment they appear.
+// finished, tagged MP3 is moved into the library's staging folder, so nothing
+// half-finished ever reaches the library.
 
 const fs = require("fs");
-const path = require("path");
 
 // Errors where a rename can't work but a copy can (another drive, or a
 // destination that briefly refuses renames).
@@ -34,11 +31,4 @@ function moveIntoOutputFolder(sourcePath, destinationPath, { fsImpl = fs } = {})
   return "copied";
 }
 
-/** iTunes and Apple Music import anything placed in these folders. */
-function isAutoImportFolder(folder) {
-  return /^Automatically Add to (?:iTunes|Music)$/i.test(
-    path.basename(path.resolve(String(folder || ""))),
-  );
-}
-
-module.exports = { isAutoImportFolder, moveIntoOutputFolder };
+module.exports = { moveIntoOutputFolder };

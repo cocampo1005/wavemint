@@ -277,6 +277,27 @@ is exercised by real code.
   reactivates the previous version and archives the copy. Without a WaveMint
   Library folder, switching to another existing version only changes the
   database; upgrading from a chosen file asks for a folder first.
+- Upgrade Track (2.2): two sources, **Choose File** and **Analyze URL**. A
+  URL is analyzed with `analyze-url` and extracted with `download-mp3`
+  (`upgradeTrackId`, square-cropped thumbnail) into the library's staging
+  folder, then prepared as an `extraction` candidate; nothing changes in the
+  library until the user upgrades. The dialog's metadata form (the shared
+  `MetadataFields`) is prefilled from the song once and only the user
+  changes it; detected values (the analysis or the replacement's own tags)
+  are only offered through "Use Detected Metadata" with per-field ticks.
+  `applyUpgrade` takes the final `metadata` and an `artwork` choice
+  (`current` / `candidate` / `custom` via `chooseUpgradeArtwork` / `none`);
+  every tag field and the front cover are written into WaveMint's copy and
+  read back. The comparison adds channels, a lengths warning, alternate
+  version words (live, remix…) and a note that streamed audio's bitrate
+  overstates its quality. Unused candidates are discarded when the dialog
+  closes (a staged extraction's folder with them); a used one's staging
+  folder is removed after the upgrade. If the upgraded song is playing, the
+  player continues from the same position in the new file.
+- Apple Music / iTunes: WaveMint never writes to Apple's library. An upgrade
+  of a song from an iTunes folder leaves that file in place, so Apple Music
+  keeps playing (and showing the details of) the old file; Prepare for
+  iPhone lists the new file under "Replaced" so it can be re-added there.
 - Consolidation now reuses an earlier managed copy (e.g. after undoing a
   copy) instead of making a "(2)" duplicate. Rescans check archived files
   directly instead of marking them missing.
@@ -466,6 +487,187 @@ Evaluated, not implemented:
 - **More metadata providers.** Discogs (token, strict limits), Last.fm (API
   key) and the iTunes Search API (no key; good artwork, restrictive terms)
   were considered. None is needed for the core workflow; none is added.
+
+### Library-first app, Add to Library and audio editing (2.1)
+
+- **Navigation.** The app opens on the library (Songs). One sidebar (`src/AppNav.jsx`)
+  holds **Add Music**, the library sections, Maintain/Manage and Settings;
+  the old Extract/Library tabs and the library's own sidebar are gone. The
+  Overview page is now **Library Health** under Maintain; an empty library
+  shows a welcome in Songs. `App.jsx` is the shell: it owns the route and the
+  library job state, and keeps both workspaces (Library, Add Music) mounted
+  so switching never loses an extraction, its progress listeners or edits.
+- **Add to Library.** `download-mp3` no longer takes an output folder. The
+  finished MP3 goes into `<userData>/library/staging/extractions/<token>/`
+  (`prepareExtractionStaging`, host-only) and `commitStagedExtraction`
+  copies it into the WaveMint Library (verified SHA-256, naming pattern,
+  never overwriting) and registers one song in a journaled `import`
+  operation ("Add "Title"", undoable from History; crash recovery is the
+  importer's). A failed extraction or failed copy leaves no song behind; the
+  staging folder is removed after the add, on failure, and at worker start.
+  The renderer only ever holds the random token. `holdForEditing` keeps the
+  staged file for the editor instead of adding it. A `library-changed` event
+  refreshes the views; the review queue is refreshed a few seconds after the
+  last add. Possible duplicates are flagged before adding
+  (`checkLibraryMatches`, same scoring as the album import) but not blocked.
+  The album import (Phase 6) remains as **Import as Album…** for playlists;
+  Extract to Folder and Open in iTunes were removed.
+- **Audio editor** (`src/editor/AudioEditor.jsx`, one component for both
+  entry points): waveform peaks from FFmpeg (`media.waveform`, mono PCM at
+  6 kHz reduced to 1,600 peaks), draggable/keyboard trim handles, time
+  inputs, fade sliders (fades sit inside the trim and can't overlap), and a
+  preview that plays the real file with the edits applied live (stops at the
+  end handle; the fades are the same linear ramps FFmpeg's `afade` applies).
+  Nothing plays until asked.
+- **Saving edits** (`electron/library/audioedit.cjs`). A plain trim of an
+  MP3/AAC file is a stream copy (cut on frame boundaries, ~26 ms, no
+  re-encoding); fades re-encode (MP3 at the smallest standard bitrate at or
+  above the original's, AAC 192–320 kbps, lossless formats losslessly). Tags
+  and artwork are copied from the original with taglib, and the result's
+  length is checked. For a library song the render becomes the song's new
+  active version through Upgrade Track (`applyJob` with `purpose: "edit"`:
+  verified copy into the WaveMint Library, tags and artwork written and
+  checked, a previous version WaveMint owns archived, one transaction; the
+  quality status is left alone). The song keeps its id, metadata and
+  playlists; History undoes it. Files in other sources are never touched,
+  so editing their songs needs the WaveMint Library folder. Repeated edits
+  or upgrades of a managed song now archive each earlier version under its
+  own name (previously the second archive move would have collided).
+- Tests: `tests/library-audio-edit.test.cjs` (validation, encoders, add with
+  and without edits, in-place edit + undo, read-only source untouched, no
+  temp files left) and `tests/editor-math.test.mjs`. Verified in the real app
+  with a YouTube video and playlist: add, View in Library, Edit Audio from
+  the song panel (13.0 s result, original archived, same song), edit before
+  adding (nothing in the library until saved), a held playlist song while the
+  batch continues, and the library after a restart.
+
+### Overview, favorites, the player and removing songs (2.1)
+
+- **Overview** (the home page; the app opens on it): totals, **Recently
+  Added** as artwork cards (`t.created_at`, i.e. when a song entered the
+  library by scan or import, never a file date; play or open each, View All
+  opens Songs newest first), genre composition (one-hue bars with counts and
+  shares; a bar opens its songs), the artists with most songs, and a short
+  "Needs attention" list. File formats and sources left the overview (Sources
+  and Quality still show them).
+- **Songs**: a Sort menu (Recently/Oldest Added, Title, Artist, Album, Genre,
+  Duration, File size) plus clickable headers; the order is remembered per
+  list. Columns: Title, Artist, Album, Genre, Time, Added, Size, a favorite
+  heart and a ⋯ menu (Format and Source are gone from the table). Columns
+  resize by dragging a header edge (double-click resets); widths are kept in
+  `localStorage` (`wavemint.trackColumns.v1`); the header scrolls sideways
+  with the body and reserves the body's scrollbar width so columns stay
+  aligned.
+- **Favorites**: migration 8 adds `tracks.favorite` (plus an index on
+  `state, created_at`). `setFavorite`, a `favorite` filter (Favorites
+  view, a chip in Songs), and a Favorites total on the Overview.
+- **Song menu** (right-click or ⋯, one builder in `LibraryView`): Play Now,
+  Play Next, Add to Queue, Add to Playlist, Remove from This Playlist (in a
+  playlist), Edit Metadata, Edit Audio, Favorite, Show in Explorer, Remove
+  from Library, Delete File. It acts on the selection when the clicked song
+  is part of it.
+- **Player** (`src/player/`): one `<audio>` element in `PlayerProvider`;
+  the player bar, queue panel and Listen Mode are views of it. The queue
+  model is pure (`queue.js`, unit-tested): the *context* (the list that was
+  started: Songs in its current filter and order, Favorites, an album, a
+  playlist) with a play order that is sequential or a shuffled permutation
+  (no repeats until every song played; turning shuffle on keeps what played
+  and shuffles the rest, turning it off continues the list after the current
+  song), plus *Up next* (Play Next / Add to Queue), which always plays first
+  and never changes a playlist. Several Play Next picks keep their order;
+  after the song changes, Play Next goes to the front again. Repeat Off stops
+  on the last song, Repeat All restarts (reshuffled), Repeat One replays.
+  Previous goes back through what actually played. The queue can be
+  reordered by dragging, trimmed, cleared, and upcoming list songs skipped
+  for the session. Shuffle, repeat and volume are remembered; Windows media
+  keys work (Media Session).
+- **Listen Mode**: a full-window view (large artwork over a still, blurred
+  copy of it; title, artist · album, progress, transport, volume, queue) with
+  a Fullscreen button (HTML fullscreen). Esc leaves fullscreen, a second Esc
+  closes Listen Mode; playback never restarts.
+- **Remove from Library** (`removal.cjs`): songs get `state = 'removed'`;
+  files and file records stay, so a rescan doesn't bring them back. One
+  "remove" operation, undoable from History or the Undo in the notice (it
+  restores playlist membership too, since playlists hide non-active songs).
+  No confirmation, since nothing on disk changes.
+- **Delete File**: the library plans which files (the songs' own audio files
+  in the WaveMint Library folder or in a source the user allowed changes to;
+  a song whose current file is in a read-only folder is refused), the main
+  process moves them to the Recycle Bin (`shell.trashItem`), and the songs
+  leave the library with their trashed file records removed (a journaled
+  "delete" operation, not undoable in WaveMint; the Recycle Bin is the way
+  back). A confirmation lists the files. Artwork lives in WaveMint's store
+  and is never touched. Removed or deleted songs leave the play queue.
+- Tests: `tests/library-removal.test.cjs`, `tests/player-queue.test.mjs`.
+  Verified in the real app on synthetic libraries (Overview, sorts, resize
+  and its persistence, favorites, the menu, queue order and drag, shuffle,
+  Repeat One, Listen Mode fullscreen and Esc, remove + Undo, delete with a
+  stubbed Recycle Bin, playlist shuffle, restart).
+
+### Storage, editor zoom and Listen Mode polish (2.2)
+
+- **Where space goes.** Metadata edits, artwork choices (one stored copy per
+  distinct image), favorites, playlists and added sources are database rows
+  or small files. What grows: previous versions after Edit Audio/Upgrade
+  (`<WaveMint Library>/.wavemint-archive`), Write Tags backups
+  (`userData/library/backups/op-N`), playable FLAC copies of ALAC/AIFF songs,
+  thumbnails/spectrograms, unused artwork, abandoned album-import staging,
+  and database backups taken before migrations.
+- **Retention** (`keepPreviousVersions`: 1 day, **3 days** (default), 7 days,
+  30 days, or "until I clean up") applies to previous versions and Write Tags
+  backups; their age comes from the operation that archived them, never only
+  from file times. Afterwards they're cleaned up and History marks the
+  change "Recovery period ended" (`operations.undoable = 0` with
+  `summary.expired`); `undoOperation` refuses such operations.
+- **`storage.cjs`** measures and plans (worker); the main process carries out
+  the plan (`cleanUpStorage` host method): audio and backups go to the
+  Recycle Bin (`shell.trashItem`), generated files are deleted. Every target
+  is `lstat`ed (links are refused), `realpath`ed and must be strictly inside
+  one of WaveMint's own folders (`isInsideRoots`): the library's
+  `.wavemint-archive`, `backups`, `cache`, `artwork-store`, `staging`,
+  `db-backups`, and the extraction work folder. Never planned: a file a song
+  is using, anything in the user's own music folders, artwork referenced by
+  songs, albums, files, pending upgrades/imports or a still-undoable change.
+  Failures (file in use, no Recycle Bin on that drive) leave the item in
+  place and are reported. Then `finish` deletes the records of removed
+  versions, retires the undo of affected operations, discards abandoned
+  imports, records the last cleanup and checkpoints the WAL.
+- **Caches:** playable copies are dropped when their song changed or is gone,
+  and kept under 1 GB least-recently-used first (each use touches the file;
+  copies used in the last 2 hours always stay). Thumbnails of unused images
+  and spectrograms of changed files (or untouched for 30 days) go. The
+  newest 3 database backups are kept.
+- **Automatic cleanup** (on by default): checked 3 minutes after start and
+  every 3 hours; it runs only if the last run was 24 hours or more ago and no
+  library task or extraction is running; one cleanup at a time.
+- **Storage page** (Manage → Storage): total size, what can be freed, a row
+  per category (your songs, the database and engine updates are shown as
+  kept), Clean Up (all or per category), the retention setting, automatic
+  cleanup, the last run, and an info note about the user's own folders
+  (including copies of songs that now play from the WaveMint Library, which
+  WaveMint never removes).
+- **Genre read-back fix:** WaveMint writes ID3v2.3 tags, and TagLib# splits
+  every v2.3 text frame on "/", so "Hip Hop/R&B" read back as "Hip Hop" and
+  every edit, upgrade or tag write of such a song failed its verification.
+  v2.3 genres are now read whole (`readGenres` in `tags.cjs`); "/" only
+  separates people in v2.3, never genres. Rescans also store the full genre.
+- **Editor:** zoom (buttons, Ctrl + wheel around the pointer, a scroll bar,
+  Fit to View; down to 1 second across the waveform) with a finer waveform
+  of the visible stretch loaded on demand (`audioWaveform` with
+  `startMs`/`endMs`). Playback has one animation loop that runs while the
+  audio plays and reads `audio.currentTime`, moving the playhead and clock
+  directly (no re-render per frame); seeking during playback keeps it
+  moving, and a zoomed view follows the playhead. Times show hundredths;
+  Alt + arrow nudges a handle by 10 ms.
+- **Listen Mode:** a visualizer frame around the artwork from a Web Audio
+  analyser on the player's single audio element (created the first time
+  Listen Mode opens; suspended while paused; `wavemint-media` is
+  CORS-enabled for this). Title and artist have fixed heights (two lines /
+  one line), so the artwork and controls never move between songs.
+- **Song table:** every column has its own width and a filler absorbs spare
+  room, so dragging a column's right edge moves only that edge (and the
+  columns after it). The ⋯ button had collided with an older `.lib-more`
+  class (with a top margin) and is now `.lib-actions-button`.
 
 ## Importing your two libraries (step by step)
 

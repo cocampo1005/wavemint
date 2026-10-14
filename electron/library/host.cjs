@@ -9,6 +9,7 @@ const fs = require("fs");
 const path = require("path");
 const { Readable } = require("stream");
 const { Worker } = require("worker_threads");
+const { CATEGORY_IDS, isInsideRoots } = require("./storage.cjs");
 const { v, validate } = require("./validate.cjs");
 
 const MEDIA_SCHEME = "wavemint-media";
@@ -45,6 +46,7 @@ const trackFilters = v.obj({
   reviewStatus: v.oneOf(["none", "needs_review", "reviewed"]),
   qualityStatus: v.oneOf(["unknown", "review_suggested", "acceptable", "user_marked_poor", "upgrade_available", "upgraded", "keep_original"]),
   multipleVersions: v.bool(),
+  favorite: v.bool(),
   ids: v.array(id(), { max: 5000 }),
 });
 
@@ -125,6 +127,18 @@ const exportScope = v.obj(
   },
   { optional: false },
 );
+const extractionToken = (options = {}) => v.str({ max: 32, allowEmpty: false, ...options });
+const MAX_LENGTH_MS = 24 * 3600 * 1000;
+const audioEdits = (options = {}) =>
+  v.obj(
+    {
+      startMs: v.int({ min: 0, max: MAX_LENGTH_MS, optional: true }),
+      endMs: v.int({ min: 0, max: MAX_LENGTH_MS, optional: true }),
+      fadeInMs: v.int({ min: 0, max: 10 * 60 * 1000, optional: true }),
+      fadeOutMs: v.int({ min: 0, max: 10 * 60 * 1000, optional: true }),
+    },
+    options,
+  );
 const reviewKinds = v.oneOf(["missing_album", "missing_artist", "missing_album_artist", "unclassified_genre", "missing_artwork", "track_numbering", "inconsistent_album", "similar_albums", "file_problem", "possible_duplicate", "uncertain_match", "incomplete_album"]);
 
 /** Renderer-callable worker methods and their parameter schemas. */
@@ -132,7 +146,7 @@ const WORKER_METHODS = {
   getOverview: {},
   getStatus: {},
   listTracks: listParams,
-  listTrackIds: { search: text(200), filters: trackFilters },
+  listTrackIds: { search: text(200), filters: trackFilters, sort: text(20), direction: v.oneOf(["asc", "desc"]) },
   listAlbums: { search: text(200), sort: text(20), offset: v.int({ min: 0, optional: true }), limit: v.int({ min: 1, max: 1000, optional: true }), filters: v.obj({ artist: text(300), genre: text(200) }) },
   listArtists: { search: text(200), offset: v.int({ min: 0, optional: true }), limit: v.int({ min: 1, max: 2000, optional: true }) },
   listGenres: {},
@@ -212,6 +226,8 @@ const WORKER_METHODS = {
         namingPattern: v.str({ max: 300, allowEmpty: false }),
         lowBitrateKbps: v.int({ min: 32, max: 512, optional: true }),
         musicBrainzEnabled: v.bool(),
+        keepPreviousVersions: v.oneOf(["1d", "3d", "7d", "30d", "never"]),
+        autoCleanup: v.bool(),
         preferOriginalReleases: v.bool(),
         convertWavAiff: v.bool(),
       },
@@ -296,6 +312,32 @@ const WORKER_METHODS = {
   },
   discardImport: { sessionId: id() },
 
+  // Adding extractions to the library and editing audio (trim, fades).
+  // Extractions are addressed by the random token the main process got when
+  // it staged them; the renderer never sends paths.
+  checkLibraryMatches: { entries: importEntries },
+  getStagedExtraction: { token: extractionToken({ optional: false }) },
+  commitStagedExtraction: { token: extractionToken({ optional: false }), edits: audioEdits() },
+  discardStagedExtraction: { token: extractionToken({ optional: false }) },
+  getAudioEditSource: { trackId: id() },
+  audioWaveform: {
+    trackId: id({ optional: true }),
+    token: extractionToken(),
+    startMs: v.int({ min: 0, max: MAX_LENGTH_MS, optional: true }),
+    endMs: v.int({ min: 1, max: MAX_LENGTH_MS, optional: true }),
+    points: v.int({ min: 16, max: 6000, optional: true }),
+  },
+  applyAudioEdit: { trackId: id(), edits: audioEdits({ optional: false }) },
+
+  // Favorites and taking songs out of the library (files are deleted only
+  // through deleteTrackFiles, a host method).
+  setFavorite: { trackIds: trackIdList({ optional: false }), favorite: v.bool({ optional: false }) },
+  removeFromLibrary: { trackIds: trackIdList({ optional: false }) },
+  previewFileDeletion: { trackIds: trackIdList({ optional: false }) },
+
+  // Storage (cleaning up is a host method: the main process removes files).
+  storageReport: {},
+
   // Playlists.
   listPlaylists: {},
   getPlaylist: { id: id() },
@@ -320,17 +362,42 @@ const WORKER_METHODS = {
 
   applyUpgrade: {
     candidateId: id(),
+    // The final, edited metadata written into the new file (preferred) …
+    metadata: v.obj({
+      title: text(500),
+      artist: text(500),
+      albumArtist: text(500),
+      album: text(500),
+      genre: text(200),
+      year: v.int({ min: 0, max: 9999, optional: true }),
+      trackNo: v.int({ min: 0, max: 999, optional: true }),
+      trackTotal: v.int({ min: 0, max: 999, optional: true }),
+      discNo: v.int({ min: 0, max: 999, optional: true }),
+      discTotal: v.int({ min: 0, max: 999, optional: true }),
+      composer: text(500),
+      comment: text(2000),
+      compilation: v.bool(),
+    }),
+    // … or, per field, the current value or the replacement's.
     choices: v.obj(Object.fromEntries(["title", "artist", "albumArtist", "album", "genre", "year", "trackNo", "trackTotal", "discNo", "discTotal", "composer"].map((field) => [field, v.oneOf(["current", "candidate"])]))),
-    artwork: v.oneOf(["current", "candidate"]),
+    artwork: v.oneOf(["current", "candidate", "custom", "none"]),
+    artworkHash: v.str({ max: 40 }),
   },
 };
 
-function createLibraryHost({ app, ipcMain, dialog, shell, BrowserWindow, protocol, binaries, logger = console }) {
+// The automatic cleanup looks at most every few hours and acts at most daily.
+const CLEANUP_FIRST_CHECK_MS = 3 * 60 * 1000;
+const CLEANUP_CHECK_EVERY_MS = 3 * 60 * 60 * 1000;
+const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+function createLibraryHost({ app, ipcMain, dialog, shell, BrowserWindow, protocol, binaries, isExtractionBusy = () => false, logger = console }) {
   let worker = null;
   let ready = null;
   let nextCallId = 1;
   const pending = new Map();
   const dataDir = path.join(app.getPath("userData"), "library");
+  const tempWorkDir = path.join(app.getPath("temp"), "WaveMint");
+  let cleaning = null;
 
   function broadcast(name, data) {
     for (const win of BrowserWindow.getAllWindows()) {
@@ -349,6 +416,7 @@ function createLibraryHost({ app, ipcMain, dialog, shell, BrowserWindow, protoco
           ffprobePath: binaries.resolve("ffprobe").command,
           childEnv: binaries.getChildEnv(),
           appVersion: app.getVersion(),
+          tempWorkDir,
         },
       });
 
@@ -416,6 +484,89 @@ function createLibraryHost({ app, ipcMain, dialog, shell, BrowserWindow, protoco
     });
   }
 
+  // --- storage cleanup -------------------------------------------------------------
+
+  /**
+   * Runs a cleanup plan from the library: audio and backups to the Recycle
+   * Bin, generated files deleted. Every target must resolve (links are never
+   * followed) strictly inside one of WaveMint's own folders, never the
+   * library's songs or the user's music folders.
+   */
+  async function cleanUpStorage({ categories = CATEGORY_IDS, auto = false } = {}) {
+    if (cleaning) throw new Error("A cleanup is already running.");
+    if (isExtractionBusy()) throw new Error("Wait for the current extraction to finish before cleaning up.");
+    cleaning = (async () => {
+      const managed = await call("getManagedLibrary", {});
+      const roots = [
+        managed?.source?.root_path ? path.join(managed.source.root_path, ".wavemint-archive") : null,
+        path.join(dataDir, "backups"),
+        path.join(dataDir, "cache"),
+        path.join(dataDir, "artwork-store"),
+        path.join(dataDir, "staging"),
+        path.join(dataDir, "db-backups"),
+        tempWorkDir,
+      ].filter(Boolean);
+      const { actions } = await call("planStorageCleanup", { categories, auto });
+      const results = [];
+      for (const action of actions) {
+        // Started meanwhile? Leave the rest for the next run.
+        if (auto && isExtractionBusy()) break;
+        const result = { ...action, ok: false };
+        try {
+          const target = path.resolve(action.path);
+          const stat = await fs.promises.lstat(target).catch(() => null);
+          if (!stat) {
+            result.ok = true; // already gone
+          } else if (stat.isSymbolicLink()) {
+            result.error = "Links are never followed.";
+          } else {
+            const real = await fs.promises.realpath(target);
+            if (!isInsideRoots(real, roots)) {
+              result.error = "Outside WaveMint's own folders; left alone.";
+            } else if (action.action === "trash") {
+              await shell.trashItem(real);
+              result.ok = true;
+            } else {
+              await fs.promises.rm(real, { recursive: true, force: true });
+              result.ok = true;
+            }
+          }
+        } catch (error) {
+          // In use, locked or no Recycle Bin on that drive: kept, reported.
+          result.error = error.message;
+        }
+        if (!result.ok) logger.warn(`[library] Cleanup kept ${action.path}: ${result.error}`);
+        results.push(result);
+      }
+      return call("finishStorageCleanup", { results, auto });
+    })();
+    try {
+      return await cleaning;
+    } finally {
+      cleaning = null;
+    }
+  }
+
+  // At most once a day, only when automatic cleanup is on and nothing else
+  // (library task or extraction) is running.
+  function startStorageMaintenance() {
+    const check = async () => {
+      try {
+        if (cleaning || isExtractionBusy()) return;
+        const state = await call("storageSchedule", {});
+        if (!state.autoCleanup || state.busy) return;
+        if (state.lastCleanupAt && Date.now() - Date.parse(state.lastCleanupAt) < CLEANUP_INTERVAL_MS) return;
+        const result = await cleanUpStorage({ auto: true });
+        logger.log(`[library] Automatic cleanup freed ${Math.round((result?.freedBytes || 0) / 1048576)} MB`);
+        broadcast("library-changed", { storage: true });
+      } catch (error) {
+        logger.warn(`[library] Automatic cleanup skipped: ${error.message}`);
+      }
+    };
+    setTimeout(check, CLEANUP_FIRST_CHECK_MS).unref?.();
+    setInterval(check, CLEANUP_CHECK_EVERY_MS).unref?.();
+  }
+
   // --- host-level operations (dialogs, shell) --------------------------------
 
   async function chooseFolder(sender, title) {
@@ -477,6 +628,19 @@ function createLibraryHost({ app, ipcMain, dialog, shell, BrowserWindow, protoco
         return call("prepareUpgrade", { trackId: params.trackId, filePath: result.filePaths[0] });
       },
     },
+    // Artwork for an upgrade: the image is only stored; the upgrade writes it.
+    chooseUpgradeArtwork: {
+      schema: {},
+      run: async (sender) => {
+        const result = await dialog.showOpenDialog(BrowserWindow.fromWebContents(sender), {
+          title: "Choose cover art",
+          properties: ["openFile", "dontAddToRecent"],
+          filters: [{ name: "Images (JPEG or PNG)", extensions: ["jpg", "jpeg", "png"] }],
+        });
+        if (result.canceled || !result.filePaths.length) return null;
+        return call("storeArtworkFile", { filePath: result.filePaths[0] });
+      },
+    },
     chooseExportRoot: {
       schema: {},
       run: async (sender) => {
@@ -527,6 +691,44 @@ function createLibraryHost({ app, ipcMain, dialog, shell, BrowserWindow, protoco
         return call("importPlaylistM3U", { filePath: result.filePaths[0] });
       },
     },
+    // Delete File: the songs' files go to the Recycle Bin, then the songs
+    // leave the library. Which files is decided by the library (only the
+    // songs' own audio files in folders WaveMint may change), never by the
+    // renderer.
+    deleteTrackFiles: {
+      schema: { trackIds: trackIdList({ optional: false }) },
+      run: async (_sender, params) => {
+        const plan = await call("planFileDeletion", { trackIds: params.trackIds });
+        const results = [];
+        for (const item of plan.items) {
+          const result = { trackId: item.trackId, trashed: [], missing: [], failed: [] };
+          for (const file of item.files) {
+            if (!file.path || !fs.existsSync(file.path)) {
+              result.missing.push(file.fileId);
+              continue;
+            }
+            try {
+              await shell.trashItem(path.resolve(file.path));
+              result.trashed.push(file.fileId);
+            } catch (error) {
+              logger.warn(`[library] Couldn't move ${file.name} to the Recycle Bin: ${error.message}`);
+              result.failed.push({ name: file.name, error: "It couldn't be moved to the Recycle Bin (it may be open in another app)." });
+            }
+          }
+          results.push(result);
+        }
+        const finished = await call("finishFileDeletion", { results });
+        return { ...finished, blocked: plan.blocked };
+      },
+    },
+    cleanUpStorage: {
+      schema: { categories: v.array(v.oneOf(CATEGORY_IDS, { optional: false }), { max: CATEGORY_IDS.length }) },
+      run: async (_sender, params) => {
+        const result = await cleanUpStorage({ categories: params.categories?.length ? params.categories : CATEGORY_IDS });
+        broadcast("library-changed", { storage: true });
+        return result;
+      },
+    },
     showFileInFolder: {
       schema: { fileId: id() },
       run: async (_sender, params) => {
@@ -557,7 +759,9 @@ function createLibraryHost({ app, ipcMain, dialog, shell, BrowserWindow, protoco
   function streamFile(filePath, request, contentType) {
     const size = fs.statSync(filePath).size;
     const range = /bytes=(\d*)-(\d*)/.exec(request.headers.get("range") || "");
-    const headers = { "Content-Type": contentType, "Accept-Ranges": "bytes", "Cache-Control": "no-store" };
+    // Only WaveMint's own window can reach this scheme; "*" lets its page
+    // (file:// when installed, localhost in development) analyse the audio.
+    const headers = { "Content-Type": contentType, "Accept-Ranges": "bytes", "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" };
 
     if (range && (range[1] || range[2])) {
       let start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));
@@ -577,10 +781,18 @@ function createLibraryHost({ app, ipcMain, dialog, shell, BrowserWindow, protoco
   }
 
   function registerProtocols() {
-    // wavemint-media://file/<fileId> and wavemint-media://candidate/<candidateId>
+    // wavemint-media://file/<fileId>, wavemint-media://candidate/<candidateId>
+    // and wavemint-media://staged/<token> (an extraction waiting to be added).
     protocol.handle(MEDIA_SCHEME, async (request) => {
       try {
         const url = new URL(request.url);
+        if (url.hostname === "staged") {
+          const token = url.pathname.replace(/^\/+/, "");
+          if (!/^[a-f0-9]{32}$/.test(token)) return new Response(null, { status: 400 });
+          const staged = await call("resolveStagedExtraction", { token });
+          if (!staged || !fs.existsSync(staged.path)) return new Response(null, { status: 404 });
+          return streamFile(staged.path, request, MIME_TYPES[path.extname(staged.path).toLowerCase()] || "application/octet-stream");
+        }
         const itemId = Number(url.pathname.replace(/^\/+/, ""));
         if (!["file", "candidate"].includes(url.hostname) || !Number.isInteger(itemId) || itemId < 1) return new Response(null, { status: 400 });
         const file =
@@ -627,13 +839,15 @@ function createLibraryHost({ app, ipcMain, dialog, shell, BrowserWindow, protoco
     await current.terminate().catch(() => {});
   }
 
-  return { call, register, registerProtocols, shutdown, startWorker };
+  return { call, register, registerProtocols, shutdown, startStorageMaintenance, startWorker };
 }
 
 // Must run before the app is ready.
 function registerLibrarySchemes(protocol) {
   protocol.registerSchemesAsPrivileged([
-    { scheme: MEDIA_SCHEME, privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } },
+    // corsEnabled: Listen Mode's visualizer reads the playing audio through Web
+    // Audio, which needs the media to be CORS-readable by the app's page.
+    { scheme: MEDIA_SCHEME, privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true, corsEnabled: true } },
     { scheme: ART_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
   ]);
 }
@@ -644,7 +858,10 @@ const HOST_METHOD_NAMES = [
   "chooseAutoAddFolder",
   "chooseExportRoot",
   "chooseManagedRoot",
+  "chooseUpgradeArtwork",
   "chooseUpgradeFile",
+  "cleanUpStorage",
+  "deleteTrackFiles",
   "exportPlaylistFile",
   "importPlaylistFile",
   "openExportFolder",

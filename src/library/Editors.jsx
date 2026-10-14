@@ -51,6 +51,29 @@ function FieldInput({ field, value, onChange, placeholder, listId, changed, orig
   );
 }
 
+/**
+ * The metadata form (every editable field), shared by the song editor and
+ * Upgrade Track. `form` and `initial` are form values (see fields.js);
+ * fields that differ from `initial` are marked with their old value.
+ */
+export function MetadataFields({ form, initial, onChange, listId, disabled = false }) {
+  return (
+    <fieldset className="lib-edit__grid lib-edit__fieldset" disabled={disabled}>
+      {EDIT_FIELDS.map((field) => (
+        <FieldInput
+          key={field.key}
+          field={field}
+          value={form[field.key]}
+          listId={listId}
+          changed={form[field.key] !== initial[field.key]}
+          original={initial[field.key]}
+          onChange={(value) => onChange(field.key, value)}
+        />
+      ))}
+    </fieldset>
+  );
+}
+
 /** Tag status of one song: in sync, unsaved, or not writable here. */
 function TagStatus({ track, onWriteTags }) {
   const active = track.files.find((file) => file.id === track.active_file_id);
@@ -135,19 +158,12 @@ export function TrackEditor({ track, onChanged, onError, onWriteTags }) {
   return (
     <div className="lib-edit">
       <GenreOptions id={`genres-${track.id}`} />
-      <div className="lib-edit__grid">
-        {EDIT_FIELDS.map((field) => (
-          <FieldInput
-            key={field.key}
-            field={field}
-            value={form[field.key]}
-            listId={`genres-${track.id}`}
-            changed={changedKeys.includes(field.key)}
-            original={initial[field.key]}
-            onChange={(value) => setForm((current) => ({ ...current, [field.key]: value }))}
-          />
-        ))}
-      </div>
+      <MetadataFields
+        form={form}
+        initial={initial}
+        listId={`genres-${track.id}`}
+        onChange={(key, value) => setForm((current) => ({ ...current, [key]: value }))}
+      />
 
       <div className="lib-edit__actions">
         <button type="button" className={`btn btn--primary btn--sm ${saving ? "is-loading" : ""}`} onClick={save} disabled={!changedKeys.length || saving}>

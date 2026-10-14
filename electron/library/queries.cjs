@@ -18,14 +18,17 @@ const TRACK_SORTS = {
   duration: "t.duration_ms",
   bitrate: "f.bitrate",
   format: "f.codec",
+  // When the song entered the WaveMint library (scan or import).
   added: "t.created_at",
+  size: "f.size",
+  favorite: "t.favorite",
   track: "t.disc_no, t.track_no",
 };
 
 const TRACK_COLUMNS = `
   t.id, t.title, t.artist, t.album_artist, t.album, t.release_id, t.track_no, t.track_total, t.disc_no,
   t.disc_total, t.year, t.genre, t.composer, t.compilation, t.duration_ms, t.review_status, t.quality_status,
-  t.rating, t.tags_dirty, t.created_at,
+  t.rating, t.favorite, t.tags_dirty, t.created_at,
   f.id AS file_id, f.codec, f.container, f.lossless, f.bitrate, f.sample_rate, f.bit_depth, f.size,
   f.status AS file_status, COALESCE(t.artwork_hash, f.artwork_hash) AS artwork_hash, f.source_id, s.name AS source_name, s.role AS source_role, s.read_only AS source_read_only,
   (SELECT COUNT(*) FROM files v WHERE v.track_id = t.id) AS version_count`;
@@ -82,6 +85,7 @@ function trackFilterSql(filters = {}, search = "") {
       AND d.artist_key = t.artist_key AND d.title_key = t.title_key)`);
   }
   if (filters.missingFile) where.push("(f.id IS NULL OR f.status != 'ok')");
+  if (filters.favorite) where.push("t.favorite = 1");
   if (typeof filters.reviewStatus === "string") {
     where.push("t.review_status = ?");
     params.push(filters.reviewStatus);
@@ -102,10 +106,15 @@ function trackFilterSql(filters = {}, search = "") {
   return { where: where.join(" AND "), params };
 }
 
+function orderBy(sort, direction) {
+  const dir = direction === "desc" ? "DESC" : "ASC";
+  // Songs added together keep the order they were added in.
+  if (sort === "added") return `t.created_at ${dir}, t.id ${dir}`;
+  return `${TRACK_SORTS[sort] || TRACK_SORTS.artist} ${dir}, t.album COLLATE NOCASE, t.disc_no, t.track_no, t.id`;
+}
+
 function listTracks(db, { search = "", filters = {}, sort = "artist", direction = "asc", offset = 0, limit = 200 } = {}) {
   const { where, params } = trackFilterSql(filters, search);
-  const order = TRACK_SORTS[sort] || TRACK_SORTS.artist;
-  const dir = direction === "desc" ? "DESC" : "ASC";
   const safeLimit = clampInt(limit, 1, 1000, 200);
   const safeOffset = clampInt(offset, 0, Number.MAX_SAFE_INTEGER, 0);
 
@@ -113,7 +122,7 @@ function listTracks(db, { search = "", filters = {}, sort = "artist", direction 
   const rows = db
     .prepare(
       `SELECT ${TRACK_COLUMNS} ${TRACK_FROM} WHERE ${where}
-       ORDER BY ${order} ${dir}, t.album COLLATE NOCASE, t.disc_no, t.track_no, t.id
+       ORDER BY ${orderBy(sort, direction)}
        LIMIT ? OFFSET ?`,
     )
     .all(...params, safeLimit, safeOffset);
@@ -121,11 +130,11 @@ function listTracks(db, { search = "", filters = {}, sort = "artist", direction 
   return { total, offset: safeOffset, rows };
 }
 
-/** IDs only (for "select all matching" and bulk actions). */
-function listTrackIds(db, { search = "", filters = {} } = {}) {
+/** IDs only, in list order (bulk actions, and playing a whole list). */
+function listTrackIds(db, { search = "", filters = {}, sort = "artist", direction = "asc" } = {}) {
   const { where, params } = trackFilterSql(filters, search);
   return db
-    .prepare(`SELECT t.id ${TRACK_FROM} WHERE ${where} LIMIT 20000`)
+    .prepare(`SELECT t.id ${TRACK_FROM} WHERE ${where} ORDER BY ${orderBy(sort, direction)} LIMIT 50000`)
     .all(...params)
     .map((row) => row.id);
 }
@@ -281,7 +290,8 @@ function getStatus(db) {
   const qualityAttention = db
     .prepare("SELECT COUNT(*) AS n FROM tracks WHERE state = 'active' AND quality_status IN ('user_marked_poor', 'upgrade_available')")
     .get().n;
-  return { unsavedWritable: unsaved, reviewOpen: review, qualityAttention, sources };
+  const tracks = db.prepare("SELECT COUNT(*) AS n FROM tracks WHERE state = 'active'").get().n;
+  return { unsavedWritable: unsaved, reviewOpen: review, qualityAttention, sources, tracks };
 }
 
 function getDashboard(db) {
@@ -296,15 +306,35 @@ function getDashboard(db) {
     FROM tracks t LEFT JOIN files f ON f.id = t.active_file_id
     WHERE t.state = 'active'`);
 
-  const storage = one("SELECT COALESCE(SUM(size), 0) AS bytes, COUNT(*) AS files FROM files WHERE status = 'ok'");
-
-  const formats = db
+  // What the collection is made of. File formats and sources stay out of
+  // the overview (Sources and Quality show them).
+  const genres = db
     .prepare(
-      `SELECT COALESCE(f.codec, 'unknown') AS codec, COUNT(*) AS count
-       FROM tracks t JOIN files f ON f.id = t.active_file_id
-       WHERE t.state = 'active' GROUP BY f.codec ORDER BY count DESC`,
+      `SELECT CASE WHEN t.genre = '' THEN '' ELSE MIN(t.genre) END AS name, COUNT(*) AS count,
+              COUNT(DISTINCT NULLIF(t.artist_key, '')) AS artists, COALESCE(SUM(t.duration_ms), 0) AS duration_ms
+       FROM tracks t WHERE t.state = 'active'
+       GROUP BY LOWER(t.genre) ORDER BY (t.genre = ''), count DESC LIMIT 200`,
     )
     .all();
+
+  const recent = db
+    .prepare(`SELECT ${TRACK_COLUMNS} ${TRACK_FROM} WHERE t.state = 'active' ORDER BY t.created_at DESC, t.id DESC LIMIT 18`)
+    .all();
+
+  const topArtists = db
+    .prepare(
+      `SELECT t.artist_key AS key,
+              (SELECT t2.artist FROM tracks t2 WHERE t2.artist_key = t.artist_key AND t2.state = 'active'
+               GROUP BY t2.artist ORDER BY COUNT(*) DESC LIMIT 1) AS name,
+              COUNT(*) AS track_count, COUNT(DISTINCT t.release_id) AS album_count,
+              (SELECT COALESCE(t3.artwork_hash, f.artwork_hash) FROM tracks t3 JOIN files f ON f.id = t3.active_file_id
+               WHERE t3.artist_key = t.artist_key AND t3.state = 'active' AND COALESCE(t3.artwork_hash, f.artwork_hash) IS NOT NULL LIMIT 1) AS artwork_hash
+       FROM tracks t WHERE t.state = 'active' AND t.artist_key != ''
+       GROUP BY t.artist_key ORDER BY track_count DESC, name COLLATE NOCASE LIMIT 8`,
+    )
+    .all();
+
+  const favorites = one("SELECT COUNT(*) AS n FROM tracks WHERE state = 'active' AND favorite = 1").n;
 
   const issues = one(`
     SELECT
@@ -332,11 +362,13 @@ function getDashboard(db) {
       GROUP BY artist_key, title_key HAVING COUNT(*) > 1)`);
 
   return {
-    totals: { ...totals, storage_bytes: storage.bytes, file_count: storage.files },
-    formats,
+    totals: { ...totals, favorites },
+    genres,
+    recent,
+    topArtists,
     issues: Object.fromEntries(Object.entries(issues).map(([key, value]) => [key, value || 0])),
     duplicates,
-    sources: listSources(db),
+    sourceCount: one("SELECT COUNT(*) AS n FROM sources").n,
     lowBitrateKbps: LOW_BITRATE_KBPS,
   };
 }

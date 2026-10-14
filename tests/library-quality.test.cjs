@@ -16,6 +16,7 @@ const { createUpgrader } = require("../electron/library/upgrade.cjs");
 const {
   SKIP_REASON,
   addAndScan,
+  coverBytes,
   createTestLibrary,
   makeTempDir,
   makeTrack,
@@ -275,6 +276,103 @@ test("a failed upgrade leaves the current version untouched", needsAudio, async 
   const track = queries.getTrack(lib.db, low);
   assert.equal(track.files.find((file) => file.id === track.active_file_id).path, managedPath);
   assert.notEqual(track.quality_status, "upgraded");
+});
+
+test("an upgrade writes the edited metadata and chosen artwork into a complete new file", needsAudio, async (t) => {
+  const lib = await upgradeLibrary(t);
+  const low = lib.id("Low");
+  edits.applyEdits(lib.db, [{ trackId: low, fields: { genre: "House", albumArtist: "A", year: 2001 } }]);
+  // A replacement whose own tags must not leak into the result.
+  const replacement = makeTrack(lib.downloads, "A - Low (Official Video).mp3", {
+    base: "noise_320",
+    tags: { title: "A - Low (Official Video)", artist: "A Channel", album: "Uploads", genre: "Music", comment: "Subscribe!", trackNo: 9 },
+    cover: "red",
+  });
+  const comparison = await lib.upgrader.prepare({ trackId: low, filePath: replacement });
+  assert.ok(comparison.candidate.channels >= 1);
+  assert.equal(comparison.fields.find((item) => item.field === "title").candidate, "A - Low (Official Video)", "the replacement's own tags are only shown");
+
+  // The form as the dialog sends it: the song's metadata, with two edits.
+  const track = queries.getTrack(lib.db, low);
+  const metadata = {
+    title: "Low",
+    artist: track.artist,
+    albumArtist: "A",
+    album: "Album (Remastered)",
+    genre: "Deep House",
+    year: 2001,
+    trackNo: 1,
+    trackTotal: 0,
+    discNo: 0,
+    discTotal: 0,
+    composer: "",
+    comment: "",
+    compilation: false,
+  };
+  const custom = lib.artStore.save(coverBytes("purple")).hash;
+  await lib.upgrader.applyJob({ candidateId: comparison.candidateId, metadata, artwork: "custom", artworkHash: custom });
+
+  const after = queries.getTrack(lib.db, low);
+  const active = after.files.find((file) => file.id === after.active_file_id);
+  const written = readTags(active.path);
+  assert.equal(written.title, "Low");
+  assert.equal(written.artist, "A");
+  assert.equal(written.album, "Album (Remastered)");
+  assert.equal(written.genre, "Deep House");
+  assert.equal(written.year, 2001);
+  assert.equal(written.trackNo, 1);
+  assert.equal(written.comment, "", "the replacement's comment was cleared");
+  assert.equal(written.artworkHash, custom, "the chosen artwork is embedded");
+  assert.equal(after.album, "Album (Remastered)");
+  assert.equal(after.genre, "Deep House");
+  assert.equal(after.artwork_hash, custom);
+  assert.equal(after.tags_dirty, 0);
+  assert.equal(queries.listTracks(lib.db, {}).total, 5, "no duplicate song");
+});
+
+test("an upgrade keeps the song's artwork, or removes it, as chosen", needsAudio, async (t) => {
+  const lib = await upgradeLibrary(t);
+  const low = lib.id("Low");
+  // The current file carries the song's artwork; the replacement has its own.
+  const coverHash = lib.artStore.save(coverBytes("navy")).hash;
+  edits.setTrackArtwork(lib.db, [low], coverHash, { label: "Art" });
+  const keep = await lib.upgrader.prepare({ trackId: low, filePath: lib.replacement });
+  await lib.upgrader.applyJob({ candidateId: keep.candidateId, metadata: {}, artwork: "current" });
+  let track = queries.getTrack(lib.db, low);
+  assert.equal(readTags(track.files.find((file) => file.id === track.active_file_id).path).artworkHash, coverHash, "the song's artwork replaced the file's own");
+
+  const second = makeTrack(lib.downloads, "low-again.mp3", { base: "noise_320", tags: { title: "Low", artist: "A" }, cover: "red" });
+  const none = await lib.upgrader.prepare({ trackId: low, filePath: second });
+  await lib.upgrader.applyJob({ candidateId: none.candidateId, metadata: {}, artwork: "none" });
+  track = queries.getTrack(lib.db, low);
+  assert.equal(readTags(track.files.find((file) => file.id === track.active_file_id).path).artworkHash, null);
+  assert.equal(track.artwork_hash, null);
+
+  const third = makeTrack(lib.downloads, "low-3.mp3", { base: "noise_320", tags: { title: "Low", artist: "A" } });
+  const bad = await lib.upgrader.prepare({ trackId: low, filePath: third });
+  await assert.rejects(lib.upgrader.applyJob({ candidateId: bad.candidateId, artwork: "candidate" }), /no artwork/);
+  await assert.rejects(lib.upgrader.applyJob({ candidateId: bad.candidateId, artwork: "custom", artworkHash: "0".repeat(40) }), /artwork image again/);
+});
+
+test("an extracted replacement records its source and warns about lossy or alternate versions", needsAudio, async (t) => {
+  const lib = await upgradeLibrary(t);
+  const low = lib.id("Low");
+  const staged = makeTrack(lib.downloads, "staged.mp3", { base: "noise_320", tags: { title: "Low (Live)", artist: "A" } });
+  const comparison = await lib.upgrader.prepare({
+    trackId: low,
+    filePath: staged,
+    kind: "extraction",
+    source: { title: "A - Low (Live at the Hall)", uploader: "A", url: "https://www.youtube.com/watch?v=abc", path: "C:\\ignored" },
+  });
+  assert.equal(comparison.kind, "extraction");
+  assert.equal(comparison.candidate.sourceName, "New extraction");
+  assert.deepEqual(comparison.candidate.source, { title: "A - Low (Live at the Hall)", uploader: "A", url: "https://www.youtube.com/watch?v=abc" });
+  assert.ok(comparison.warnings.some((item) => item.level === "note" && /already compressed/.test(item.text)));
+  assert.ok(comparison.warnings.some((item) => /alternate version \("live" in its title\)/.test(item.text)));
+
+  const discarded = lib.upgrader.discard({ candidateId: comparison.candidateId });
+  assert.deepEqual(discarded, { discarded: true, kind: "extraction", path: staged });
+  assert.equal(lib.upgrader.discard({ candidateId: comparison.candidateId }).path, null, "already discarded");
 });
 
 test("an interrupted upgrade is rolled back at the next start", needsAudio, async (t) => {

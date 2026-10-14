@@ -1,0 +1,159 @@
+/* Add Music workspace. Shared components (.panel, .btn, .track, .artwork…)
+   come from App.css. */
+
+.add-music {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.add-music > .workspace-head,
+.add-music__body {
+  width: 100%;
+  max-width: 1128px;
+  margin-inline: auto;
+}
+
+.add-music__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wm-space-5);
+  padding: 0 var(--wm-space-6) var(--wm-space-10);
+}
+
+/* Where added songs go. */
+.library-target {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--wm-space-2) var(--wm-space-3);
+  margin-top: var(--wm-space-4);
+  padding-top: var(--wm-space-4);
+  border-top: 1px solid var(--wm-border-subtle);
+  color: var(--wm-text-muted);
+  font-size: var(--wm-text-sm);
+}
+
+.library-target .wm-icon {
+  flex-shrink: 0;
+  color: var(--wm-cyan);
+}
+
+.library-target__text {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-target__path {
+  color: var(--wm-text-subtle);
+}
+
+.library-target.is-missing {
+  color: var(--wm-warning);
+}
+
+.library-target.is-missing .wm-icon {
+  color: var(--wm-warning);
+}
+
+.library-target.is-missing .library-target__text {
+  white-space: normal;
+}
+
+.add-edit-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--wm-space-2);
+  color: var(--wm-text-muted);
+  font-size: var(--wm-text-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.add-edit-toggle input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--wm-azure);
+}
+
+/* Playlist: actions stay in reach while scrolling long lists. */
+.playlist-toolbar--sticky {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  margin-inline: calc(-1 * var(--wm-space-3));
+  padding: var(--wm-space-3);
+  border-radius: var(--wm-radius-lg);
+  background: rgba(15, 26, 58, 0.97);
+  box-shadow: 0 10px 18px -12px rgba(2, 5, 18, 0.9);
+}
+
+.playlist-toolbar__progress {
+  flex-basis: 100%;
+}
+
+.playlist-toolbar__progress .progress {
+  margin-top: 0;
+}
+
+.track__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--wm-space-3);
+}
+
+.track.is-added {
+  border-color: var(--wm-success-border);
+}
+
+/* What happened to a song: one compact line, no layout jump. */
+.add-outcome {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--wm-space-2);
+  min-height: 32px;
+  margin: var(--wm-space-1) 0 var(--wm-space-2);
+  font-size: var(--wm-text-sm);
+}
+
+.add-outcome__icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.add-outcome__actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--wm-space-1);
+  margin-left: auto;
+}
+
+.add-outcome.is-added {
+  color: var(--wm-success);
+}
+
+.add-outcome.is-held {
+  color: var(--wm-cyan);
+}
+
+.add-outcome.is-failed {
+  color: var(--wm-danger);
+}
+
+.add-outcome.is-working {
+  color: var(--wm-text-muted);
+}
+
+.add-outcome .artwork__spinner {
+  width: 14px;
+  height: 14px;
+}

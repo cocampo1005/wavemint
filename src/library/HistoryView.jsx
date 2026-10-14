@@ -25,6 +25,8 @@ const KIND_LABEL = {
   upgrade: "Upgrade",
   quality: "Quality",
   import: "Import",
+  remove: "Removed",
+  delete: "Deleted",
 };
 
 const STEP_LABEL = { consolidate: "Copy", upgrade: "Upgrade", "write-tags": "Write tags", "restore-tags": "Restore" };
@@ -98,7 +100,8 @@ export function HistoryView({ revision, onChanged, onError }) {
     <div className="lib-history">
       <p className="text-muted lib-history__intro">
         Every change WaveMint makes to your library. Metadata changes and merges can be undone; written files are restored
-        from their verified backups. Undoing a copy into the WaveMint Library switches songs back but keeps the copies on disk.
+        from their verified backups. Previous versions and file backups are kept for the period set in Storage; after that,
+        those changes stay listed here but can no longer be undone.
       </p>
       {error && <div className="alert alert--compact">{error}</div>}
       <div className="lib-list">
@@ -121,6 +124,11 @@ export function HistoryView({ revision, onChanged, onError }) {
                     .join(" · ")}
                 </span>
                 <span className={`lib-badge is-${STATUS_TONE[operation.status] || "quiet"}`}>{operation.was_undone ? "undone" : operation.status}</span>
+                {operation.summary?.expired && !operation.was_undone && (
+                  <span className="lib-badge is-quiet" title={operation.summary.expired.reason}>
+                    Recovery period ended
+                  </span>
+                )}
                 {undoable && (
                   <button type="button" className={`btn btn--secondary btn--sm ${busy === operation.id ? "is-loading" : ""}`} disabled={!!busy} onClick={() => undo(operation)}>
                     Undo

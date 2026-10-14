@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { artworkUrl, formatNumber, formatQuality, pluralize } from "./format";
+import { formatNumber, formatQuality, pluralize } from "./format";
 import { PauseIcon, PlayIcon, QualityIcon, SearchIcon, UpgradeIcon } from "./icons";
 import { errorMessage, libraryApi, useDebounced, useLoader } from "./useLibrary";
+import { Artwork } from "./Artwork";
 
 const VIEWS = [
   ["attention", "Needs attention"],
@@ -173,7 +174,7 @@ export function QualityView({ revision, checking, playing, onPlay, onOpenTrack, 
                   })
                 }
               />
-              {row.artwork_hash ? <img className="lib-merge-member__art" src={artworkUrl(row.artwork_hash, 64)} alt="" loading="lazy" /> : <span className="lib-merge-member__art lib-art-placeholder" />}
+              <Artwork className="lib-merge-member__art" hash={row.artwork_hash} size={64} loading="lazy" />
               <button type="button" className="lib-play" aria-label={isPlaying ? "Pause" : `Play ${row.title}`} onClick={() => onPlay({ id: row.id, file_id: row.file_id, title: row.title, artist: row.artist, artwork_hash: row.artwork_hash })}>
                 {isPlaying ? <PauseIcon size={12} /> : <PlayIcon size={12} />}
               </button>
