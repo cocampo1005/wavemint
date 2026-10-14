@@ -2,7 +2,7 @@
   "name": "wavemint",
   "productName": "WaveMint",
   "private": true,
-  "version": "2.2.0",
+  "version": "1.0.0",
   "description": "A Windows desktop app for managing a personal music library: organize, tag, edit, play and upgrade your songs, and add new ones from YouTube.",
   "author": {
     "name": "Christian Ocampo"
