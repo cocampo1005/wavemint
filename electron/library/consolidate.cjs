@@ -12,12 +12,10 @@
 // Every step is journaled; recover() finishes or cleans up after an
 // interruption, and re-running skips songs that are already managed.
 
-const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { nowIso, parseJson, transaction } = require("./db.cjs");
-const { tagDifferences, siblingPath } = require("./fileops.cjs");
-const { FIELDS } = require("./edits.cjs");
+const { TAG_FIELDS, sha256, siblingPath, tagDifferences } = require("./fileops.cjs");
 const { addStep, finishOperation, logChange, startOperation, updateStep } = require("./operations.cjs");
 const { DEFAULT_PATTERN, planPaths, validatePattern } = require("./organize.cjs");
 const { pathKey } = require("./normalize.cjs");
@@ -25,7 +23,6 @@ const { quickSignature } = require("./scanner.cjs");
 const { canWriteTags, readTags, writeTags } = require("./tags.cjs");
 const { validateRoot } = require("./sources.cjs");
 
-const TAG_FIELDS = Object.entries(FIELDS).filter(([, def]) => def.tag);
 // Versions replaced by an upgrade are kept here, inside the managed folder
 // (hidden folders aren't scanned, so they never show up as songs).
 const ARCHIVE_DIR = ".wavemint-archive";
@@ -68,15 +65,6 @@ function insertFileRow(db, { trackId, sourceId, target, relRoot, snapshot, role 
   );
 }
 
-function sha256(filePath) {
-  return new Promise((resolve, reject) => {
-    const hash = crypto.createHash("sha256");
-    fs.createReadStream(filePath)
-      .on("data", (chunk) => hash.update(chunk))
-      .on("error", reject)
-      .on("end", () => resolve(hash.digest("hex")));
-  });
-}
 
 function freeBytes(folder) {
   try {
@@ -371,4 +359,4 @@ function createConsolidator({ db, media, artStore, logger = console }) {
   return { consolidateJob, ensureManagedSource, managedSource, preview, recover, undoConsolidation };
 }
 
-module.exports = { ARCHIVE_DIR, TAG_FIELDS, createConsolidator, freeBytes, insertFileRow, sha256 };
+module.exports = { ARCHIVE_DIR, createConsolidator, freeBytes, insertFileRow };

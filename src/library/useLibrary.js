@@ -2,6 +2,7 @@
 // and "something changed, reload" notifications.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { GENRE_OPTIONS } from "../constants/genres";
 import { parseIpcError } from "../ipcErrors";
 
 export const libraryApi = window.waveMintAPI.library;
@@ -77,6 +78,36 @@ export function useLoader(load, deps) {
 
   const reload = useCallback(() => setTick((value) => value + 1), []);
   return { ...state, reload };
+}
+
+// Genre names for pickers: WaveMint's starter list, the library's genre
+// taxonomy and the genres songs use. Loaded once and shared by every picker
+// (a playlist can show a hundred), reloaded after the library changes.
+const sortGenres = (names) => [...new Set(names.filter(Boolean))].sort((a, b) => a.localeCompare(b));
+const STARTER_GENRES = sortGenres(GENRE_OPTIONS);
+let genreNames = null;
+window.waveMintAPI.onLibraryEvent?.(({ name, data }) => {
+  if (name === "library-changed" || (name === "job" && data?.status !== "running")) genreNames = null;
+});
+
+function loadGenreNames() {
+  genreNames ??= Promise.all([libraryApi.listGenreTaxonomy().catch(() => []), libraryApi.listGenres().catch(() => [])]).then(([taxonomy, used]) =>
+    sortGenres([...GENRE_OPTIONS, ...taxonomy.map((genre) => genre.name), ...used.map((genre) => genre.name)]),
+  );
+  return genreNames;
+}
+
+/** Sorted genre names for pickers (the starter list until the library's arrive). */
+export function useGenreNames() {
+  const [names, setNames] = useState(STARTER_GENRES);
+  useEffect(() => {
+    let alive = true;
+    loadGenreNames().then((loaded) => alive && setNames(loaded));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return names;
 }
 
 export const QUICK_FILTERS = [

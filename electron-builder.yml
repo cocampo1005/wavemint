@@ -11,8 +11,10 @@ directories:
   buildResources: build
 
 # Whitelist of what goes into app.asar. The renderer is pre-bundled by Vite
-# into dist/, and the main process has no runtime npm dependencies, so no
-# node_modules, sources, scripts, tests or local files are packaged.
+# into dist/. electron-builder adds the production dependencies from
+# package.json (node-taglib-sharp, used by the library worker, and its own
+# dependencies) under node_modules/; no sources, scripts, tests or local
+# files are packaged. scripts/check-release.cjs verifies both.
 files:
   - dist/**/*
   - electron/**/*
@@ -31,6 +33,22 @@ extraResources:
     to: THIRD_PARTY_NOTICES.md
   - from: node_modules/@fontsource/poppins/LICENSE
     to: licenses/Poppins-OFL.txt
+  # License texts of the packaged npm packages (electron-builder doesn't keep
+  # them inside app.asar). check-release.cjs fails the build if one is missing.
+  - from: node_modules/node-taglib-sharp/LICENSE
+    to: licenses/node-taglib-sharp-LICENSE.txt
+  - from: node_modules/iconv-lite/LICENSE
+    to: licenses/iconv-lite-LICENSE.txt
+  - from: node_modules/safer-buffer/LICENSE
+    to: licenses/safer-buffer-LICENSE.txt
+  - from: node_modules/os-locale/license
+    to: licenses/os-locale-LICENSE.txt
+  - from: node_modules/lcid/license
+    to: licenses/lcid-LICENSE.txt
+  - from: node_modules/invert-kv/license
+    to: licenses/invert-kv-LICENSE.txt
+  - from: node_modules/uuid/LICENSE.md
+    to: licenses/uuid-LICENSE.txt
 
 # Fails the build if the packaged app is missing bundled tools or contains
 # anything that looks like cookies or other credentials.

@@ -22,22 +22,28 @@ measured. For building and releasing see the [README](../README.md) and the
 ## Extraction architecture
 
 ```
-renderer (src/App.jsx, SettingsDialog.jsx)
+renderer (src/addMusic/, src/library/UpgradeDialog.jsx, SettingsDialog.jsx)
    │  window.waveMintAPI  (electron/preload.cjs)
    ▼
-main process (electron/main.cjs)
-   ├─ analyze-url / download-mp3 / cancel-operations
-   │     └─ extraction manager (electron/extraction.cjs)
-   │           ├─ command construction (buildAnalyzeArgs / buildDownloadArgs)
-   │           ├─ auth arguments (auth.cjs → buildYtDlpAuthArgs)
-   │           ├─ runtime arguments + executable (binaries.cjs)
-   │           ├─ process runner with cancel/timeout (processes.cjs)
-   │           ├─ failure classification (errors.cjs)
-   │           ├─ retry policy (decideNextAttempt) and rate-limit cooldown
-   │           └─ sanitized diagnostics (diagnostics.cjs)
-   ├─ artwork + metadata tagging (unchanged helpers in main.cjs, FFmpeg via the manager's runTool)
-   └─ engine-* handlers
-         └─ engine store + updater (electron/engine.cjs, electron/pgp.cjs)
+main process (electron/main.cjs wires everything; handlers behind ipc/trustedIpc.cjs)
+   ├─ ipc/extractionHandlers.cjs: analyze-url / download-mp3 / cancel-operations
+   │     ├─ youtubeMetadata.cjs: yt-dlp JSON → song details, thumbnails (pure)
+   │     ├─ operationRegistry.cjs: cancellation per window and requestId
+   │     └─ songExtraction.cjs: URL → finished, tagged MP3
+   │           ├─ extraction manager (electron/extraction.cjs)
+   │           │     ├─ command construction (buildAnalyzeArgs / buildDownloadArgs)
+   │           │     ├─ auth arguments (auth.cjs → buildYtDlpAuthArgs)
+   │           │     ├─ runtime arguments + executable (binaries.cjs)
+   │           │     ├─ process runner with cancel/timeout (processes.cjs)
+   │           │     ├─ failure classification (errors.cjs)
+   │           │     ├─ retry policy (decideNextAttempt) and rate-limit cooldown
+   │           │     └─ sanitized diagnostics (diagnostics.cjs)
+   │           ├─ artwork.cjs: thumbnail download, square crop, cover (FFmpeg via runChecked)
+   │           └─ FFmpeg tagging (buildTaggingArgs: stream copy, ID3v2.3)
+   ├─ ipc/engineHandlers.cjs: engine-*
+   │     └─ engine store + updater (electron/engine.cjs, electron/pgp.cjs)
+   ├─ ipc/authHandlers.cjs: auth-*
+   └─ library/host.cjs: the music library (worker thread; see LIBRARY.md)
 ```
 
 - **`extraction.cjs`** is the only code that runs yt-dlp for analysis and

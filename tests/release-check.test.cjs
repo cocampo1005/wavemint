@@ -1,5 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
+const fs = require("fs");
+const path = require("path");
 
 const {
   SENSITIVE_CONTENT_PATTERNS,
@@ -77,4 +79,13 @@ test("only runtime npm packages may be packaged into app.asar", () => {
   assert.equal(isAllowedAsarEntry(String.raw`node_modules\electron\index.js`, packages), false);
   assert.equal(isAllowedAsarEntry(String.raw`node_modules\vite\dist\node.js`, packages), false);
   assert.equal(isAllowedAsarEntry("cookies.txt", packages), false);
+});
+
+test("every packaged npm package is listed in the notices and ships its license text", () => {
+  const { missingNotices, productionPackages } = require("../scripts/check-release.cjs");
+  assert.deepEqual(missingNotices(), []);
+  const builderConfig = fs.readFileSync(path.join(__dirname, "..", "electron-builder.yml"), "utf8");
+  for (const name of productionPackages()) {
+    assert.ok(builderConfig.includes(`to: licenses/${name}-LICENSE.txt`), `electron-builder.yml copies ${name}'s license`);
+  }
 });

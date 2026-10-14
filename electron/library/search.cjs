@@ -34,12 +34,6 @@ function refreshTrackSearch(db, trackIds) {
   }
 }
 
-function rebuildTrackSearch(db) {
-  db.exec("DELETE FROM track_search");
-  db.exec(`INSERT INTO track_search (rowid, title, artist, album, album_artist, genre)
-           SELECT id, title, artist, album, album_artist, genre FROM tracks WHERE state = 'active'`);
-}
-
 /**
  * Converts free text into an FTS5 query: every word must match as a prefix,
  * in any column. User input never reaches FTS syntax unescaped.
@@ -55,4 +49,4 @@ function toFtsQuery(text) {
   return words.map((word) => `"${word.replace(/"/g, "")}"*`).join(" ");
 }
 
-module.exports = { rebuildTrackSearch, refreshTrackSearch, toFtsQuery };
+module.exports = { refreshTrackSearch, toFtsQuery };

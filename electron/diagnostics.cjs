@@ -13,10 +13,6 @@ const MAX_ENTRIES = 25;
 const MAX_TECHNICAL_LINES = 80;
 const MAX_LINE_LENGTH = 600;
 
-function escapeRegExp(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 /**
  * Removes credentials and personal details from tool output.
  * `homeDir` is replaced by %USERPROFILE% so paths stay readable.
@@ -46,7 +42,7 @@ function sanitizeDiagnosticText(text, { homeDir = os.homedir() } = {}) {
     .replace(/[A-Za-z0-9_-]{120,}={0,2}/g, "[redacted]");
 
   if (homeDir && homeDir.length > 3) {
-    const pattern = new RegExp(escapeRegExp(homeDir).replace(/\\\\/g, "[\\\\/]"), "gi");
+    const pattern = new RegExp(RegExp.escape(homeDir).replace(/\\\\/g, "[\\\\/]"), "gi");
     value = value.replace(pattern, "%USERPROFILE%");
     // yt-dlp prints Python reprs, where backslashes are doubled.
     const doubled = homeDir.replace(/\\/g, "\\\\");

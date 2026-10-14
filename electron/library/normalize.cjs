@@ -130,11 +130,6 @@ function pathKey(filePath) {
   return String(filePath || "").replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
 }
 
-/** Sort key that ignores a leading "The". */
-function sortName(value) {
-  return String(value || "").replace(/^the\s+/i, "").trim();
-}
-
 module.exports = {
   artistKey,
   artistParts,
@@ -142,7 +137,6 @@ module.exports = {
   parseAlbum,
   parseTitle,
   pathKey,
-  sortName,
   stripDiacritics,
   titleKey,
 };

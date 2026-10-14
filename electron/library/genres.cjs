@@ -14,7 +14,6 @@
 const { nowIso, parseJson, transaction } = require("./db.cjs");
 const { applyEdits } = require("./edits.cjs");
 const { artistKey, normalizeKey } = require("./normalize.cjs");
-const { finishOperation, logChange, startOperation } = require("./operations.cjs");
 
 class GenreError extends Error {}
 
@@ -347,24 +346,6 @@ function applyRules(db, { exclude = [] } = {}) {
   );
 }
 
-/** Internal secondary genre labels (not written to files). */
-function setSecondaryGenres(db, { trackIds, genreIds }) {
-  const ids = genreIds.map(Number);
-  for (const id of ids) getGenre(db, id);
-  let operationId = null;
-  transaction(db, () => {
-    operationId = startOperation(db, { kind: "secondary-genres", label: "Set additional genres", undoable: false });
-    for (const trackId of trackIds) {
-      const before = db.prepare("SELECT genre_id FROM track_genres WHERE track_id = ?").all(trackId).map((row) => row.genre_id);
-      db.prepare("DELETE FROM track_genres WHERE track_id = ?").run(trackId);
-      for (const id of ids) db.prepare("INSERT OR IGNORE INTO track_genres (track_id, genre_id) VALUES (?, ?)").run(trackId, id);
-      logChange(db, operationId, { entityId: trackId, field: "secondary_genres", oldValue: before, newValue: ids });
-    }
-    finishOperation(db, operationId, "completed", { tracks: trackIds.length });
-  });
-  return { operationId };
-}
-
 module.exports = {
   GenreError,
   addAlias,
@@ -383,7 +364,6 @@ module.exports = {
   removeRule,
   renameGenre,
   setParent,
-  setSecondaryGenres,
   similar,
   updateRule,
 };

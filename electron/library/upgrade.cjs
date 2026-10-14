@@ -26,9 +26,9 @@
 const fs = require("fs");
 const path = require("path");
 const { nowIso, parseJson, transaction } = require("./db.cjs");
-const { ARCHIVE_DIR, TAG_FIELDS, freeBytes, insertFileRow, sha256 } = require("./consolidate.cjs");
+const { ARCHIVE_DIR, freeBytes, insertFileRow } = require("./consolidate.cjs");
 const { FIELDS, normalizeValue, syncDerived } = require("./edits.cjs");
-const { siblingPath, tagDifferences } = require("./fileops.cjs");
+const { TAG_FIELDS, freePath, moveFile, sha256, siblingPath, tagDifferences } = require("./fileops.cjs");
 const { compareTracks } = require("./match.cjs");
 const { pathKey } = require("./normalize.cjs");
 const { addStep, finishOperation, logChange, startOperation, updateStep } = require("./operations.cjs");
@@ -79,21 +79,6 @@ function cleanSource(source) {
   const text = (value, max) => (typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, max) : "");
   const url = text(source.url, 2000);
   return { title: text(source.title, 500), uploader: text(source.uploader, 300), url: /^https?:\/\//i.test(url) ? url : "" };
-}
-
-function moveFile(from, to) {
-  if (fs.existsSync(to)) throw new Error(`"${path.basename(to)}" already exists; nothing was overwritten`);
-  fs.mkdirSync(path.dirname(to), { recursive: true });
-  fs.renameSync(from, to);
-}
-
-/** `target`, or "name (2).ext", "name (3).ext"… if it's taken. */
-function freePath(target) {
-  const ext = path.extname(target);
-  const base = target.slice(0, target.length - ext.length);
-  let candidate = target;
-  for (let counter = 2; fs.existsSync(candidate); counter += 1) candidate = `${base} (${counter})${ext}`;
-  return candidate;
 }
 
 function createUpgrader({ db, media, artStore, managedSource, getSettings, logger = console }) {

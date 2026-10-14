@@ -164,6 +164,14 @@ function checkBundledTools(binDir, label, problems) {
   }
 }
 
+/** Packaged npm packages that THIRD_PARTY_NOTICES.md doesn't list. */
+function missingNotices() {
+  const noticesPath = path.join(ROOT, "THIRD_PARTY_NOTICES.md");
+  if (!fs.existsSync(noticesPath)) return ["THIRD_PARTY_NOTICES.md is missing."];
+  const notices = fs.readFileSync(noticesPath, "utf8");
+  return [...productionPackages()].filter((name) => !notices.includes(`\`${name}\``)).map((name) => `THIRD_PARTY_NOTICES.md doesn't list the packaged npm package "${name}".`);
+}
+
 function report(problems, label) {
   if (problems.length) {
     const message = `Release check failed (${label}):\n  - ${problems.join("\n  - ")}`;
@@ -184,9 +192,7 @@ function checkInputs() {
     problems.push('build/icon.ico is missing. Run "npm run icon".');
   }
 
-  if (!fs.existsSync(path.join(ROOT, "THIRD_PARTY_NOTICES.md"))) {
-    problems.push("THIRD_PARTY_NOTICES.md is missing.");
-  }
+  problems.push(...missingNotices());
 
   for (const dir of ["dist", "electron"]) {
     scanNamesAndContent(filesystemEntries(path.join(ROOT, dir)), dir, problems);
@@ -254,6 +260,11 @@ async function checkPackagedApp(context) {
   if (!fs.existsSync(path.join(resourcesDir, "THIRD_PARTY_NOTICES.md"))) {
     problems.push("packaged app: THIRD_PARTY_NOTICES.md is missing");
   }
+  for (const name of productionPackages()) {
+    if (!fs.existsSync(path.join(resourcesDir, "licenses", `${name}-LICENSE.txt`))) {
+      problems.push(`packaged app: licenses/${name}-LICENSE.txt is missing (add it to extraResources in electron-builder.yml)`);
+    }
+  }
 
   report(problems, `packaged app (${path.basename(appOutDir)})`);
 }
@@ -262,6 +273,7 @@ module.exports = checkPackagedApp;
 module.exports.default = checkPackagedApp;
 module.exports.checkInputs = checkInputs;
 module.exports.isAllowedAsarEntry = isAllowedAsarEntry;
+module.exports.missingNotices = missingNotices;
 module.exports.productionPackages = productionPackages;
 module.exports.SENSITIVE_CONTENT_PATTERNS = SENSITIVE_CONTENT_PATTERNS;
 module.exports.SENSITIVE_NAME_PATTERNS = SENSITIVE_NAME_PATTERNS;

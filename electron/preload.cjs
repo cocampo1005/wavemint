@@ -144,7 +144,9 @@ contextBridge.exposeInMainWorld("waveMintAPI", {
   generateSquareCropPreview: (payload) =>
     ipcRenderer.invoke("generate-square-crop-preview", payload),
   downloadMp3: (payload) => ipcRenderer.invoke("download-mp3", payload),
-  cancelOperations: () => ipcRenderer.invoke("cancel-operations"),
+  // { requestId } cancels only that request's analysis/extraction (the id
+  // passed to analyzeUrl / downloadMp3); without it, all of this window's.
+  cancelOperations: (payload) => ipcRenderer.invoke("cancel-operations", payload),
 
   getAppStatus: (options) => ipcRenderer.invoke("get-app-status", options),
 

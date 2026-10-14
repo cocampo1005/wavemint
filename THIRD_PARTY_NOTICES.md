@@ -57,6 +57,31 @@ WaveMint does not modify any of these components.
 | React, React DOM, Scheduler | MIT | https://github.com/facebook/react |
 | Poppins typeface (`@fontsource/poppins`) | SIL Open Font License 1.1 | https://github.com/itfoundry/Poppins |
 
+## Runtime npm packages
+
+These packages are included inside `resources\app.asar` and used by the
+music library to read and write audio tags. Their full license texts are
+installed in `resources\licenses\` (`<package>-LICENSE.txt`).
+
+| Package | Version | License | Copyright | Source |
+|---|---|---|---|---|
+| `node-taglib-sharp` | 6.0.3 | LGPL-2.1-or-later | Ben Russell and contributors | https://github.com/benrr101/node-taglib-sharp/tree/v6.0.3 |
+| `iconv-lite` | 0.6.3 | MIT | © 2011 Alexander Shtuchkin | https://github.com/ashtuchkin/iconv-lite |
+| `safer-buffer` | 2.1.2 | MIT | © 2018 Nikita Skovoroda | https://github.com/ChALkeR/safer-buffer |
+| `os-locale` | 6.0.2 | MIT | © Sindre Sorhus | https://github.com/sindresorhus/os-locale |
+| `lcid` | 3.1.1 | MIT | © Sindre Sorhus | https://github.com/sindresorhus/lcid |
+| `invert-kv` | 3.0.1 | MIT | © Sindre Sorhus | https://github.com/sindresorhus/invert-kv |
+| `uuid` | 8.3.2 | MIT | © 2010-2020 Robert Kieffer and other contributors | https://github.com/uuidjs/uuid |
+
+### node-taglib-sharp (GNU LGPL 2.1 or later)
+
+WaveMint uses `node-taglib-sharp` unmodified, as a separate library: its
+JavaScript files are stored as-is under `node_modules\node-taglib-sharp\`
+inside `resources\app.asar`, an archive that can be unpacked and repacked with
+the `@electron/asar` tool, so the library can be replaced with a modified
+version. Its complete source code for the version shipped is available at the
+link above. The license text is in `resources\licenses\node-taglib-sharp-LICENSE.txt`.
+
 ### MIT License (React, React DOM, Scheduler)
 
 Copyright (c) Meta Platforms, Inc. and affiliates.

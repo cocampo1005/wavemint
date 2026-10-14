@@ -2,8 +2,8 @@
 // errors with details, metadata fields and the artwork picker.
 
 import { useState } from "react";
-import { GENRE_OPTIONS } from "../constants/genres";
 import { getErrorActions } from "../ipcErrors";
+import { useGenreNames } from "../library/useLibrary";
 import { ARTWORK_PLACEHOLDER } from "../library/placeholder";
 import { ARTWORK_OPTIONS } from "./extraction";
 
@@ -200,18 +200,19 @@ export function InlineStatus({ message }) {
   );
 }
 
+/**
+ * The genre picker. Its options always include the current value, so a
+ * detected genre that isn't in the list is shown as it will be written.
+ */
 export function GenreSelect({ value, onChange, disabled, className = "" }) {
+  const genres = useGenreNames();
+  const options = value && !genres.includes(value) ? [value, ...genres] : genres;
   return (
-    <select
-      value={value}
-      onChange={onChange}
-      disabled={disabled}
-      className={`field ${value ? "" : "is-empty"} ${className}`.trim()}
-    >
+    <select value={value} onChange={onChange} disabled={disabled} className={`field ${value ? "" : "is-empty"} ${className}`.trim()}>
       <option value="">Select genre</option>
-      {GENRE_OPTIONS.map((genre) => (
-        <option key={genre.value || genre} value={genre.value || genre}>
-          {genre.label || genre}
+      {options.map((genre) => (
+        <option key={genre} value={genre}>
+          {genre}
         </option>
       ))}
     </select>

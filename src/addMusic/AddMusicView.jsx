@@ -6,7 +6,7 @@ import { pluralize } from "../library/format";
 import { FolderOpenIcon, WaveformIcon } from "../library/icons";
 import { EntryLibraryMatch, PlaylistImport } from "../library/PlaylistImport";
 import { entryKey, libraryApi } from "../library/useLibrary";
-import { PREVIEW_CONCURRENCY, createArtworkState, describeComponentProblems, describeProgress, formatDuration, mapWithConcurrency } from "./extraction";
+import { PREVIEW_CONCURRENCY, createArtworkState, createRequestId, describeComponentProblems, describeProgress, formatDuration, mapWithConcurrency } from "./extraction";
 import { AlertIcon, ArtworkPanel, CheckIcon, ErrorAlert, FormField, GenreSelect, InlineStatus, ProgressBar } from "./parts";
 import "./addMusic.css";
 
@@ -129,6 +129,9 @@ export function AddMusicView({ active, appStatus, checkingComponents, onRecheckC
   // { mode: "staged", token, key } | { mode: "library", trackId, key }
   const [editor, setEditor] = useState(null);
   const lastActionRef = useRef(null);
+  // This workspace's analyses and extractions (album imports included): its
+  // progress events and its Cancel button never touch an upgrade's.
+  const [requestId] = useState(() => createRequestId("add-music"));
 
   const error = errorState.message;
   const setError = (message) => setErrorState({ message, code: "", diagnosticsId: "" });
@@ -144,13 +147,13 @@ export function AddMusicView({ active, appStatus, checkingComponents, onRecheckC
 
   // One set of progress listeners for the app's lifetime (this view never unmounts).
   useEffect(() => {
-    const removeAnalyze = window.waveMintAPI.onAnalyzeProgress((data) => setAnalyzeStatus(data));
-    const removeDownload = window.waveMintAPI.onDownloadProgress((data) => setDownloadStatus(data));
+    const removeAnalyze = window.waveMintAPI.onAnalyzeProgress((data) => data?.requestId === requestId && setAnalyzeStatus(data));
+    const removeDownload = window.waveMintAPI.onDownloadProgress((data) => data?.requestId === requestId && setDownloadStatus(data));
     return () => {
       removeAnalyze?.();
       removeDownload?.();
     };
-  }, []);
+  }, [requestId]);
 
   const loadLibrary = () =>
     libraryApi
@@ -189,7 +192,7 @@ export function AddMusicView({ active, appStatus, checkingComponents, onRecheckC
   const handleCancel = async () => {
     setCancelling(true);
     try {
-      await window.waveMintAPI.cancelOperations();
+      await window.waveMintAPI.cancelOperations({ requestId });
     } catch {
       setCancelling(false);
     }
@@ -253,7 +256,7 @@ export function AddMusicView({ active, appStatus, checkingComponents, onRecheckC
     setDownloadStatus(null);
 
     try {
-      const data = await window.waveMintAPI.analyzeUrl({ url, mode });
+      const data = await window.waveMintAPI.analyzeUrl({ url, mode, requestId });
 
       if (data.isPlaylist) {
         const normalizedEntries = (data.entries || []).map((entry) => ({ ...createArtworkState(entry), editBeforeAdding: false, outcome: null }));
@@ -343,6 +346,7 @@ export function AddMusicView({ active, appStatus, checkingComponents, onRecheckC
     duration: item.duration,
     artwork: { mode: item.artworkMode || "square_crop", customFilePath: item.customArtworkPath || "" },
     holdForEditing,
+    requestId,
   });
 
   const handleAddSingle = async () => {
@@ -770,6 +774,7 @@ export function AddMusicView({ active, appStatus, checkingComponents, onRecheckC
                 playlist={result}
                 entries={entries}
                 downloadStatus={downloadStatus}
+                requestId={requestId}
                 onBusyChange={setImportBusy}
                 onCancel={handleCancel}
                 onMatches={setImportMatches}

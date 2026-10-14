@@ -3,13 +3,16 @@
   "productName": "WaveMint",
   "private": true,
   "version": "2.2.0",
-  "description": "Turn YouTube videos and playlists into clean, tagged MP3s.",
+  "description": "A Windows desktop app for managing a personal music library: organize, tag, edit, play and upgrade your songs, and add new ones from YouTube.",
   "author": {
     "name": "Christian Ocampo"
   },
   "homepage": "https://github.com/cocampo1005/wavemint",
   "type": "module",
   "main": "electron/main.cjs",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "dev": "vite",
     "electron": "electron .",

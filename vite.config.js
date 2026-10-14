@@ -48,4 +48,10 @@ export default defineConfig({
     // electron-builder fail while `npm start` is running.
     watch: { ignored: ['**/release/**', '**/resources/**'] },
   },
+  build: {
+    // The UI is one bundle (~500 kB, ~145 kB gzipped) read from the local
+    // disk by Electron, not downloaded, so splitting it wouldn't make startup
+    // noticeably faster. Warn only if it grows well beyond that.
+    chunkSizeWarningLimit: 900,
+  },
 })

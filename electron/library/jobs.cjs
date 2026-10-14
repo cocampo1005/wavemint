@@ -66,7 +66,7 @@ function createJobManager({ emit, logger = console }) {
     };
 
     publish(job);
-    Promise.resolve()
+    job.done = Promise.resolve()
       .then(() => work({ signal: controller.signal, progress }))
       .then((result) => {
         job.result = result ?? null;
@@ -108,7 +108,15 @@ function createJobManager({ emit, logger = console }) {
     return !!exclusiveRunning;
   }
 
-  return { cancel, cancelAll, isBusy, list, start };
+  /** Resolves once every running job has finished, or after `timeoutMs`. */
+  function settle(timeoutMs) {
+    const running = [...jobs.values()].filter((job) => !job.finishedAt).map((job) => job.done);
+    if (!running.length) return Promise.resolve();
+    let timer;
+    return Promise.race([Promise.allSettled(running), new Promise((resolve) => (timer = setTimeout(resolve, timeoutMs)))]).finally(() => clearTimeout(timer));
+  }
+
+  return { cancel, cancelAll, isBusy, list, settle, start };
 }
 
 module.exports = { createJobManager };

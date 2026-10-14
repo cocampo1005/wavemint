@@ -26,6 +26,7 @@ const { canWriteTags, readTags, writeTags } = require("./tags.cjs");
 
 const TAG_FIELDS = Object.entries(FIELDS).filter(([, def]) => def.tag);
 
+/** SHA-256 of a file's contents (hex); copies are verified with it. */
 function sha256(filePath) {
   return new Promise((resolve, reject) => {
     const hash = crypto.createHash("sha256");
@@ -34,6 +35,22 @@ function sha256(filePath) {
       .on("error", reject)
       .on("end", () => resolve(hash.digest("hex")));
   });
+}
+
+/** Renames `from` to `to`, never overwriting an existing file. */
+function moveFile(from, to) {
+  if (fs.existsSync(to)) throw new Error(`"${path.basename(to)}" already exists; nothing was overwritten`);
+  fs.mkdirSync(path.dirname(to), { recursive: true });
+  fs.renameSync(from, to);
+}
+
+/** `target`, or "name (2).ext", "name (3).ext"… if it's taken. */
+function freePath(target) {
+  const ext = path.extname(target);
+  const base = target.slice(0, target.length - ext.length);
+  let candidate = target;
+  for (let counter = 2; fs.existsSync(candidate); counter += 1) candidate = `${base} (${counter})${ext}`;
+  return candidate;
 }
 
 function siblingPath(filePath, marker) {
@@ -332,4 +349,4 @@ function createFileOps({ db, media, artStore, backupsRoot, logger = console }) {
   return { previewTagWrite, recover, undoTagWrite, writeTagsJob };
 }
 
-module.exports = { createFileOps, siblingPath, tagDifferences };
+module.exports = { TAG_FIELDS, createFileOps, freePath, moveFile, sha256, siblingPath, tagDifferences };

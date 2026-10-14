@@ -44,7 +44,11 @@ async function start() {
 
   parentPort.on("message", async (message) => {
     if (message?.type === "shutdown") {
+      // Cancelled jobs stop at their next checkpoint; give them a moment so
+      // they can roll back cleanly (the host waits up to 3 s). Anything still
+      // unfinished is recovered from the journal at the next start.
       jobs.cancelAll();
+      await jobs.settle(2000);
       try {
         db.close();
       } catch {}

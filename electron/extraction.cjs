@@ -54,6 +54,25 @@ const STRATEGIES = {
   MWEB: "mweb-client",
 };
 
+const MAX_URL_LENGTH = 2048;
+// Schemes that never point at web media. Bare forms yt-dlp understands
+// ("youtube.com/watch?v=…", a video id) stay allowed.
+const LOCAL_SCHEMES = /^(?:file|data|javascript|vbscript|about|blob|chrome|devtools|ftp|wss?):/i;
+
+/**
+ * The trimmed URL to analyze or download, or an "unsupported-url" error the
+ * UI can show. yt-dlp remains the real parser; this only rejects input that
+ * can't be a web media link (and is passed after "--" anyway).
+ */
+function validateMediaUrl(value) {
+  const text = String(value ?? "").trim();
+  // eslint-disable-next-line no-control-regex -- rejects whitespace and control characters
+  if (!text || text.length > MAX_URL_LENGTH || /[\s\x00-\x1F\x7F]/.test(text) || LOCAL_SCHEMES.test(text)) {
+    throw new ExtractionError({ category: CATEGORIES.UNSUPPORTED_URL, message: "Paste the web address of a video or playlist (for example https://www.youtube.com/watch?v=…)." });
+  }
+  return text;
+}
+
 function getPacingArgs({ beforeDownload = false } = {}) {
   const args = ["--sleep-requests", REQUEST_SLEEP_SECONDS];
 
@@ -300,6 +319,27 @@ function createExtractionManager({
     }
   }
 
+  /**
+   * runTool for FFmpeg/FFprobe work (artwork, tagging): resolves with
+   * { stdout, stderr } on success and throws otherwise. The thrown message is
+   * short and safe to show; the redacted tool output is kept on the error
+   * (rawMessage) for diagnostics.
+   */
+  async function runChecked(tool, args, options = {}) {
+    const result = await runTool(tool, args, options);
+    if (result.cancelled) throw new ExtractionError({ category: CATEGORIES.CANCELLED, message: "Cancelled." });
+    if (result.timedOut || result.code !== 0) {
+      const { label } = binaries.resolve(tool);
+      const rawMessage = redactSensitiveText(result.stderr || result.stdout || `${tool} failed`);
+      logger.error(`[extraction] ${tool} exited with code ${result.code}\n${rawMessage}`);
+      const error = new Error(result.timedOut ? `${label} took too long to respond and was stopped.` : `${label} couldn't process the file.`);
+      error.rawMessage = rawMessage;
+      error.exitCode = result.code;
+      throw error;
+    }
+    return { stdout: result.stdout, stderr: result.stderr };
+  }
+
   function throwIfCancelled(signal) {
     if (signal?.aborted) {
       throw new ExtractionError({ category: CATEGORIES.CANCELLED, message: "Cancelled." });
@@ -463,6 +503,7 @@ function createExtractionManager({
     getRateLimitRemainingMs,
     isBusy: () => activeJobs > 0,
     markRateLimited,
+    runChecked,
     runTool,
   };
 }
@@ -481,4 +522,5 @@ module.exports = {
   getPacingArgs,
   getRetryDelayMs,
   parseDownloadProgressLine,
+  validateMediaUrl,
 };

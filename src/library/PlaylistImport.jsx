@@ -40,7 +40,7 @@ export function EntryLibraryMatch({ match }) {
  * "Import into WaveMint Library" for an analyzed playlist: match → choose
  * actions and album details → extract into staging → review → commit.
  */
-export function PlaylistImport({ playlist, entries, downloadStatus, onBusyChange, onCancel, onMatches, onDone }) {
+export function PlaylistImport({ playlist, entries, downloadStatus, requestId, onBusyChange, onCancel, onMatches, onDone }) {
   const [session, setSession] = useState(null);
   const [step, setStep] = useState("start"); // start | plan | staging | review | done
   const [albumFields, setAlbumFields] = useState({ album: "", albumArtist: "", year: "", genre: "", edition: "", numberTracks: true, artworkKey: "" });
@@ -137,6 +137,7 @@ export function PlaylistImport({ playlist, entries, downloadStatus, onBusyChange
             thumbnail: entry.thumbnail,
             duration: entry.duration,
             artwork: { mode: entry.artworkMode || "square_crop", customFilePath: entry.customArtworkPath || "" },
+            requestId,
           });
         } catch (trackError) {
           const parsed = parseIpcError(trackError, "This track couldn't be extracted");

@@ -28,8 +28,8 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { nowIso, transaction } = require("./db.cjs");
-const { freeBytes, insertFileRow, sha256 } = require("./consolidate.cjs");
-const { siblingPath } = require("./fileops.cjs");
+const { freeBytes, insertFileRow } = require("./consolidate.cjs");
+const { moveFile, sha256, siblingPath } = require("./fileops.cjs");
 const { artistKey, titleKey } = require("./normalize.cjs");
 const { addStep, finishOperation, logChange, startOperation, updateStep } = require("./operations.cjs");
 const { DEFAULT_PATTERN, planPaths } = require("./organize.cjs");
@@ -96,12 +96,6 @@ function encodingFor(filePath, info = {}) {
   if (ext === ".wav") return { lossless: true, codecArgs: ["-c:a", deep ? "pcm_s24le" : "pcm_s16le"] };
   if (ext === ".aif" || ext === ".aiff") return { lossless: true, codecArgs: ["-c:a", deep ? "pcm_s24be" : "pcm_s16be"] };
   throw new Error(`WaveMint can't edit ${ext.toUpperCase().slice(1) || "these"} files.`);
-}
-
-function moveFile(from, to) {
-  if (fs.existsSync(to)) throw new Error(`"${path.basename(to)}" already exists; nothing was overwritten`);
-  fs.mkdirSync(path.dirname(to), { recursive: true });
-  fs.renameSync(from, to);
 }
 
 function createAudioEditor({ db, media, artStore, upgrader, importer, managedSource, getSettings = () => ({}), paths, logger = console }) {

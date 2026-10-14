@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { describeProgress, formatDuration as formatSeconds } from "../addMusic/extraction";
+import { createRequestId, describeProgress, formatDuration as formatSeconds } from "../addMusic/extraction";
 import { ProgressBar } from "../addMusic/parts";
 import { parseIpcError } from "../ipcErrors";
 import { usePlayer } from "../player/usePlayer";
@@ -334,30 +334,33 @@ export function UpgradeDialog({ trackId, start = null, candidateId: initialCandi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Replacements this dialog made and didn't use are discarded on close
-  // (an extracted one only lived in the library's staging folder).
+  // This dialog's analyses and extractions (progress events carry the id;
+  // cancelling stops only these).
+  const [requestId] = useState(() => createRequestId("upgrade"));
+
+  // On close: a running analysis/extraction stops, and replacements this
+  // dialog made but didn't use are discarded (an extracted one only lived in
+  // the library's staging folder).
   useEffect(
     () => () => {
       mounted.current = false;
       seq.current += 1;
+      window.waveMintAPI.cancelOperations({ requestId }).catch(() => {});
       for (const id of created.current) if (!applied.current.has(id)) libraryApi.discardUpgrade({ candidateId: id }).catch(() => {});
     },
-    [],
+    [requestId],
   );
 
-  // Progress of our own analysis/extraction, and of the upgrade job.
-  const listening = useRef(false);
+  // Progress of this dialog's own analysis/extraction, and of the upgrade job.
   useEffect(() => {
-    listening.current = analyzing || extracting;
-  }, [analyzing, extracting]);
-  useEffect(() => {
-    const removeAnalyze = window.waveMintAPI.onAnalyzeProgress((data) => listening.current && setStatus(data));
-    const removeDownload = window.waveMintAPI.onDownloadProgress((data) => listening.current && setStatus(data));
+    const own = (data) => data?.requestId === requestId && setStatus(data);
+    const removeAnalyze = window.waveMintAPI.onAnalyzeProgress(own);
+    const removeDownload = window.waveMintAPI.onDownloadProgress(own);
     return () => {
       removeAnalyze();
       removeDownload();
     };
-  }, []);
+  }, [requestId]);
   useLibraryEvent(({ name, data }) => {
     if (name === "job" && jobId && data.id === jobId && data.status === "running" && data.progress?.phase) setJobPhase(data.progress.phase);
   });
@@ -411,7 +414,7 @@ export function UpgradeDialog({ trackId, start = null, candidateId: initialCandi
     setSquarePreview("");
     setCandidate("url", null);
     try {
-      const data = await window.waveMintAPI.analyzeUrl({ url: value, mode: "video" });
+      const data = await window.waveMintAPI.analyzeUrl({ url: value, mode: "video", requestId });
       if (seq.current !== mine) return;
       if (data.isPlaylist) throw new Error("That's a playlist. Paste the URL of a single video.");
       setAnalysis(data);
@@ -448,6 +451,7 @@ export function UpgradeDialog({ trackId, start = null, candidateId: initialCandi
         thumbnail: analysis.thumbnail,
         artwork: { mode: "square_crop" },
         upgradeTrackId: trackId,
+        requestId,
       });
       const next = response?.upgrade;
       if (!next) throw new Error("The extraction didn't produce a replacement.");
@@ -474,7 +478,7 @@ export function UpgradeDialog({ trackId, start = null, candidateId: initialCandi
   const cancelExtraction = async () => {
     setCancelling(true);
     try {
-      await window.waveMintAPI.cancelOperations();
+      await window.waveMintAPI.cancelOperations({ requestId });
     } catch {
       setCancelling(false);
     }

@@ -2,16 +2,10 @@
 
 <img src="src/assets/Horizontal%20Logo.png" alt="WaveMint" width="420" />
 
-### Your music library, with YouTube as a way to add to it.
+### A desktop music library manager for Windows
 
-Organize your collection, then add songs from YouTube videos and playlists as clean, tagged MP3s, trimmed and faded if you like. WaveMint handles the rest.
-
-![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-4A8DFF?style=flat-square)
-![Electron](https://img.shields.io/badge/Electron-41-1FC8FF?style=flat-square&logo=electron&logoColor=white)
-![React](https://img.shields.io/badge/React-19-8A5CFF?style=flat-square&logo=react&logoColor=white)
-![Vite](https://img.shields.io/badge/Vite-8-4A8DFF?style=flat-square&logo=vite&logoColor=white)
-
-**[Download for Windows](https://github.com/cocampo1005/wavemint/releases/latest)**
+Organize, tag, edit and play your music collection. Add songs from YouTube as tagged MP3s,<br />
+replace songs with better-quality versions, and keep every change undoable.
 
 </div>
 
@@ -19,431 +13,337 @@ Organize your collection, then add songs from YouTube videos and playlists as cl
 
 ## Contents
 
-**For users**
+**Using WaveMint**
+[Overview](#overview) · [Features](#features) · [Project status](#project-status) · [Installation](#download-and-installation) · [System requirements](#system-requirements) · [Getting started](#getting-started) · [YouTube access](#youtube-access-and-optional-sign-in) · [Keeping extraction working](#keeping-extraction-working) · [Troubleshooting](#troubleshooting) · [Privacy and your data](#privacy-and-your-data)
 
-- [Features](#features)
-- [Download and install](#download-and-install)
-- [Using WaveMint](#using-wavemint)
-- [Keeping extraction working](#keeping-extraction-working)
-- [YouTube Access and optional sign-in](#youtube-access-and-optional-sign-in)
-- [Troubleshooting](#troubleshooting)
-- [Uninstalling](#uninstalling)
+**Developing WaveMint**
+[Building from source](#building-from-source) · [Architecture](#architecture) · [Testing](#testing) · [Releasing](#releasing)
 
-**For developers**
-
-- [Development setup](#development-setup)
-- [Project structure](#project-structure)
-- [How extraction works](#how-extraction-works)
-- [Scripts](#scripts)
-- [Building the Windows installer](#building-the-windows-installer)
-- [Bundled tools](#bundled-tools)
-- [Publishing a release](#publishing-a-release)
-- [Code signing and SmartScreen](#code-signing-and-smartscreen)
-- [Future: automatic updates](#future-automatic-updates)
+**Legal**
+[Responsible use and copyright](#responsible-use-and-copyright) · [Third-party software](#third-party-software-and-non-affiliation) · [Disclaimer](#disclaimer-of-warranty-and-limitation-of-liability) · [License](#license)
 
 ---
+
+## Overview
+
+WaveMint started as a small tool for turning YouTube videos into tagged MP3s and grew into a music library manager for people who keep their own collection of audio files. It reads the folders you already have (an old iTunes Media folder, a curated collection, downloads) without changing them, helps you clean up their metadata, artwork, duplicates and quality problems, and keeps the result in a tidy **WaveMint Library** folder.
+
+It's built around a few principles:
+
+- **Your files are safe by default.** Music folders you add are read-only unless you allow writing. Every file change is copied, verified, journaled and undoable from History; nothing is deleted without asking (deletions go to the Recycle Bin).
+- **Local first.** Your library, metadata and history live on your computer. Online services are only contacted when you use a feature that needs them.
+- **One place for the whole workflow:** browsing and playback, metadata and artwork, audio trimming, adding new songs, upgrading old ones, and preparing files for Apple Music on an iPhone.
 
 ## Features
 
+**Library**
+- Browse and search songs, albums, artists, genres, favorites and playlists, starting from an Overview of recently added music, genres and top artists.
+- Add any number of music folders. Scans are read-only; folders stay untouched unless you mark them writable.
+- Edit metadata for one song, many songs at once, or a whole album, with a preview of every change. Changes are stored in WaveMint and written into files only when you choose **Write Tags**, after a verified backup.
+- Organize copies of your songs into the **WaveMint Library** folder with a naming pattern (default `Album Artist/Album/Track Title`).
+- Manual and smart playlists (rules on genre, artist, album and more), with M3U8 import and export.
+- **History** lists every change, and almost all of them can be undone.
+
+**Playback**
+- A player with a queue (Play Next, Add to Queue, drag to reorder), shuffle and repeat, and Windows media keys.
+- **Listen Mode**: fullscreen-ready large artwork with a visualizer whose translucent contours flow from the artwork's edges, driven by the music that's playing.
+
+**Adding music**
+- **Add Music** analyzes a YouTube video or playlist, pre-fills title, artist, album and genre (including YouTube Music's "Provided to YouTube by…" details), and lets you edit everything before adding.
+- Artwork from the original thumbnail, a centered 1000 × 1000 square crop, or your own image, previewed before extraction.
+- Songs are converted to MP3 with ID3v2.3 tags and embedded artwork, and added straight to your library. A playlist can also be imported as an album, with a review step before anything is added.
+
+**Editing and upgrading**
+- A built-in **audio editor** trims songs and adds fades, with a waveform and live preview (for library songs and for new songs before they're added).
+- **Upgrade Track** replaces a song's file with a better version, either a file from your computer or a URL. The song's current details are prefilled and editable; WaveMint writes your final metadata and artwork into the new file, compares quality side by side (with A/B listening and spectrograms), warns about likely live or alternate versions, and keeps the old file so the upgrade can be undone.
+- **Quality & Upgrades** flags low-bitrate, transcoded and damaged files.
+
+**Maintenance**
+- **Merge & Duplicates** finds the same song across folders and merges them into one entry with several file versions.
+- **Review** collects metadata problems (missing artwork, inconsistent albums, unclassified genres).
+- **Identify** (optional, off by default) looks songs and albums up on MusicBrainz and the Cover Art Archive.
+- **Storage** shows WaveMint's disk usage and cleans up old backups and previous versions after a retention period you choose.
+
+**Apple Music and iPhone**
+- **Prepare for iPhone** keeps an export folder of finished files for Apple Music or iTunes (FLAC is converted to Apple Lossless; MP3, AAC and ALAC are copied as they are), plus playlists and a report of what changed. WaveMint never edits Apple's library or talks to the iPhone; see [limitations](#apple-music-and-itunes).
+
+**Extraction engine**
+- yt-dlp, Deno and FFmpeg are bundled; nothing else needs to be installed.
+- The YouTube extraction engine (yt-dlp) can be updated from Settings without reinstalling. Updates are verified against yt-dlp's signed checksums and tested before use, and the built-in version is always the fallback.
+- Requests are paced, brief connection problems are retried, and WaveMint pauses itself if YouTube rate-limits the session. Errors are explained in plain language with technical details one click away.
+
+## Project status
+
+- **Platform:** Windows 10 and 11 (64-bit) only. The build configuration, bundled tools and file handling target Windows; other platforms are not supported.
+- **Releases:** no release has been published yet. Until one is, build WaveMint from source ([below](#building-from-source)).
+- **License:** not yet chosen; see [License](#license).
+- WaveMint is an independent personal project, maintained in spare time.
+
+## Download and installation
+
+When a release is published, it will be on the **[Releases page](https://github.com/cocampo1005/wavemint/releases)** as `WaveMint-Setup-<version>.exe`, with a `SHA256SUMS.txt` file to verify the download.
+
+1. Download and run the installer. It installs for your Windows account only (no administrator rights needed); you can choose the folder and whether to add a desktop shortcut.
+2. Start **WaveMint** from the Start menu.
+
+> [!NOTE]
+> Builds are not code-signed yet, so Windows SmartScreen may show "Windows protected your PC". Choose **More info**, then **Run anyway**, after checking the download's hash: `Get-FileHash .\WaveMint-Setup-<version>.exe` in PowerShell should match `SHA256SUMS.txt`.
+
+**Uninstalling:** Windows Settings → Apps → Installed apps → WaveMint → Uninstall. This removes the app **and its data folder `%APPDATA%\WaveMint`, including the library database** (your edits, playlists and history). Your music files, the WaveMint Library folder and any exported files are not touched. If you might reinstall, back up `%APPDATA%\WaveMint\library` first.
+
+## System requirements
+
 | | |
 |---|---|
-| 📚 **Library first** | WaveMint opens on an Overview of your collection (Recently Added, genres, top artists); browse, sort, search and edit songs, albums, artists, genres, favorites and playlists. |
-| 🎧 **A real player** | Shuffle, repeat, a play queue (Play Next, Add to Queue, drag to reorder) and a fullscreen **Listen Mode** with large artwork for big screens. |
-| 🎵 **Add Music from YouTube** | Analyze one video, or a whole playlist and choose which songs to add to your library. |
-| ✂️ **Built-in audio editor** | Trim intros, outros and silence, and add fade-ins and fade-outs, with a waveform and live preview. Works on songs in your library and on new songs before they're added. |
-| 🏷️ **Smart metadata** | Title, artist, album and genre are pre-filled, including details parsed from YouTube Music's *"Provided to YouTube by…"* descriptions. Everything stays editable. |
-| 🖼️ **Cover art your way** | Use the **Original** thumbnail, a centered **Square** 1000 × 1000 crop, or a **Custom** image from your computer, with a live preview before you extract. |
-| 🗂️ **Bulk editing** | Apply an artist, album, genre, or cover image to every track in a playlist at once. |
-| 🎧 **High-quality MP3s** | Best available audio, encoded to MP3 with ID3v2.3 tags and embedded cover art. |
-| ▶️ **Straight to your library** | Finished songs go straight into your WaveMint Library folder, with their details and artwork, ready to browse. |
-| 🚀 **No setup for public videos** | Install, paste a link, extract. No account, cookies or configuration needed. |
-| 🔄 **Self-updating engine** | Install newer, signature-verified versions of the YouTube extraction engine from Settings, without reinstalling. |
-| 💬 **Clear messages** | Problems are explained in plain language with a next step (Retry, YouTube Access, Check for Updates). Technical details are one click away. |
-| 🔐 **Optional YouTube sign-in** | For videos that need a signed-in account, use cookies from your browser or a `cookies.txt` file. |
-| 📦 **Nothing else to install** | yt-dlp, FFmpeg and everything they need are built in. |
-| 🛡️ **Rate-limit aware** | Requests are paced automatically, brief connection problems are retried, and WaveMint pauses itself if YouTube rate-limits the session. |
+| Operating system | Windows 10 or 11, 64-bit |
+| Disk space | About 650 MB for the app and its bundled tools, plus room for your WaveMint Library, backups and caches |
+| Internet | Only for adding music from YouTube, engine updates and the optional MusicBrainz lookups. The library, player and editors work offline. |
+| Other software | None. yt-dlp, Deno, FFmpeg and FFprobe are included. |
 
----
+## Getting started
 
-## Download and install
+### 1. Set up your library
 
-1. Open the **[latest release](https://github.com/cocampo1005/wavemint/releases/latest)** and download **`WaveMint-Setup-x.y.z.exe`**.
-2. Run the installer. It installs for your Windows account only, so no administrator rights are needed. You can choose the install folder and whether to add a desktop shortcut.
-3. Launch **WaveMint** from the Start menu.
+1. WaveMint opens on the **Overview**. Choose **Add iTunes / Legacy Folder** there, or go to **Manage → Sources** and choose **Add Curated Folder**, **Add Legacy Folder** or **Add Other…**, then pick a folder of music. It's scanned read-only; the folder's role decides which copy is preferred when the same song appears in several folders.
+2. Under **Manage → WaveMint Library**, choose the folder where WaveMint should keep its own organized copies. Songs you add or upgrade are saved there.
+3. Browse with **Songs**, **Albums**, **Artists** and **Genres**; double-click a song to play it.
 
-That's it. You don't need Node.js, Python, FFmpeg, yt-dlp, or a terminal.
+### 2. Add music from YouTube
 
-> [!NOTE]
-> **"Windows protected your PC"?** WaveMint isn't code-signed yet, so Microsoft SmartScreen may warn you the first time you run the installer. Select **More info**, then **Run anyway**. To check that your download is genuine, compare its SHA-256 hash with `SHA256SUMS.txt` on the release page. In PowerShell, run `Get-FileHash .\WaveMint-Setup-x.y.z.exe`.
+1. Click **Add Music** at the top of the navigation.
+2. Choose **Single Video** or **Playlist**, paste the link and click **Analyze**.
+3. Check the title, artist, album and genre. For a playlist, tick the songs you want and optionally use **Apply to all songs**.
+4. Pick the artwork under the preview: **Original**, **Square** or **Custom**.
+5. Click **Add to Library** (or **Add Selected to Library**). Tick **Edit audio before adding** to trim or fade a song first.
 
-**Requirements:** Windows 10 or 11, 64-bit.
+You can cancel an analysis or extraction from its progress bar. Songs that can't be added (removed, private, region-locked) are skipped and marked; the others are added.
 
----
+### 3. Edit metadata and artwork
 
-## Using WaveMint
+Select a song to open its details, edit the fields and **Save**. Select several songs for bulk editing, or open an album to edit it as a whole. Use **Choose Image…** for artwork. Edits are saved in WaveMint first; songs with unsaved file changes show **Write to File…**, which writes them after a verified backup (only for formats WaveMint can tag: MP3, M4A/AAC, ALAC and FLAC).
 
-WaveMint opens on your library. To add songs from YouTube:
+### 4. Trim or fade a song
 
-1. Click **+ Add Music** (top right, or at the top of the navigation).
-2. **Choose a source.** Select **Single Video** or **Playlist**.
-3. **Paste a YouTube URL** and click **Analyze**.
-4. **Review the details.** Edit the title, artist, album, and genre as needed.
-5. **Pick your artwork.** Choose **Original**, **Square**, or **Custom** under the preview.
-6. **Add to Library.**
-   - *Single video:* click **Add to Library**.
-   - *Playlist:* tick the songs you want (use **Select All** / **Clear All**), optionally fill in **Apply to all songs**, then click **Add Selected to Library**.
-7. A short confirmation appears; **View in Library** takes you to the new songs.
+Select a song and choose **Edit Audio…**. Drag the handles to trim, set fade-in and fade-out lengths, preview, and save. The edited audio becomes the song's new version; the previous one is kept and the edit can be undone from **History**.
 
-The first time, WaveMint asks where to keep your **WaveMint Library** folder; added songs are saved there and appear in the library right away.
+### 5. Upgrade a song
 
-**Trimming and fades.** Tick **Edit audio before adding** to trim the song or add fades before it's added: the audio editor opens when the extraction finishes, with **Save & Add to Library** and **Skip Editing & Add to Library**. In a playlist, tick it on individual songs: they wait (marked in the list) while the others are added, and you edit them when you're ready. For songs already in your library, select a song and click **Edit Audio…** in its details. Edits are undoable from **History**.
+1. Select the song and choose **Upgrade Track…**.
+2. Choose **Choose File** to pick a replacement from your computer, or **Analyze URL**, paste a video link, **Analyze**, then **Extract for Comparison**.
+3. Compare the quality, listen to both, and adjust the prefilled metadata and the artwork (**Current**, **Source**, **Custom** or **None**). Detected details are never applied automatically; **Use Detected Metadata…** lets you pick fields to take.
+4. Click **Upgrade Track**. The new file is written with your details into the WaveMint Library; the old file is kept and the upgrade can be undone from **History**.
 
-You can **Cancel** an analysis or extraction from its progress bar. If a playlist song can't be added (for example, it was removed or is private), WaveMint skips it, adds the others and marks the ones that failed.
+### 6. Keep things tidy
 
-> [!TIP]
-> Analyzing a new URL resets the previous results, so you can work through links one after another.
+Check **Review** for metadata problems, **Merge & Duplicates** for songs found in several folders, **Quality & Upgrades** for files worth replacing, and **Storage** for disk usage.
 
-> [!IMPORTANT]
-> Only download or extract content you own or have permission to use, in line with YouTube's Terms of Service and the laws where you live.
+## YouTube access and optional sign-in
 
----
+Public videos work without any setup. Some videos (age-restricted, members-only, or private videos shared with you) need a signed-in account; WaveMint says when that's the case. Signing in can help with those videos, but it doesn't guarantee access or lift YouTube's rate limits.
 
-## Keeping extraction working
-
-YouTube changes often, and sometimes an update to WaveMint's extraction engine (yt-dlp) is needed. You don't have to reinstall WaveMint for that:
-
-1. Open **Settings** → **Extraction Engine** and click **Check for Updates**.
-2. If a newer version is available, click **Install**. WaveMint downloads it from yt-dlp's official releases, checks its signature and tests it before using it.
-3. If anything goes wrong, **Use Built-in Version** switches back to the version that came with WaveMint.
-
-By default WaveMint also checks quietly in the background, at most once a day. It never installs anything until you click **Install**, and nothing stops working when you're offline. **Stable** is the default channel; **Nightly** gets fixes sooner but is less tested.
-
-> [!NOTE]
-> YouTube access is never guaranteed. YouTube can change or restrict access at any time, and a fix may take a few days to appear.
-
----
-
-## YouTube Access and optional sign-in
-
-WaveMint automatically connects to YouTube for publicly accessible videos. **No account setup is required**, and most people never need to open this part of Settings.
-
-Some videos (age-restricted, members-only, or private videos shared with you) need a signed-in YouTube account. WaveMint tells you when that's the case and offers a **YouTube Access** button. Signing in can help with those videos. It doesn't guarantee access, and it doesn't remove YouTube's rate limits.
-
-Open **Settings** (top right) → **YouTube Access** → **Advanced Authentication** and pick a method:
+**Settings → YouTube Access → Advanced Authentication** offers:
 
 | Method | How it works |
 |---|---|
-| **Off** (default) | Automatic access. No cookies are used. |
-| **Browser Cookies** | WaveMint asks yt-dlp to read your YouTube sign-in from a browser profile on this PC. Choose the browser and the profile you use for YouTube. |
-| **Cookies File** | Use a `cookies.txt` file you exported from your browser. |
+| **Off** (default) | No cookies are used. |
+| **Browser Cookies** | yt-dlp reads your YouTube sign-in from a browser profile on this PC (Chrome, Edge, Firefox, Brave, Opera, Vivaldi, Chromium, Whale). |
+| **Cookies File** | A `cookies.txt` file (Netscape format) you exported from your browser. |
 
-Then click **Test Authentication**. The test makes one small request to YouTube and nothing is downloaded. It reports two things separately:
-
-- **Cookie source:** could WaveMint read the cookies at all?
-- **YouTube session:** did YouTube accept them as a signed-in account?
-
-A green **Signed in** result is shown only when YouTube itself confirmed the session.
-
-### Browser support
-
-WaveMint supports the browsers yt-dlp supports on Windows: **Chrome, Edge, Firefox, Brave, Opera, Vivaldi, Chromium** and **Naver Whale**. Settings shows which ones it found on your PC and lists their profiles. If your browser or profile is in an unusual location, choose **Choose a profile folder…**.
+**Test Authentication** makes one small request (nothing is downloaded) and reports separately whether the cookies could be read and whether YouTube accepted them as a signed-in session.
 
 > [!WARNING]
-> **Chrome and other Chromium-based browsers.** Recent versions on Windows encrypt cookies so that only the browser itself can read them ("app-bound encryption"). Chromium-based browsers also lock their cookie database while they're open. If the test says the cookies **could not be accessed**, close the browser completely and try again. If it still fails, use a **Cookies File** instead. WaveMint does not try to bypass these protections.
->
-> **Firefox** cookies can usually be read while Firefox is open.
+> Recent Chromium-based browsers on Windows protect cookies with app-bound encryption and lock them while the browser is open. If the test says the cookies couldn't be accessed, close the browser completely and retry, or use a cookies file. WaveMint does not try to bypass these protections.
 
-### Using a cookies file
+A cookies file is as sensitive as a password: it can give access to your Google account. Keep it private and delete it when you no longer need it. WaveMint stores only the file's location, never cookie values; yt-dlp may update the file with refreshed cookies.
 
-1. In your browser, sign in to youtube.com.
-2. Export cookies for youtube.com in **Netscape `cookies.txt` format** with a cookie-export extension you trust (for example *"Get cookies.txt LOCALLY"*). JSON exports won't work.
-3. In WaveMint, choose **Settings → YouTube Access → Advanced Authentication → Cookies File → Import Cookies File…**, then **Test Authentication**.
+## Keeping extraction working
 
-> [!TIP]
-> Export from a private (InPrivate/Incognito) window and close it right after exporting. YouTube keeps refreshing the cookies of open browser tabs, which can invalidate an exported file.
+YouTube changes frequently, and extraction sometimes needs a newer yt-dlp. **Settings → Extraction Engine → Check for Updates** finds the latest official release; **Install** downloads it, verifies its signature and checksum, tests it, and switches to it. **Use Built-in Version** and a button to return to the previous version are always available. By default WaveMint checks quietly at most once a day and never installs anything on its own; you can turn the check off.
 
-**Remove Authentication** turns sign-in off and makes WaveMint forget the browser, profile and file location you chose. It never deletes files.
-
-WaveMint uses the file where you saved it and does not copy it. yt-dlp may update the file with refreshed cookies from YouTube. If YouTube signs the session out, the test tells you to export a fresh file. **Remove** only makes WaveMint forget the file; it doesn't delete it.
-
-### Privacy and security
-
-- Cookies never leave your computer. They're only passed to the yt-dlp copy built into WaveMint, which uses them for its requests to YouTube.
-- WaveMint stores your choices (method, browser, profile, and the file's location) in `%APPDATA%\WaveMint\settings.json`. It never stores cookie values.
-- Browser cookies are read only when you choose **Browser Cookies**, and only by yt-dlp.
-- **A cookies file is as sensitive as a password.** It can give access to your Google account. Keep it private, don't share it, and delete it when you no longer need it.
-
----
+Extraction from YouTube is never guaranteed to work: YouTube can change or restrict access at any time, and a fix can take days to appear.
 
 ## Troubleshooting
 
 <details>
 <summary><b>"Some of WaveMint's built-in components could not be started"</b></summary>
 
-A file in the WaveMint installation is missing or was blocked, often by antivirus software. Restore or allow it in your antivirus, or run the installer again to repair WaveMint.
-
+A bundled tool is missing or was blocked, often by antivirus software. Restore or allow it, or reinstall WaveMint. In a source checkout, run `npm run binaries:fetch`.
 </details>
 
 <details>
-<summary><b>"Chrome cookies could not be accessed" (or Edge, Brave…)</b></summary>
+<summary><b>"Paste the web address of a video or playlist"</b></summary>
 
-Close the browser completely, including any windows in the system tray, and click **Test Authentication** again. If it still fails, the browser is protecting its cookies with app-bound encryption. Switch to **Cookies File**.
-
+The text isn't a web link WaveMint can analyze (for example a local file path). Paste the link from the browser's address bar.
 </details>
 
 <details>
-<summary><b>"YouTube rejected the selected authentication session"</b></summary>
+<summary><b>The video is unavailable, private or region-locked</b></summary>
 
-Your sign-in has expired or YouTube rotated it. Sign in to YouTube again in your browser and retest, or export a fresh `cookies.txt`.
-
+These are final for that video. For private or age-restricted videos, set up [sign-in](#youtube-access-and-optional-sign-in) with an account that has access.
 </details>
 
 <details>
-<summary><b>"…but YouTube didn't see a signed-in account" / "doesn't contain any cookies"</b></summary>
+<summary><b>"YouTube temporarily rate-limited this session"</b></summary>
 
-WaveMint could read the cookies, but that browser profile isn't signed in to YouTube. Choose the profile you actually use for YouTube, or sign in to YouTube in that profile first.
-
-</details>
-
-<details>
-<summary><b>"YouTube temporarily rate-limited this WaveMint session"</b></summary>
-
-YouTube has throttled requests from your connection. WaveMint pauses itself for up to an hour and shows how long is left. Wait it out before analyzing or extracting again.
-
+YouTube is throttling requests from your connection. WaveMint pauses analysis and extraction for up to an hour and shows how long is left.
 </details>
 
 <details>
 <summary><b>"YouTube refused to send the audio" / "extraction components may need an update"</b></summary>
 
-WaveMint already tried the safe alternatives automatically. YouTube changes often: click **Check for Updates** in the message (or open **Settings → Extraction Engine**), install the newest engine, then try again.
-
+WaveMint already tried the safe alternatives. Use **Check for Updates** in the message (or Settings → Extraction Engine), install the newest engine, and try again.
 </details>
 
 <details>
-<summary><b>"WaveMint couldn't connect to YouTube"</b></summary>
+<summary><b>A file can't be tagged, edited or upgraded</b></summary>
 
-WaveMint retries brief connection problems by itself. If you still see this, check your internet connection (and any VPN or proxy), then click **Retry**.
+- WAV and AIFF files are read and played, but WaveMint doesn't write tags into them.
+- Files in a read-only source keep their tags; your edits stay in WaveMint and are written into copies (WaveMint Library, Prepare for iPhone).
+- "In use" or permission errors: close other apps using the file (media players, tag editors, cloud-sync tools) and check that the folder isn't read-only. Failed operations leave the original file unchanged.
+</details>
 
+<details>
+<summary><b>An upgrade or edit failed</b></summary>
+
+The song keeps its current file: replacements are prepared and verified before anything moves, and a failure rolls back. If WaveMint was closed mid-operation, it finishes or rolls back the operation at the next start.
 </details>
 
 <details>
 <summary><b>Reporting a problem</b></summary>
 
-Click **Details** in the error message, then **Copy Error Details**, and paste that into your report. Cookies, sign-in tokens and your Windows user folder are removed from these details.
-
+Click **Details** in the error, then **Copy Error Details**, and include that in your report. Cookies, sign-in tokens, signed media URLs and your Windows user folder are removed from these details.
 </details>
 
-<details>
-<summary><b>Private or age-restricted videos won't work</b></summary>
+### Apple Music and iTunes
 
-Set up [YouTube sign-in](#youtube-access-and-optional-sign-in) with an account that has access, and use **Test Authentication** to confirm YouTube accepts it.
+WaveMint never writes to Apple's library database. Apple Music and iTunes keep their own copy of each song's details and point at specific files. If you edit or upgrade a song that lives in your iTunes folder, Apple Music keeps showing (and playing) the old file and details until you update or re-add the song there. **Prepare for iPhone** lists replaced and changed songs in its report so you know what to refresh.
 
-</details>
+## Privacy and your data
 
----
+WaveMint has no accounts, analytics, telemetry or crash reporting.
 
-## Uninstalling
+**Stored on your computer**
 
-Use **Settings → Apps → Installed apps → WaveMint → Uninstall** in Windows. This removes the app, its shortcuts and its settings. MP3s you extracted and any `cookies.txt` files you exported are not touched.
+| What | Where |
+|---|---|
+| Library database: song details, file paths, playlists, history, settings | `%APPDATA%\WaveMint\library\` |
+| Artwork store, caches, verified backups of files before tag writes, previous versions | `%APPDATA%\WaveMint\library\` and your WaveMint Library's `.wavemint-archive` folder |
+| App settings: YouTube access method, chosen browser and profile, the cookies file's **location**, engine preferences (never cookie values) | `%APPDATA%\WaveMint\settings.json` |
+| Updated yt-dlp versions, yt-dlp's cache | `%APPDATA%\WaveMint\engine\`, `%APPDATA%\WaveMint\yt-dlp-cache\` |
+| Player preferences (volume, shuffle, column widths) | the app's local browser storage |
 
----
+Error details are kept in memory only (the last 25), sanitized, and shared only if you copy them. Logs go to the console and aren't written to files.
 
-## Development setup
+**Network connections**
 
-**Prerequisites:** Windows 10/11 x64, [Node.js](https://nodejs.org/) 22 LTS or newer, and Git.
+| Service | When | What's sent |
+|---|---|---|
+| YouTube / Google (through yt-dlp) and thumbnail servers | When you analyze or extract a link, or test sign-in | The link; with sign-in turned on, your YouTube cookies (read locally by yt-dlp) |
+| GitHub | Engine update checks (at most daily, can be turned off) and installs | Standard requests for yt-dlp's release information and files |
+| MusicBrainz and Cover Art Archive | Only if you turn on Identify | Song and album details you look up, with an app identifier as required by MusicBrainz |
+
+Third-party services handle these requests under their own privacy policies.
+
+## Building from source
+
+**Prerequisites:** Windows 10/11 x64, [Node.js](https://nodejs.org/) 24 or newer (npm included), and Git.
 
 ```powershell
 git clone https://github.com/cocampo1005/wavemint.git
 cd wavemint
 npm install
-npm run binaries:fetch   # downloads the pinned yt-dlp, Deno and FFmpeg into resources/bin
-npm start                # Vite dev server + Electron
+npm run binaries:fetch   # downloads the pinned yt-dlp, Deno and FFmpeg into resources/bin and verifies them
+npm start                # Vite dev server + Electron, with hot reload
 ```
-
-`npm start` runs the Vite dev server on `http://localhost:5173` and opens Electron against it, with hot reload. You can also run the parts separately: `npm run dev` in one terminal, `npm run electron` in another.
-
-**How development differs from the installed app**
-
-- **Tools:** development uses the binaries fetched into `resources/bin/win32-x64/`. If you haven't fetched them, it falls back to `yt-dlp`, `ffmpeg`, `ffprobe` and `deno` on your `PATH`, which was the original setup. Set `WAVEMINT_USE_SYSTEM_BINARIES=1` to force your `PATH` copies.
-- **Settings:** development keeps its settings in `%APPDATA%\WaveMint-Dev`, separate from an installed copy (`%APPDATA%\WaveMint`). To use a personal `cookies.txt` while developing, select it in **Settings → YouTube Access → Advanced Authentication → Cookies File** once. In-app engine updates made while developing go to `%APPDATA%\WaveMint-Dev\engine`. Nothing personal is ever stored in the repository.
-- **Built UI:** set `WAVEMINT_RENDERER=dist` to make development Electron load the built `dist/` instead of the dev server.
-
----
-
-## Project structure
-
-```
-wavemint/
-├── electron/
-│   ├── main.cjs          # Main process: IPC handlers, analysis/download/artwork/tagging flows
-│   ├── preload.cjs       # Secure bridge exposing window.waveMintAPI to the UI
-│   ├── binaries.cjs      # Resolves bundled yt-dlp/FFmpeg/FFprobe/Deno; startup dependency check
-│   ├── processes.cjs     # Runs child processes (argument arrays, no shell, timeouts, cleanup)
-│   ├── auth.cjs          # YouTube auth: browser/profile discovery, cookies.txt checks, yt-dlp args
-│   ├── extraction.cjs    # Extraction manager: yt-dlp commands, retries, rate limits, cancel, progress
-│   ├── errors.cjs        # Failure categories and plain-language messages
-│   ├── diagnostics.cjs   # Sanitized technical details for "Copy Error Details"
-│   ├── engine.cjs        # In-app yt-dlp updates: verify, test, activate, roll back
-│   ├── pgp.cjs           # OpenPGP signature check for yt-dlp releases (Node crypto only)
-│   ├── trust/            # yt-dlp's release signing key (pinned by fingerprint)
-│   ├── settings.cjs      # Per-user settings (validated JSON in %APPDATA%)
-│   ├── library/          # Music library (worker thread + SQLite), imports, audio editing
-│   └── assets/icon.png   # Window icon in development
-├── src/
-│   ├── App.jsx / AppNav.jsx # App shell and navigation (Library, Add Music, Settings)
-│   ├── addMusic/         # Add Music: YouTube single-video + playlist flows
-│   ├── editor/           # Audio editor (trim, fades, waveform, preview)
-│   ├── library/          # Library views
-│   ├── SettingsDialog.jsx# Settings: YouTube Access, Extraction Engine, About
-│   ├── ipcErrors.js      # Reads error categories and diagnostics ids from main-process errors
-│   ├── App.css / index.css
-│   └── assets/           # WaveMint logos
-├── build/
-│   ├── icon.ico          # Multi-resolution app/installer icon (npm run icon)
-│   └── installer.nsh     # NSIS customizations (optional desktop shortcut, cleanup)
-├── scripts/
-│   ├── binaries.manifest.json  # Pinned tool versions, URLs and SHA-256 hashes
-│   ├── fetch-binaries.mjs      # Downloads + verifies the pinned tools
-│   ├── check-binary-updates.mjs# Finds newer upstream releases
-│   ├── check-release.cjs       # Release safety checks (also electron-builder afterPack)
-│   └── generate-icon.cjs
-├── docs/                 # ENGINEERING.md (architecture, evaluations), release checklist
-├── tests/                # node --test unit and integration tests (+ fixtures/)
-├── electron-builder.yml  # Packaging configuration
-└── .github/workflows/release.yml
-```
-
-The UI never touches the file system or runs commands directly. Everything goes through `window.waveMintAPI` (defined in `preload.cjs`), which calls narrowly scoped handlers in `main.cjs`. Paths for cookies files, profiles, the library folder and artwork are chosen through main-process dialogs; songs waiting to be added are referred to by random tokens, never by paths.
-
----
-
-## How extraction works
-
-All yt-dlp runs go through one **extraction manager** (`electron/extraction.cjs`). It builds the command (bundled Deno and FFmpeg, no user config or plugins, optional sign-in), runs it with cancellation, classifies failures into categories such as *network-timeout*, *unavailable*, *auth-required* or *extractor-outdated*, and decides conservatively whether another attempt is worthwhile:
-
-- brief connection problems: up to two retries with backoff;
-- HTTP 403 on the audio stream: the existing ladder (without cookies if sign-in is configured, then yt-dlp's `mweb` client), each step once;
-- YouTube rate limits: stop and pause the session for an hour;
-- everything else (private, removed, region-locked, sign-in needed…): stop immediately with a clear message.
-
-Technical details stay in the main process, sanitized, and are shown only on request. See [`docs/ENGINEERING.md`](docs/ENGINEERING.md) for the full design, the in-app engine updater's trust model, and the measured evaluations of PO Token providers and YouTube.js (both evaluated and deliberately not integrated).
-
----
-
-## Scripts
 
 | Command | Description |
 |---|---|
-| `npm start` | Run the dev server and Electron together. |
-| `npm run dev` | Start only the Vite dev server on `http://localhost:5173`. |
-| `npm run electron` | Launch only Electron (requires the dev server). |
-| `npm run build` | Build the interface into `dist/`. |
-| `npm run lint` | Run ESLint (UI, main process, scripts, tests). |
-| `npm test` | Run the unit and integration tests (`node --test`). |
-| `npm run binaries:fetch` | Download and verify the pinned yt-dlp, Deno and FFmpeg (skips if already current). |
-| `npm run binaries:verify` | Re-hash the fetched binaries without downloading. |
-| `npm run binaries:check-updates` | Show newer upstream versions (`-- --write` updates the manifest). |
-| `npm run check:release` | Run the release safety checks on the build inputs. |
-| `npm run pack:win` | Build an unpacked app in `release/<version>/win-unpacked/` for testing. |
-| `npm run dist:win` | Build the installer `release/<version>/WaveMint-Setup-<version>.exe`. |
-| `npm run icon` | Regenerate `build/icon.ico` from `src/assets/Logomark.png`. |
+| `npm start` | Dev server (`http://localhost:5173`) and Electron together |
+| `npm run dev` / `npm run electron` | The two halves separately |
+| `npm run build` | Build the UI into `dist/` |
+| `npm run lint` | ESLint (UI, main process, scripts, tests) |
+| `npm test` | All tests (`node --test`) |
+| `npm run binaries:fetch` / `binaries:verify` | Fetch or re-verify the pinned tools |
+| `npm run binaries:check-updates` | Show newer upstream tool versions (`-- --write` updates the pins) |
+| `npm run check:release` | Release safety checks on the build inputs |
+| `npm run pack:win` | Unpacked app in `release/<version>/win-unpacked/` |
+| `npm run dist:win` | Installer `release/<version>/WaveMint-Setup-<version>.exe` |
+| `npm run icon` | Regenerate `build/icon.ico` from the logo |
 
----
+**Development notes**
 
-## Building the Windows installer
+- Without `npm run binaries:fetch`, development falls back to `yt-dlp`, `ffmpeg`, `ffprobe` and `deno` on your `PATH`; `WAVEMINT_USE_SYSTEM_BINARIES=1` forces that.
+- Development uses `%APPDATA%\WaveMint-Dev`, separate from an installed copy. `--user-data-dir=<folder>` overrides it (handy for testing with a throwaway profile).
+- `WAVEMINT_RENDERER=dist` makes Electron load the built `dist/` instead of the dev server.
+- If Electron starts as plain Node, unset `ELECTRON_RUN_AS_NODE` (some editors set it).
 
-```powershell
-npm run dist:win
+## Architecture
+
+WaveMint is an Electron app with a strict split between the sandboxed React UI and the privileged main process:
+
+```
+React UI (src/)                       sandboxed, no Node access, strict CSP
+   │  window.waveMintAPI (electron/preload.cjs): an explicit allowlist
+   ▼
+Main process (electron/)              every handler rejects other pages (ipc/trustedIpc.cjs)
+   ├─ ipc/extractionHandlers.cjs      analyze, extract, previews, cancel (per request id)
+   │     ├─ youtubeMetadata.cjs       yt-dlp JSON → song details and thumbnails (pure)
+   │     └─ songExtraction.cjs        URL → tagged MP3: extraction.cjs (yt-dlp, retries,
+   │                                  rate limits), artwork.cjs (download, square crop), FFmpeg
+   ├─ ipc/engineHandlers.cjs          verified yt-dlp updates (engine.cjs, pgp.cjs)
+   ├─ ipc/authHandlers.cjs            YouTube sign-in options (auth.cjs, settings.cjs)
+   └─ library/host.cjs                schema-validated library API, dialogs, media protocols
+         │  worker thread
+         ▼
+   library/worker.cjs + service.cjs   SQLite (node:sqlite) and the library's domain modules:
+                                      scanner, edits/fileops, merge, consolidate, upgrade,
+                                      audioedit, playlists, exporter, identify, storage…
 ```
 
-This runs, in order:
+Key decisions:
 
-1. `vite build`: the UI is compiled into `dist/` with relative asset paths and a strict Content-Security-Policy.
-2. `binaries:fetch`: the pinned tools are downloaded if needed and checked against their SHA-256 hashes.
-3. `check:release`: the build fails if anything credential-like (cookie files, cookie contents, YouTube session values, hardcoded cookie paths, browser credential stores, keys, `.env` files) would be packaged, or if the bundled tools are missing or differ from the pinned versions.
-4. `electron-builder`: packages the app and runs the same checks again on the packaged output, including inside `app.asar`. It then creates the NSIS installer.
+- **Security boundary.** The renderer never receives file paths or runs commands. Files and folders are chosen in main-process dialogs; songs are referred to by database ids and served through custom `wavemint-media://` and `wavemint-art://` protocols. Renderer input is validated against schemas; IPC senders are checked; external processes run with argument arrays, never a shell; browser permissions are denied except fullscreen.
+- **File safety.** Every change to a music file is a journaled operation: copy to a temporary file, verify (SHA-256, tags read back, audio stream unchanged), then move into place. Interrupted operations are finished or rolled back at the next start, and History undoes them.
+- **One extraction path.** All yt-dlp runs go through `extraction.cjs`, which classifies failures and applies a deliberately conservative retry policy (a pure, tested function). Analysis, extraction, album imports and Upgrade Track share it.
+- **Off the main thread.** The library runs in a worker thread so scans of large collections never block the UI. The renderer has no state library: a player context, small hooks and paged, virtualized lists.
+- **Tools are pinned.** Bundled binaries are pinned by SHA-256 to upstream checksums, and the release check fails the build if anything credential-like or unpinned would ship.
 
-**Output:** `release/<version>/WaveMint-Setup-<version>.exe`, with an unpacked copy in `release/<version>/win-unpacked/`.
+More detail: [`docs/ENGINEERING.md`](docs/ENGINEERING.md) (extraction, engine updates, evaluations), [`docs/LIBRARY.md`](docs/LIBRARY.md) (library design, data model, safety model) and [`CLAUDE.md`](CLAUDE.md) (a module-by-module map).
 
-Only `dist/`, `electron/` and `package.json` go into `app.asar`. No `node_modules`, sources, scripts or tests are packaged. The tools are placed outside the archive in `resources\bin\`, and license texts in `resources\bin\licenses\` and `resources\licenses\`.
+## Testing
 
----
+`npm test` runs the whole suite with Node's built-in test runner; no extra framework. Tests build synthetic music libraries in temporary folders (never a real library) and cover metadata parsing and resolution, artwork crop and download rules, extraction arguments and the retry policy, IPC validation and sender checks, request-scoped cancellation, tag writing with verification, upgrades with rollback and undo, imports, merging, playlists, storage cleanup, the player queue and the visualizer model. Tests that need FFmpeg run when the tools have been fetched. Network services are replaced by fakes; no test downloads from YouTube.
 
-## Bundled tools
+## Releasing
 
-| Tool | Version | Source | License |
-|---|---|---|---|
-| yt-dlp (`yt-dlp.exe`, includes yt-dlp-ejs) | 2026.08.19 | [yt-dlp releases](https://github.com/yt-dlp/yt-dlp/releases) | Unlicense + bundled licenses |
-| Deno | 2.9.7 | [Deno releases](https://github.com/denoland/deno/releases) | MIT |
-| FFmpeg + FFprobe (LGPL, shared) | n8.1.3 | [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) (end-of-month build) | LGPL-3.0 |
+Releases are built by [`.github/workflows/release.yml`](.github/workflows/release.yml) on a version tag (`v1.2.3`, matching `package.json`): it fetches and verifies the tools, runs lint and tests, builds the installer, and creates a **draft** GitHub Release with the installer, its blockmap, `SHA256SUMS.txt` and the FFmpeg source archive (for the LGPL). Test the draft with [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md) before publishing.
 
-Pins live in [`scripts/binaries.manifest.json`](scripts/binaries.manifest.json). Every hash there comes from the upstream project's own checksum file, and `fetch-binaries` rejects any download that doesn't match. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for licensing details.
-
-**How WaveMint finds them at runtime** (`electron/binaries.cjs`): the installed app always uses `<install dir>\resources\bin\` and never your `PATH`. Every yt-dlp call gets `--ignore-config`, `--no-js-runtimes --js-runtimes deno:<bundled deno.exe>` and `--ffmpeg-location <bundled bin>`, so yt-dlp solves YouTube's JavaScript challenges with the bundled Deno and converts audio with the bundled FFmpeg. At startup WaveMint runs each tool once in the background to confirm it works (for yt-dlp, that it can use the bundled Deno and its built-in EJS challenge solver), and shows a clear message if one is missing or blocked.
-
-**In-app engine updates** are stored per user in `%APPDATA%\WaveMint\engine\versions\<version>\` and take priority over the bundled yt-dlp once verified; the bundled copy is always the fallback. See [docs/ENGINEERING.md](docs/ENGINEERING.md#extraction-engine-updates).
-
-**Updating the tools.** YouTube changes often, so expect to refresh yt-dlp regularly, independently of app changes:
-
-```powershell
-npm run binaries:check-updates            # see what's new (yt-dlp: also verifies the release signature)
-npm run binaries:check-updates -- --write # update pins (URLs + official hashes)
-npm run binaries:fetch -- --force
-npm test
-```
-
-Then update the versions in `THIRD_PARTY_NOTICES.md` and this table, test analysis, extraction, artwork and authentication in `npm start` and in `npm run pack:win`, bump the app version, and release. BtbN removes daily FFmpeg builds after a few weeks, so the checker only proposes end-of-month builds, which are kept for over a year.
+Installers are unsigned. To sign them, add a code-signing certificate (or Azure Trusted Signing) to electron-builder, and sign only WaveMint's own executables: the bundled third-party tools must stay byte-identical to their pinned hashes, which the release check enforces.
 
 ---
 
-## Publishing a release
+## Responsible use and copyright
 
-Releases are built by [`.github/workflows/release.yml`](.github/workflows/release.yml) on GitHub's Windows runners.
+WaveMint is intended for lawful management and processing of your own music collection.
 
-1. Bump `"version"` in `package.json` (for example `1.0.1`) and commit.
-2. Tag and push: `git tag v1.0.1 && git push origin v1.0.1`
-3. The workflow installs dependencies, fetches and verifies the tools, runs lint and tests, builds the installer (with the safety checks), and creates a **draft** GitHub Release. The draft contains the installer, its `.blockmap`, `SHA256SUMS.txt`, and the FFmpeg source archive (for the LGPL).
-4. Download the installer from the draft and test it on a clean Windows PC with the [release checklist](docs/RELEASE_CHECKLIST.md).
-5. Edit the draft notes if needed, then **Publish**. Nothing becomes public before this step.
+- Only access, download, copy, convert or modify media when you have the rights or permission to do so. Music, videos, artwork and other content remain the property of their respective rights holders, and WaveMint grants no license to any third-party content.
+- Content being available on a streaming or video platform doesn't mean downloading or converting it is permitted. Platforms' terms of service (including YouTube's) may restrict downloading, and the law differs between countries. You are responsible for complying with the laws and terms that apply to you.
+- WaveMint is not designed or intended to circumvent technical protection measures, and must not be used to access protected services without authorization, to infringe copyright, or to redistribute content without permission.
 
-You can also run the workflow manually (**Actions → Windows release → Run workflow**) to get the installer as a build artifact without creating a release. The workflow needs no secrets: it uses the built-in `GITHUB_TOKEN`, and builds are unsigned.
+## Third-party software and non-affiliation
 
----
+WaveMint builds on [Electron](https://www.electronjs.org/), [React](https://react.dev/), [Vite](https://vite.dev/), [yt-dlp](https://github.com/yt-dlp/yt-dlp), [Deno](https://deno.com/), [FFmpeg](https://ffmpeg.org/) (LGPL build), [node-taglib-sharp](https://github.com/benrr101/node-taglib-sharp) and the [Poppins](https://github.com/itfoundry/Poppins) typeface, and can use [MusicBrainz](https://musicbrainz.org/) and the [Cover Art Archive](https://coverartarchive.org/). Each is distributed under its own license; see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). License texts are installed in `resources\licenses\` and `resources\bin\licenses\`.
 
-## Code signing and SmartScreen
+WaveMint is an independent project. It is not affiliated with, sponsored or endorsed by YouTube, Google, Apple, MusicBrainz or any other platform or service it works with, or by the authors of the software it uses. Product names and trademarks belong to their owners. Third-party services can change their interfaces, policies or availability at any time, so features that depend on them may stop working. Using a particular tool does not make downloading or converting any content lawful.
 
-Unsigned installers work, but Windows SmartScreen warns users until a download builds reputation. To sign releases:
+## Disclaimer of warranty and limitation of liability
 
-1. Get a code-signing certificate (an OV or EV certificate from a certificate authority) or set up [Azure Trusted Signing](https://learn.microsoft.com/azure/trusted-signing/).
-2. For a `.pfx` certificate, add repository secrets `WIN_CSC_LINK` (base64-encoded `.pfx`) and `WIN_CSC_KEY_PASSWORD`, and expose them as environment variables on the **Build installer** step. electron-builder signs automatically when they're present. For Azure Trusted Signing, add `win.azureSignOptions` to `electron-builder.yml` and the Azure credentials as secrets.
-3. **Bundled tools:** by default electron-builder signs every `.exe`, including the third-party tools in `resources\bin`. That changes their bytes, so the release check (which verifies them against the pinned hashes) will fail. That's intentional. Either keep the upstream files unmodified by using a custom `win.signtoolOptions.sign` hook that signs only `WaveMint.exe`, the uninstaller and the installer (recommended), or update `check-release.cjs` to compare the files without their signatures.
+WaveMint is provided **"as is"**, without warranty of any kind, express or implied, including warranties of merchantability, fitness for a particular purpose and non-infringement.
 
-Never commit certificates or passwords. The release check fails the build if `.pfx`, `.p12`, `.pem` or `.key` files would be packaged.
+Although WaveMint is designed to protect your files (verified copies, backups, journaled and undoable operations), software can fail. Possible problems include corrupted or replaced audio files, lost or incorrect metadata, library and Apple Music/iTunes synchronization differences, unsupported formats, crashes, and failed downloads or conversions, including failures of third-party services. **Keep backups of your music library before large operations** such as writing tags, consolidating, upgrading or deleting files.
 
----
+To the extent permitted by applicable law, the author and contributors are not liable for any damages or losses arising from the use of, or inability to use, WaveMint. Some jurisdictions don't allow certain warranty exclusions or liability limitations, so parts of this section may not apply to you.
 
-## Future: automatic updates
+## License
 
-The packaging is ready for [electron-updater](https://www.electron.build/auto-update) with GitHub Releases. It uses the NSIS target, a stable `appId`, generates `.blockmap` files for differential downloads, and the installer caches itself for that purpose. To enable it:
-
-1. `npm install electron-updater` (as a regular dependency, since it runs in the main process).
-2. In `electron-builder.yml`, replace `publish: null` with
-   ```yaml
-   publish:
-     provider: github
-     owner: cocampo1005
-     repo: wavemint
-   ```
-   so builds also produce `latest.yml`. Upload it with the installer and blockmap (add it to the workflow's release files).
-3. In `main.cjs`, call `autoUpdater.checkForUpdatesAndNotify()` after the window opens, only when `app.isPackaged`.
-4. Sign releases first. Unsigned auto-updates trigger SmartScreen on every update.
-
-The extraction engine (yt-dlp) already updates independently from inside the app (Settings → Extraction Engine); app updates would cover WaveMint itself, Deno and FFmpeg.
-
----
-
-<div align="center">
-<img src="src/assets/Logomark.png" alt="" width="56" />
-<br />
-<sub>Built with Electron, React, yt-dlp, Deno, and FFmpeg.</sub>
-</div>
+No license has been chosen for WaveMint yet, so there is no `LICENSE` file. Until one is added, the source code is copyright © 2026 Christian Ocampo, all rights reserved: you may view it on GitHub, but no other rights are granted. The third-party components WaveMint includes are covered by their own licenses (see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)).

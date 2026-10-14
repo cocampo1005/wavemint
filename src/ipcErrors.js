@@ -1,7 +1,7 @@
 // Errors thrown by main-process IPC handlers arrive wrapped as
 // "Error invoking remote method '<channel>': Error: <message>". WaveMint's own
 // actionable errors also start with a "[code]" or "[code:diagnosticsId]" tag
-// (see createUserError in electron/main.cjs and ExtractionError in
+// (see taggedError and ExtractionError in
 // electron/errors.cjs), e.g. "[auth]", "[rate-limit]" or "[network-timeout:x1]".
 export function parseIpcError(error, fallback = "Something went wrong") {
   // Electron prefixes the error's class name ("Error:", "ExtractionError:").

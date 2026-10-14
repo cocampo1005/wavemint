@@ -201,12 +201,6 @@
   padding: var(--wm-space-6);
 }
 
-.panel__section + .panel__section {
-  margin-top: var(--wm-space-5);
-  padding-top: var(--wm-space-5);
-  border-top: 1px solid var(--wm-border-subtle);
-}
-
 .section-label {
   display: block;
   margin-bottom: var(--wm-space-2);
@@ -549,32 +543,6 @@ select.field.is-empty {
 .input-row > .field {
   flex: 1;
   min-width: 0;
-}
-
-.folder-display {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  height: var(--wm-control-h);
-  padding: 0 var(--wm-space-3);
-  border: 1px dashed var(--wm-border);
-  border-radius: var(--wm-radius-md);
-  color: var(--wm-text-subtle);
-  font-size: var(--wm-text-sm);
-  overflow: hidden;
-}
-
-.folder-display.is-set {
-  border-style: solid;
-  background: var(--wm-surface-input);
-  color: var(--wm-text);
-}
-
-.folder-display__path {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .source-top {

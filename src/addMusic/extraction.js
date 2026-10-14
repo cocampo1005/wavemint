@@ -1,4 +1,14 @@
-// Extraction helpers for the Add Music workspace (moved from App.jsx).
+// Extraction helpers for the Add Music workspace (and Upgrade Track's URL
+// source, which uses the same analysis and extraction IPC).
+
+/**
+ * An id for one part of the UI's analyses and extractions. The main process
+ * tags progress events with it and can cancel just its operations, so Add
+ * Music and an upgrade never see or stop each other's work.
+ */
+export function createRequestId(prefix) {
+  return `${prefix}-${crypto.randomUUID()}`;
+}
 
 export function describeComponentProblems(problems, isPackaged) {
   const names = problems.map((tool) => tool.label).join(", ");

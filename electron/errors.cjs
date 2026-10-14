@@ -299,6 +299,15 @@ class ExtractionError extends Error {
   }
 }
 
+/**
+ * An error whose message carries a "[code]" tag for the UI (see
+ * src/ipcErrors.js), for problems outside extraction (engine updates,
+ * authentication settings).
+ */
+function taggedError(code, message) {
+  return new Error(`[${code}] ${message}`);
+}
+
 module.exports = {
   CATEGORIES,
   CATEGORY_ACTIONS,
@@ -308,4 +317,5 @@ module.exports = {
   isHttp403Text,
   isYouTubeRateLimitMessage,
   summarizeYtDlpError,
+  taggedError,
 };

@@ -17,8 +17,8 @@
 const fs = require("fs");
 const path = require("path");
 const { nowIso, parseJson, transaction } = require("./db.cjs");
-const { ARCHIVE_DIR, freeBytes, insertFileRow, sha256 } = require("./consolidate.cjs");
-const { siblingPath } = require("./fileops.cjs");
+const { ARCHIVE_DIR, freeBytes, insertFileRow } = require("./consolidate.cjs");
+const { moveFile, sha256, siblingPath } = require("./fileops.cjs");
 const { scoreMatch } = require("./identify.cjs");
 const { artistKey, normalizeKey, parseAlbum, pathKey, titleKey } = require("./normalize.cjs");
 const { addStep, finishOperation, logChange, startOperation, updateStep } = require("./operations.cjs");
@@ -31,12 +31,6 @@ const { canWriteTags, readArtwork, readTags, writeTags } = require("./tags.cjs")
 const ACTIONS = ["add", "compare", "keep_existing", "keep_both", "skip"];
 const DECISIONS = ["add", "upgrade", "keep_existing", "keep_both", "skip"];
 const NEEDS_DOWNLOAD = new Set(["add", "compare", "keep_both"]);
-
-function moveFile(from, to) {
-  if (fs.existsSync(to)) throw new Error(`"${path.basename(to)}" already exists; nothing was overwritten`);
-  fs.mkdirSync(path.dirname(to), { recursive: true });
-  fs.renameSync(from, to);
-}
 
 function createImporter({ db, media, artStore, upgrader, managedSource, getSettings = () => ({}), paths, logger = console }) {
   function stagingFolder(sessionId) {

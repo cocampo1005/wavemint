@@ -4,15 +4,10 @@ import { EditPreview } from "./EditPreview";
 import { EDIT_FIELDS, FIELD_LABELS, displayValue, toApiValue, toFormValue } from "./fields";
 import { pluralize } from "./format";
 import { CloseIcon, EditIcon, WarningIcon } from "./icons";
-import { errorMessage, libraryApi, useLoader } from "./useLibrary";
+import { errorMessage, libraryApi, useGenreNames, useLoader } from "./useLibrary";
 
 export function GenreOptions({ id }) {
-  const { data: taxonomy } = useLoader(() => libraryApi.listGenreTaxonomy(), []);
-  const { data: used } = useLoader(() => libraryApi.listGenres(), []);
-  const names = useMemo(
-    () => [...new Set([...(taxonomy || []).map((genre) => genre.name), ...(used || []).map((genre) => genre.name).filter(Boolean)])].sort((a, b) => a.localeCompare(b)),
-    [taxonomy, used],
-  );
+  const names = useGenreNames();
   return (
     <datalist id={id}>
       {names.map((name) => (

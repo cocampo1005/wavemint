@@ -385,6 +385,27 @@ const WORKER_METHODS = {
   },
 };
 
+// Renderer-callable methods the main process handles itself (dialogs, shell,
+// Recycle Bin), with their parameter schemas. Paths never come from the
+// renderer: files and folders are chosen in main-process dialogs.
+const HOST_METHOD_SCHEMAS = {
+  addSourceFromDialog: { role: v.oneOf(["legacy", "curated", "other"]), name: text(120), scan: v.bool() },
+  relinkSource: { id: id() },
+  setArtworkFromDialog: { trackIds: trackIdList({ optional: false }) },
+  chooseManagedRoot: {},
+  chooseUpgradeFile: { trackId: id() },
+  chooseUpgradeArtwork: {},
+  chooseExportRoot: {},
+  chooseAutoAddFolder: {},
+  openExportFolder: { report: v.bool() },
+  exportPlaylistFile: { id: id(), relative: v.bool() },
+  importPlaylistFile: {},
+  deleteTrackFiles: { trackIds: trackIdList({ optional: false }) },
+  cleanUpStorage: { categories: v.array(v.oneOf(CATEGORY_IDS, { optional: false }), { max: CATEGORY_IDS.length }) },
+  showFileInFolder: { fileId: id() },
+};
+const HOST_METHOD_NAMES = Object.keys(HOST_METHOD_SCHEMAS);
+
 // The automatic cleanup looks at most every few hours and acts at most daily.
 const CLEANUP_FIRST_CHECK_MS = 3 * 60 * 1000;
 const CLEANUP_CHECK_EVERY_MS = 3 * 60 * 60 * 1000;
@@ -577,177 +598,126 @@ function createLibraryHost({ app, ipcMain, dialog, shell, BrowserWindow, protoco
     return result.canceled || !result.filePaths.length ? null : result.filePaths[0];
   }
 
-  const HOST_METHODS = {
-    addSourceFromDialog: {
-      schema: { role: v.oneOf(["legacy", "curated", "other"]), name: text(120), scan: v.bool() },
-      run: async (sender, params) => {
-        const rootPath = await chooseFolder(sender, "Choose a music folder to add to your library");
-        if (!rootPath) return null;
-        const added = await call("addSource", { rootPath, role: params.role || "other", name: params.name });
-        const job = params.scan === false ? null : await call("scanSources", { sourceIds: [added.id] });
-        return { ...added, job };
-      },
+  /** One file chosen in a main-process dialog, or null. */
+  async function chooseFile(sender, title, filter) {
+    const result = await dialog.showOpenDialog(BrowserWindow.fromWebContents(sender), {
+      title,
+      properties: ["openFile", "dontAddToRecent"],
+      filters: [filter],
+    });
+    return result.canceled || !result.filePaths.length ? null : result.filePaths[0];
+  }
+
+  const IMAGE_FILES = { name: "Images (JPEG or PNG)", extensions: ["jpg", "jpeg", "png"] };
+
+  // Host methods run in the main process (dialogs, shell, the Recycle Bin);
+  // their parameters are validated against HOST_METHOD_SCHEMAS first.
+  const HOST_HANDLERS = {
+    addSourceFromDialog: async (sender, params) => {
+      const rootPath = await chooseFolder(sender, "Choose a music folder to add to your library");
+      if (!rootPath) return null;
+      const added = await call("addSource", { rootPath, role: params.role || "other", name: params.name });
+      const job = params.scan === false ? null : await call("scanSources", { sourceIds: [added.id] });
+      return { ...added, job };
     },
-    relinkSource: {
-      schema: { id: id() },
-      run: async (sender, params) => {
-        const rootPath = await chooseFolder(sender, "Choose the folder's new location");
-        if (!rootPath) return null;
-        return call("updateSource", { id: params.id, patch: { rootPath } });
-      },
+    relinkSource: async (sender, params) => {
+      const rootPath = await chooseFolder(sender, "Choose the folder's new location");
+      return rootPath ? call("updateSource", { id: params.id, patch: { rootPath } }) : null;
     },
-    setArtworkFromDialog: {
-      schema: { trackIds: trackIdList({ optional: false }) },
-      run: async (sender, params) => {
-        const result = await dialog.showOpenDialog(BrowserWindow.fromWebContents(sender), {
-          title: "Choose cover art",
-          properties: ["openFile", "dontAddToRecent"],
-          filters: [{ name: "Images (JPEG or PNG)", extensions: ["jpg", "jpeg", "png"] }],
-        });
-        if (result.canceled || !result.filePaths.length) return null;
-        return call("setArtworkFromPath", { trackIds: params.trackIds, filePath: result.filePaths[0] });
-      },
+    setArtworkFromDialog: async (sender, params) => {
+      const filePath = await chooseFile(sender, "Choose cover art", IMAGE_FILES);
+      return filePath ? call("setArtworkFromPath", { trackIds: params.trackIds, filePath }) : null;
     },
-    chooseManagedRoot: {
-      schema: {},
-      run: async (sender) => {
-        const rootPath = await chooseFolder(sender, "Choose a folder for your WaveMint Library");
-        if (!rootPath) return null;
-        return call("setManagedRoot", { rootPath });
-      },
+    chooseManagedRoot: async (sender) => {
+      const rootPath = await chooseFolder(sender, "Choose a folder for your WaveMint Library");
+      return rootPath ? call("setManagedRoot", { rootPath }) : null;
     },
-    chooseUpgradeFile: {
-      schema: { trackId: id() },
-      run: async (sender, params) => {
-        const result = await dialog.showOpenDialog(BrowserWindow.fromWebContents(sender), {
-          title: "Choose the replacement audio file",
-          properties: ["openFile", "dontAddToRecent"],
-          filters: [{ name: "Audio files", extensions: ["mp3", "m4a", "flac", "wav", "aif", "aiff", "aac"] }],
-        });
-        if (result.canceled || !result.filePaths.length) return null;
-        return call("prepareUpgrade", { trackId: params.trackId, filePath: result.filePaths[0] });
-      },
+    chooseUpgradeFile: async (sender, params) => {
+      const filePath = await chooseFile(sender, "Choose the replacement audio file", { name: "Audio files", extensions: ["mp3", "m4a", "flac", "wav", "aif", "aiff", "aac"] });
+      return filePath ? call("prepareUpgrade", { trackId: params.trackId, filePath }) : null;
     },
     // Artwork for an upgrade: the image is only stored; the upgrade writes it.
-    chooseUpgradeArtwork: {
-      schema: {},
-      run: async (sender) => {
-        const result = await dialog.showOpenDialog(BrowserWindow.fromWebContents(sender), {
-          title: "Choose cover art",
-          properties: ["openFile", "dontAddToRecent"],
-          filters: [{ name: "Images (JPEG or PNG)", extensions: ["jpg", "jpeg", "png"] }],
-        });
-        if (result.canceled || !result.filePaths.length) return null;
-        return call("storeArtworkFile", { filePath: result.filePaths[0] });
-      },
+    chooseUpgradeArtwork: async (sender) => {
+      const filePath = await chooseFile(sender, "Choose cover art", IMAGE_FILES);
+      return filePath ? call("storeArtworkFile", { filePath }) : null;
     },
-    chooseExportRoot: {
-      schema: {},
-      run: async (sender) => {
-        const rootPath = await chooseFolder(sender, "Choose a folder for songs prepared for iPhone");
-        return rootPath ? call("setExportRoot", { rootPath }) : null;
-      },
+    chooseExportRoot: async (sender) => {
+      const rootPath = await chooseFolder(sender, "Choose a folder for songs prepared for iPhone");
+      return rootPath ? call("setExportRoot", { rootPath }) : null;
     },
-    chooseAutoAddFolder: {
-      schema: {},
-      run: async (sender) => {
-        const folder = await chooseFolder(sender, 'Choose Apple\'s "Automatically Add to iTunes" (or "to Music") folder');
-        return folder ? call("setAutoAddFolder", { folder }) : null;
-      },
+    chooseAutoAddFolder: async (sender) => {
+      const folder = await chooseFolder(sender, 'Choose Apple\'s "Automatically Add to iTunes" (or "to Music") folder');
+      return folder ? call("setAutoAddFolder", { folder }) : null;
     },
-    openExportFolder: {
-      schema: { report: v.bool() },
-      run: async (_sender, params) => {
-        const setup = await call("getExportSetup", {});
-        if (!setup.root || !fs.existsSync(setup.root)) throw new Error("The export folder isn't available.");
-        const target = params.report ? path.join(setup.root, "WaveMint Export Report.txt") : setup.root;
-        const problem = await shell.openPath(target);
-        if (problem) throw new Error(problem);
-        return { opened: true };
-      },
+    openExportFolder: async (_sender, params) => {
+      const setup = await call("getExportSetup", {});
+      if (!setup.root || !fs.existsSync(setup.root)) throw new Error("The export folder isn't available.");
+      const problem = await shell.openPath(params.report ? path.join(setup.root, "WaveMint Export Report.txt") : setup.root);
+      if (problem) throw new Error(problem);
+      return { opened: true };
     },
-    exportPlaylistFile: {
-      schema: { id: id(), relative: v.bool() },
-      run: async (sender, params) => {
-        const playlist = await call("getPlaylist", { id: params.id });
-        const result = await dialog.showSaveDialog(BrowserWindow.fromWebContents(sender), {
-          title: "Export playlist",
-          defaultPath: `${playlist.name.replace(/[<>:"/\\|?*]/g, " ").trim() || "Playlist"}.m3u8`,
-          filters: [{ name: "M3U8 playlist", extensions: ["m3u8"] }],
-        });
-        if (result.canceled || !result.filePath) return null;
-        return call("exportPlaylistM3U8", { id: params.id, filePath: result.filePath, relative: !!params.relative });
-      },
+    exportPlaylistFile: async (sender, params) => {
+      const playlist = await call("getPlaylist", { id: params.id });
+      const result = await dialog.showSaveDialog(BrowserWindow.fromWebContents(sender), {
+        title: "Export playlist",
+        defaultPath: `${playlist.name.replace(/[<>:"/\\|?*]/g, " ").trim() || "Playlist"}.m3u8`,
+        filters: [{ name: "M3U8 playlist", extensions: ["m3u8"] }],
+      });
+      if (result.canceled || !result.filePath) return null;
+      return call("exportPlaylistM3U8", { id: params.id, filePath: result.filePath, relative: !!params.relative });
     },
-    importPlaylistFile: {
-      schema: {},
-      run: async (sender) => {
-        const result = await dialog.showOpenDialog(BrowserWindow.fromWebContents(sender), {
-          title: "Import a playlist",
-          properties: ["openFile", "dontAddToRecent"],
-          filters: [{ name: "Playlists", extensions: ["m3u8", "m3u"] }],
-        });
-        if (result.canceled || !result.filePaths.length) return null;
-        return call("importPlaylistM3U", { filePath: result.filePaths[0] });
-      },
+    importPlaylistFile: async (sender) => {
+      const filePath = await chooseFile(sender, "Import a playlist", { name: "Playlists", extensions: ["m3u8", "m3u"] });
+      return filePath ? call("importPlaylistM3U", { filePath }) : null;
     },
     // Delete File: the songs' files go to the Recycle Bin, then the songs
     // leave the library. Which files is decided by the library (only the
     // songs' own audio files in folders WaveMint may change), never by the
     // renderer.
-    deleteTrackFiles: {
-      schema: { trackIds: trackIdList({ optional: false }) },
-      run: async (_sender, params) => {
-        const plan = await call("planFileDeletion", { trackIds: params.trackIds });
-        const results = [];
-        for (const item of plan.items) {
-          const result = { trackId: item.trackId, trashed: [], missing: [], failed: [] };
-          for (const file of item.files) {
-            if (!file.path || !fs.existsSync(file.path)) {
-              result.missing.push(file.fileId);
-              continue;
-            }
-            try {
-              await shell.trashItem(path.resolve(file.path));
-              result.trashed.push(file.fileId);
-            } catch (error) {
-              logger.warn(`[library] Couldn't move ${file.name} to the Recycle Bin: ${error.message}`);
-              result.failed.push({ name: file.name, error: "It couldn't be moved to the Recycle Bin (it may be open in another app)." });
-            }
+    deleteTrackFiles: async (_sender, params) => {
+      const plan = await call("planFileDeletion", { trackIds: params.trackIds });
+      const results = [];
+      for (const item of plan.items) {
+        const result = { trackId: item.trackId, trashed: [], missing: [], failed: [] };
+        for (const file of item.files) {
+          if (!file.path || !fs.existsSync(file.path)) {
+            result.missing.push(file.fileId);
+            continue;
           }
-          results.push(result);
+          try {
+            await shell.trashItem(path.resolve(file.path));
+            result.trashed.push(file.fileId);
+          } catch (error) {
+            logger.warn(`[library] Couldn't move ${file.name} to the Recycle Bin: ${error.message}`);
+            result.failed.push({ name: file.name, error: "It couldn't be moved to the Recycle Bin (it may be open in another app)." });
+          }
         }
-        const finished = await call("finishFileDeletion", { results });
-        return { ...finished, blocked: plan.blocked };
-      },
+        results.push(result);
+      }
+      const finished = await call("finishFileDeletion", { results });
+      return { ...finished, blocked: plan.blocked };
     },
-    cleanUpStorage: {
-      schema: { categories: v.array(v.oneOf(CATEGORY_IDS, { optional: false }), { max: CATEGORY_IDS.length }) },
-      run: async (_sender, params) => {
-        const result = await cleanUpStorage({ categories: params.categories?.length ? params.categories : CATEGORY_IDS });
-        broadcast("library-changed", { storage: true });
-        return result;
-      },
+    cleanUpStorage: async (_sender, params) => {
+      const result = await cleanUpStorage({ categories: params.categories?.length ? params.categories : CATEGORY_IDS });
+      broadcast("library-changed", { storage: true });
+      return result;
     },
-    showFileInFolder: {
-      schema: { fileId: id() },
-      run: async (_sender, params) => {
-        const file = await call("resolvePlayback", { fileId: params.fileId });
-        if (!file || !fs.existsSync(file.path)) throw new Error("This file isn't available right now.");
-        shell.showItemInFolder(file.path);
-        return { shown: true };
-      },
+    showFileInFolder: async (_sender, params) => {
+      const file = await call("resolvePlayback", { fileId: params.fileId });
+      if (!file || !fs.existsSync(file.path)) throw new Error("This file isn't available right now.");
+      shell.showItemInFolder(file.path);
+      return { shown: true };
     },
   };
+  // Every handler has a schema and every schema a handler.
+  const unmatched = [...Object.keys(HOST_HANDLERS), ...HOST_METHOD_NAMES].filter((name) => !Object.hasOwn(HOST_HANDLERS, name) || !Object.hasOwn(HOST_METHOD_SCHEMAS, name));
+  if (unmatched.length) throw new Error(`Library host methods without a handler or schema: ${unmatched.join(", ")}`);
 
   function register() {
     ipcMain.handle("library", async (event, method, params) => {
       if (typeof method !== "string") throw new Error("Unknown library operation");
 
-      if (Object.hasOwn(HOST_METHODS, method)) {
-        const entry = HOST_METHODS[method];
-        return entry.run(event.sender, validate(entry.schema, params));
-      }
+      if (Object.hasOwn(HOST_HANDLERS, method)) return HOST_HANDLERS[method](event.sender, validate(HOST_METHOD_SCHEMAS[method], params));
 
       if (!Object.hasOwn(WORKER_METHODS, method)) throw new Error("Unknown library operation");
       return call(method, validate(WORKER_METHODS[method], params));
@@ -852,22 +822,5 @@ function registerLibrarySchemes(protocol) {
   ]);
 }
 
-// Host methods (dialogs, shell) handled in the main process itself.
-const HOST_METHOD_NAMES = [
-  "addSourceFromDialog",
-  "chooseAutoAddFolder",
-  "chooseExportRoot",
-  "chooseManagedRoot",
-  "chooseUpgradeArtwork",
-  "chooseUpgradeFile",
-  "cleanUpStorage",
-  "deleteTrackFiles",
-  "exportPlaylistFile",
-  "importPlaylistFile",
-  "openExportFolder",
-  "relinkSource",
-  "setArtworkFromDialog",
-  "showFileInFolder",
-];
 
 module.exports = { HOST_METHOD_NAMES, HOST_SCHEMES: [MEDIA_SCHEME, ART_SCHEME], WORKER_METHODS, createLibraryHost, registerLibrarySchemes };
