@@ -1,6 +1,8 @@
 // Metadata editing for logical tracks. Edits change the database (the source
-// of truth); they are written into audio files separately and only where
-// WaveMint may write (see fileops.cjs).
+// of truth); the service then writes them through into the audio files where
+// WaveMint may write (service.cjs writeThrough, fileops.cjs). Songs in
+// read-only folders keep the edit in WaveMint until they're copied into the
+// WaveMint Library.
 //
 // - Every edit is an operation with a field-level change log, so it can be
 //   reviewed and undone.
@@ -265,6 +267,33 @@ function undoMetadataOperation(db, operationId) {
   return { operationId: undoId, tracks: touched.size, conflicts };
 }
 
+/**
+ * Takes back an edit that was just applied but couldn't be saved to the file
+ * (a failed save): the old values return, and neither the edit nor its
+ * reversal is kept in History. `previous` maps trackId -> the track's
+ * { curated_fields, tags_dirty } from before the edit.
+ */
+function discardOperation(db, operationId, previous = new Map()) {
+  const changes = db.prepare("SELECT * FROM change_log WHERE operation_id = ? AND entity_type = 'track' ORDER BY id DESC").all(Number(operationId));
+  const touched = new Set();
+  transaction(db, () => {
+    for (const change of changes) {
+      if (!/^[a-z_]+$/.test(change.field)) continue;
+      db.prepare(`UPDATE tracks SET ${change.field} = ? WHERE id = ?`).run(parseJson(change.old_value), change.entity_id);
+      touched.add(change.entity_id);
+    }
+    for (const id of touched) {
+      const before = previous.get(id);
+      if (before) db.prepare("UPDATE tracks SET curated_fields = ?, tags_dirty = ? WHERE id = ?").run(before.curated_fields, before.tags_dirty, id);
+      syncDerived(db, id);
+    }
+    db.prepare("DELETE FROM change_log WHERE operation_id = ?").run(Number(operationId));
+    db.prepare("DELETE FROM operations WHERE id = ?").run(Number(operationId));
+  });
+  refreshTrackSearch(db, [...touched]);
+  return { tracks: touched.size };
+}
+
 /** Title Case suitable for song and album titles (keeps ALL-CAPS words). */
 function titleCase(value) {
   const small = new Set(["a", "an", "and", "as", "at", "but", "by", "for", "in", "nor", "of", "on", "or", "the", "to", "vs", "via", "with"]);
@@ -285,6 +314,7 @@ function titleCase(value) {
 module.exports = {
   FIELDS,
   applyEdits,
+  discardOperation,
   normalizeValue,
   previewEdits,
   setTrackArtwork,

@@ -5,9 +5,10 @@ import { isSkippableInBatch, parseIpcError } from "../ipcErrors";
 import { pluralize } from "../library/format";
 import { FolderOpenIcon, WaveformIcon } from "../library/icons";
 import { EntryLibraryMatch, PlaylistImport } from "../library/PlaylistImport";
+import { AlbumInput, ArtistInput, GenreInput } from "../library/MetadataInputs";
 import { entryKey, libraryApi } from "../library/useLibrary";
 import { PREVIEW_CONCURRENCY, createArtworkState, createRequestId, describeComponentProblems, describeProgress, formatDuration, mapWithConcurrency } from "./extraction";
-import { AlertIcon, ArtworkPanel, CheckIcon, ErrorAlert, FormField, GenreSelect, InlineStatus, ProgressBar } from "./parts";
+import { AlertIcon, ArtworkPanel, CheckIcon, ErrorAlert, FormField, InlineStatus, ProgressBar } from "./parts";
 import "./addMusic.css";
 
 const DONE = new Set(["added", "held"]);
@@ -21,19 +22,23 @@ function matchPayload(items) {
   }));
 }
 
+/** Title, Artist, Album and Genre of a song to add (Artist, Album and Genre suggest what the library has). */
 function MetadataFields({ metadata, onChange, disabled, columns = 2 }) {
-  const field = (name, label, wide = false) => (
-    <FormField label={label} wide={wide}>
-      <input type="text" className="field" value={metadata?.[name] || ""} onChange={(event) => onChange(name, event.target.value)} placeholder={label} disabled={disabled} />
-    </FormField>
-  );
+  const value = (name) => metadata?.[name] || "";
+  const set = (name) => (next) => onChange(name, next);
   return (
     <div className={`form-grid form-grid--${columns}`}>
-      {field("title", "Title", true)}
-      {field("artist", "Artist")}
-      {field("album", "Album")}
+      <FormField label="Title" wide>
+        <input type="text" className="field" value={value("title")} onChange={(event) => onChange("title", event.target.value)} placeholder="Title" disabled={disabled} />
+      </FormField>
+      <FormField label="Artist">
+        <ArtistInput value={value("artist")} onChange={set("artist")} placeholder="Artist" disabled={disabled} />
+      </FormField>
+      <FormField label="Album">
+        <AlbumInput value={value("album")} onChange={set("album")} artist={value("artist")} placeholder="Album" disabled={disabled} />
+      </FormField>
       <FormField label="Genre" wide={columns === 2}>
-        <GenreSelect value={metadata?.genre || ""} onChange={(event) => onChange("genre", event.target.value)} disabled={disabled} />
+        <GenreInput value={value("genre")} onChange={set("genre")} placeholder="Genre" disabled={disabled} />
       </FormField>
     </div>
   );
@@ -784,9 +789,9 @@ export function AddMusicView({ active, appStatus, checkingComponents, onRecheckC
             <div className="bulk-edit">
               <span className="section-label">Apply to all songs</span>
               <div className="bulk-edit__row">
-                <input type="text" className="field" value={masterArtist} onChange={(event) => setMasterArtist(event.target.value)} placeholder="Artist" aria-label="Artist for all songs" disabled={batchRunning} />
-                <input type="text" className="field" value={masterAlbum} onChange={(event) => setMasterAlbum(event.target.value)} placeholder="Album" aria-label="Album for all songs" disabled={batchRunning} />
-                <GenreSelect value={masterGenre} onChange={(event) => setMasterGenre(event.target.value)} disabled={batchRunning} />
+                <ArtistInput value={masterArtist} onChange={setMasterArtist} placeholder="Artist" ariaLabel="Artist for all songs" disabled={batchRunning} />
+                <AlbumInput value={masterAlbum} onChange={setMasterAlbum} artist={masterArtist} placeholder="Album" ariaLabel="Album for all songs" disabled={batchRunning} />
+                <GenreInput value={masterGenre} onChange={setMasterGenre} placeholder="Genre" ariaLabel="Genre for all songs" disabled={batchRunning} />
                 <button type="button" className="btn btn--secondary" onClick={handleApplyMasterMetadata} disabled={!canApplyMaster}>
                   Apply to All
                 </button>

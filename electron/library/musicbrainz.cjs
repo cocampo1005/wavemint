@@ -138,11 +138,16 @@ function createMusicBrainz({ web }) {
     return data ? normalizeFullRelease(data) : null;
   }
 
-  /** Front cover from the Cover Art Archive (release, then release group). */
+  /**
+   * Front cover from the Cover Art Archive (release, then release group), at
+   * 1200 px; the 500 px version only when there's no larger one.
+   */
   async function frontCover({ releaseId, releaseGroupId }, { signal } = {}) {
     const urls = [];
-    if (MBID.test(String(releaseId || ""))) urls.push(`${CAA}/release/${releaseId}/front-500`);
-    if (MBID.test(String(releaseGroupId || ""))) urls.push(`${CAA}/release-group/${releaseGroupId}/front-500`);
+    for (const size of ["1200", "500"]) {
+      if (MBID.test(String(releaseId || ""))) urls.push(`${CAA}/release/${releaseId}/front-${size}`);
+      if (MBID.test(String(releaseGroupId || ""))) urls.push(`${CAA}/release-group/${releaseGroupId}/front-${size}`);
+    }
     for (const url of urls) {
       const image = await web.getBytes(url, { signal });
       if (image) return { ...image, source: url };

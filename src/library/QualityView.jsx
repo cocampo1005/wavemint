@@ -3,6 +3,7 @@ import { formatNumber, formatQuality, pluralize } from "./format";
 import { PauseIcon, PlayIcon, QualityIcon, SearchIcon, UpgradeIcon } from "./icons";
 import { errorMessage, libraryApi, useDebounced, useLoader } from "./useLibrary";
 import { Artwork } from "./Artwork";
+import { WithSongPanel } from "./SongPanel";
 
 const VIEWS = [
   ["attention", "Needs attention"],
@@ -34,10 +35,16 @@ const BITRATES = [
   ["256", "≤ 256 kbps"],
 ];
 
-export function QualityView({ revision, checking, playing, onPlay, onOpenTrack, onUpgrade, onChanged, onError }) {
-  const [view, setView] = useState("attention");
+/**
+ * Audio quality: low bitrates, quality signals, upgrade candidates. Songs
+ * open in a panel beside the list; Upgrade compares and replaces the file.
+ * `initialMaxBitrate` presets the bitrate filter (Overview's low-bitrate link).
+ */
+export function QualityView({ revision, initialView = "attention", initialMaxBitrate = "", checking, playing, browserProps, onPlay, onUpgrade, onChanged, onError }) {
+  const [view, setView] = useState(initialView);
   const [search, setSearch] = useState("");
-  const [maxBitrate, setMaxBitrate] = useState("");
+  const [maxBitrate, setMaxBitrate] = useState(initialMaxBitrate);
+  const [openTrack, setOpenTrack] = useState(null);
   const [sort, setSort] = useState("severity");
   const [limit, setLimit] = useState(100);
   const [selected, setSelected] = useState(() => new Set());
@@ -68,6 +75,7 @@ export function QualityView({ revision, checking, playing, onPlay, onOpenTrack, 
     key === "attention" ? (counts.review_suggested || 0) + (counts.user_marked_poor || 0) + (counts.upgrade_available || 0) : key === "all" ? summary?.total : counts[key];
 
   return (
+    <WithSongPanel trackId={openTrack} onClose={() => setOpenTrack(null)} browserProps={browserProps}>
     <div className="lib-quality">
       <section className="panel lib-merge__intro">
         <QualityIcon size={22} />
@@ -178,7 +186,7 @@ export function QualityView({ revision, checking, playing, onPlay, onOpenTrack, 
               <button type="button" className="lib-play" aria-label={isPlaying ? "Pause" : `Play ${row.title}`} onClick={() => onPlay({ id: row.id, file_id: row.file_id, title: row.title, artist: row.artist, artwork_hash: row.artwork_hash })}>
                 {isPlaying ? <PauseIcon size={12} /> : <PlayIcon size={12} />}
               </button>
-              <button type="button" className="lib-quality-row__text" onClick={() => onOpenTrack(row.id)}>
+              <button type="button" className="lib-quality-row__text" onClick={() => setOpenTrack(row.id)}>
                 <strong>{row.title || "Untitled"}</strong>
                 <span>
                   {row.artist || "Unknown artist"}
@@ -231,5 +239,6 @@ export function QualityView({ revision, checking, playing, onPlay, onOpenTrack, 
         </button>
       )}
     </div>
+    </WithSongPanel>
   );
 }

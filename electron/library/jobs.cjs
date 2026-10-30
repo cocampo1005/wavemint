@@ -6,6 +6,7 @@ let nextJobId = 1;
 
 function createJobManager({ emit, logger = console }) {
   const jobs = new Map();
+  const settledListeners = new Set();
   let exclusiveRunning = null;
 
   function snapshot(job) {
@@ -84,6 +85,13 @@ function createJobManager({ emit, logger = console }) {
         // Keep recent history small.
         const finished = [...jobs.values()].filter((item) => item.finishedAt);
         for (const old of finished.slice(0, Math.max(0, finished.length - 20))) jobs.delete(old.id);
+        for (const listener of settledListeners) {
+          try {
+            listener(snapshot(job));
+          } catch (error) {
+            logger.warn(`[library] After "${label}": ${error.message}`);
+          }
+        }
       });
 
     return snapshot(job);
@@ -108,6 +116,17 @@ function createJobManager({ emit, logger = console }) {
     return !!exclusiveRunning;
   }
 
+  /** The kind of the running exclusive job, or null. */
+  function runningKind() {
+    return exclusiveRunning ? jobs.get(exclusiveRunning)?.kind || null : null;
+  }
+
+  /** Calls `listener(job)` after every job finishes; returns an unsubscribe function. */
+  function onSettled(listener) {
+    settledListeners.add(listener);
+    return () => settledListeners.delete(listener);
+  }
+
   /** Resolves once every running job has finished, or after `timeoutMs`. */
   function settle(timeoutMs) {
     const running = [...jobs.values()].filter((job) => !job.finishedAt).map((job) => job.done);
@@ -116,7 +135,7 @@ function createJobManager({ emit, logger = console }) {
     return Promise.race([Promise.allSettled(running), new Promise((resolve) => (timer = setTimeout(resolve, timeoutMs)))]).finally(() => clearTimeout(timer));
   }
 
-  return { cancel, cancelAll, isBusy, list, settle, start };
+  return { cancel, cancelAll, isBusy, list, onSettled, runningKind, settle, start };
 }
 
 module.exports = { createJobManager };

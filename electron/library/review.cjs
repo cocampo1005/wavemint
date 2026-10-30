@@ -266,10 +266,16 @@ function refreshReview(db) {
   return { open: [...issues.values()].length, added, reopened, resolved };
 }
 
+// Review is about metadata and organization. Missing or unreadable files are
+// still detected here (so they resolve and reopen like other issues), but
+// they're shown and fixed in File Health.
+const FILE_KINDS = ["file_problem"];
+const METADATA_KINDS = Object.keys(KINDS).filter((kind) => !FILE_KINDS.includes(kind));
+
 function reviewSummary(db) {
   const rows = db.prepare("SELECT kind, status, COUNT(*) AS count FROM review_items GROUP BY kind, status").all();
   const kinds = {};
-  for (const [kind, def] of Object.entries(KINDS)) kinds[kind] = { label: def.label, open: 0, ignored: 0, resolved: 0 };
+  for (const kind of METADATA_KINDS) kinds[kind] = { label: KINDS[kind].label, open: 0, ignored: 0, resolved: 0 };
   for (const row of rows) {
     if (!kinds[row.kind]) continue;
     if (row.status === "needs_review" || row.status === "suggested") kinds[row.kind].open += row.count;
@@ -286,6 +292,9 @@ function listReviewItems(db, { kind, status = "open", offset = 0, limit = 100 } 
   if (kind) {
     where.push("r.kind = ?");
     params.push(kind);
+  } else {
+    where.push(`r.kind NOT IN (${FILE_KINDS.map(() => "?").join(",")})`);
+    params.push(...FILE_KINDS);
   }
   if (status === "open") where.push("r.status IN ('needs_review', 'suggested')");
   else if (status) {
@@ -345,4 +354,4 @@ function approveSuggestions(db, { ids }) {
   return { applied: results.length, results };
 }
 
-module.exports = { KINDS, approveSuggestions, detectIssues, listReviewItems, refreshReview, reviewSummary, setReviewStatus };
+module.exports = { FILE_KINDS, KINDS, approveSuggestions, detectIssues, listReviewItems, refreshReview, reviewSummary, setReviewStatus };

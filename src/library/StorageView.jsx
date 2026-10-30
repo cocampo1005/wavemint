@@ -1,6 +1,7 @@
 import { useState } from "react";
+import { useToast } from "../toasts/useToast";
 import { formatBytes, formatDate, pluralize } from "./format";
-import { CheckIcon, WarningIcon } from "./icons";
+import { WarningIcon } from "./icons";
 import { errorMessage, libraryApi, useLoader } from "./useLibrary";
 
 const CATEGORIES = {
@@ -48,13 +49,22 @@ export function StorageView({ revision, onError }) {
   const [tick, setTick] = useState(0);
   const { data, loading } = useLoader(() => libraryApi.storageReport(), [revision, tick]);
   const [cleaning, setCleaning] = useState(null); // category id or "all"
-  const [result, setResult] = useState(null);
+  const { notify } = useToast();
 
   const cleanUp = async (categories) => {
     setCleaning(categories ? categories[0] : "all");
-    setResult(null);
     try {
-      setResult(await libraryApi.cleanUpStorage({ categories }));
+      const result = await libraryApi.cleanUpStorage({ categories });
+      notify({
+        tone: result.failed ? "warning" : "success",
+        text: [
+          `Freed ${formatBytes(result.freedBytes)}: ${describeCleanup(result)}.`,
+          result.failed ? `${pluralize(result.failed, "item")} couldn't be removed and ${result.failed === 1 ? "was" : "were"} left in place (for example, a file in use).` : "",
+          result.removed?.versions || result.removed?.tagBackups || result.removed?.dbBackups ? "Audio and backups went to the Recycle Bin." : "",
+        ]
+          .filter(Boolean)
+          .join(" "),
+      });
       setTick((value) => value + 1);
     } catch (error) {
       onError?.(errorMessage(error, "The cleanup didn't run"));
@@ -99,20 +109,6 @@ export function StorageView({ revision, onError }) {
           </span>
         </div>
       </section>
-
-      {result && (
-        <div className="lib-notice" role="status">
-          <CheckIcon size={16} />
-          <span className="lib-notice__text">
-            Freed {formatBytes(result.freedBytes)}: {describeCleanup(result)}.
-            {result.failed ? ` ${pluralize(result.failed, "item")} couldn't be removed and ${result.failed === 1 ? "was" : "were"} left in place (for example, a file in use).` : ""}
-            {result.removed?.versions || result.removed?.tagBackups || result.removed?.dbBackups ? " Audio and backups went to the Recycle Bin." : ""}
-          </span>
-          <button type="button" className="btn btn--ghost btn--sm" onClick={() => setResult(null)}>
-            Dismiss
-          </button>
-        </div>
-      )}
 
       <section className="panel lib-storage__settings" aria-labelledby="lib-storage-settings">
         <h2 id="lib-storage-settings" className="section-label">

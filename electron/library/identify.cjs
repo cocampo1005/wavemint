@@ -402,16 +402,14 @@ function createIdentifier({ db, mb, artStore, getSettings = () => ({}), logger =
     return view(track.id);
   }
 
-  /** The chosen release's front cover from the Cover Art Archive (stored locally). */
-  async function cover({ trackId }, { signal } = {}) {
-    const row = db.prepare("SELECT suggestion FROM identifications WHERE track_id = ?").get(Number(trackId));
-    const fields = parseJson(row?.suggestion, {}).fields || {};
-    if (!fields.mbReleaseId && !fields.mbReleaseGroupId) return null;
-    const key = `cover:${fields.mbReleaseId || ""}:${fields.mbReleaseGroupId || ""}`;
+  /** A release's front cover from the Cover Art Archive, stored locally (cached, misses included). */
+  async function coverFor({ releaseId, releaseGroupId }, { signal } = {}) {
+    if (!releaseId && !releaseGroupId) return null;
+    const key = `cover:${releaseId || ""}:${releaseGroupId || ""}`;
     const known = db.prepare("SELECT status, body FROM web_cache WHERE key = ?").get(key);
     if (known?.status === 404) return null;
     if (known?.status === 200 && artStore.locate(known.body)) return { hash: known.body };
-    const image = await mb.frontCover({ releaseId: fields.mbReleaseId, releaseGroupId: fields.mbReleaseGroupId }, { signal });
+    const image = await mb.frontCover({ releaseId, releaseGroupId }, { signal });
     if (!image) {
       db.prepare("INSERT OR REPLACE INTO web_cache (key, status, body, fetched_at) VALUES (?, 404, NULL, ?)").run(key, nowIso());
       return null;
@@ -419,6 +417,69 @@ function createIdentifier({ db, mb, artStore, getSettings = () => ({}), logger =
     const { hash } = artStore.save(image.data);
     db.prepare("INSERT OR REPLACE INTO web_cache (key, status, body, fetched_at) VALUES (?, 200, ?, ?)").run(key, hash, nowIso());
     return { hash };
+  }
+
+  /** The chosen release's front cover from the Cover Art Archive (stored locally). */
+  async function cover({ trackId }, { signal } = {}) {
+    const row = db.prepare("SELECT suggestion FROM identifications WHERE track_id = ?").get(Number(trackId));
+    const fields = parseJson(row?.suggestion, {}).fields || {};
+    return coverFor({ releaseId: fields.mbReleaseId, releaseGroupId: fields.mbReleaseGroupId }, { signal });
+  }
+
+  /**
+   * Album artwork for a song from its title, artist and album alone: no
+   * identification, no audio analysis, and nothing about the song changes.
+   * Releases are searched by album and artist (only same-named albums by the
+   * same artist count); without an album, the song's own recordings are
+   * searched and their original album used. The cover is stored locally and
+   * returned as a proposal: { hash, release: { title, artist, year } } or null.
+   */
+  async function findArtwork({ trackId }, { signal } = {}) {
+    const track = localTrack(trackId);
+    const artist = track.album_artist || track.artist;
+    const sameArtist = (other) =>
+      !artist || artistKey(artist) === artistKey(other) || artistParts(artist).some((part) => artistParts(other).includes(part)) || ratio(artistKey(artist), artistKey(other)) >= 0.85;
+    const candidates = [];
+
+    if (track.album) {
+      const albumKey = parseAlbum(track.album).key;
+      const releases = await mb.searchReleases({ album: track.album, artist }, { signal });
+      candidates.push(
+        ...releases
+          .filter((release) => (release.searchScore ?? 0) >= 70 && sameArtist(release.artist))
+          .filter((release) => {
+            const key = parseAlbum(release.title).key;
+            return key === albumKey || ratio(key, albumKey) >= 0.9;
+          })
+          .sort(
+            (a, b) =>
+              (STATUS_RANK[String(a.status).toLowerCase()] ?? 2) - (STATUS_RANK[String(b.status).toLowerCase()] ?? 2) ||
+              Number(b.trackCount === (track.track_total || track.album_size)) - Number(a.trackCount === (track.track_total || track.album_size)) ||
+              (a.year ?? 9999) - (b.year ?? 9999),
+          ),
+      );
+    }
+
+    if (!candidates.length && track.title) {
+      const local = { title: track.title, artist: track.artist, durationMs: track.durationMs };
+      const title = track.title.replace(/\s*[([][^)\]]*[)\]]/g, "").trim() || track.title;
+      const best = (await mb.searchRecordings({ title, artist: track.artist }, { signal }))
+        .map((recording) => ({ recording, match: scoreMatch(local, recording) }))
+        .filter((item) => item.match.score >= UNCERTAIN && item.match.parts.artist >= 0.8)
+        .sort((a, b) => b.match.score - a.match.score)[0];
+      if (best) {
+        const groups = groupReleases(best.recording.releases);
+        const group = pickGroup(groups, { album: track.album, preferOriginal: getSettings().preferOriginalReleases !== false });
+        if (group) candidates.push({ ...group.representative, releaseGroupId: group.releaseGroupId, year: group.year });
+      }
+    }
+
+    // A few releases at most (each is one Cover Art Archive request).
+    for (const release of candidates.slice(0, 3)) {
+      const found = await coverFor({ releaseId: release.id, releaseGroupId: release.releaseGroupId }, { signal });
+      if (found) return { hash: found.hash, release: { title: release.title, artist: release.artist, year: release.year ?? null } };
+    }
+    return null;
   }
 
   /** Applies the selected suggested fields (and optionally the cover) as one undoable edit. */
@@ -629,7 +690,7 @@ function createIdentifier({ db, mb, artStore, getSettings = () => ({}), logger =
     return result;
   }
 
-  return { albumCandidates, albumProposal, apply, applyAlbum, applyConfident, chooseRelease, cover, dismiss, identifyJob, identifyTrack, list, summary, view };
+  return { albumCandidates, albumProposal, apply, applyAlbum, applyConfident, chooseRelease, cover, dismiss, findArtwork, identifyJob, identifyTrack, list, summary, view };
 }
 
 module.exports = { KIND_LABELS, createIdentifier, groupReleases, kindOf, mapGenre, pickGroup, scoreMatch, versionsOf };

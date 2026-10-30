@@ -10,6 +10,7 @@ import { usePlayer } from "./player/usePlayer";
 import "./player/player.css";
 import { SettingsDialog } from "./SettingsDialog";
 import { LibraryView } from "./library/LibraryView";
+import { ToastProvider } from "./toasts/Toasts";
 import { libraryApi, useLibraryJobs, useLoader } from "./library/useLibrary";
 
 function describeAuthState(authState) {
@@ -42,9 +43,11 @@ function PlayerOverlays() {
  */
 function App() {
   return (
-    <PlayerProvider>
-      <AppShell />
-    </PlayerProvider>
+    <ToastProvider>
+      <PlayerProvider>
+        <AppShell />
+      </PlayerProvider>
+    </ToastProvider>
   );
 }
 
@@ -122,7 +125,7 @@ function AppShell() {
   const authIndicator = authState && authState.mode !== "none" ? (authState.lastTest?.status === "authenticated" ? "success" : "warning") : "";
   const engineUpdateAvailable = engineStatus?.lastCheck?.status === "available";
   const settingsIndicator = authIndicator === "warning" ? "warning" : engineUpdateAvailable ? "update" : authIndicator;
-  const activeNav = workspace === "add" ? "add" : route.view === "album" ? "albums" : route.view;
+  const activeNav = workspace === "add" ? "add" : route.view;
 
   return (
     <div className="app-shell">

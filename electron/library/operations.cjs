@@ -76,7 +76,11 @@ function listOperations(db, { limit = 100, offset = 0 } = {}) {
               (SELECT COUNT(*) FROM operation_steps s WHERE s.operation_id = o.id AND s.state = 'done') AS steps_done,
               (SELECT COUNT(*) FROM operation_steps s WHERE s.operation_id = o.id AND s.state = 'failed') AS steps_failed,
               EXISTS (SELECT 1 FROM operations u WHERE u.undo_of = o.id AND u.status IN ('completed', 'partial')) AS was_undone
-       FROM operations o ORDER BY o.id DESC LIMIT ? OFFSET ?`,
+       FROM operations o
+       -- A save's file step belongs to its edit (undoing the edit writes the
+       -- old values back); only failures are listed on their own.
+       WHERE json_extract(o.summary, '$.partOf') IS NULL OR o.status NOT IN ('completed', 'running')
+       ORDER BY o.id DESC LIMIT ? OFFSET ?`,
     )
     .all(Math.min(500, Math.max(1, Number(limit) || 100)), Math.max(0, Number(offset) || 0))
     .map((row) => ({ ...row, summary: parseJson(row.summary, null), was_undone: !!row.was_undone }));

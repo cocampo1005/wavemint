@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Dialog } from "./Dialog";
 import { displayValue, FIELD_LABELS } from "./fields";
 import { pluralize } from "./format";
-import { errorMessage, libraryApi } from "./useLibrary";
+import { errorMessage, libraryApi, refreshSuggestions } from "./useLibrary";
 
 /**
  * Shows exactly what an edit will change (existing → proposed, per song and
@@ -48,6 +48,7 @@ export function EditPreview({ title = "Review changes", edits, label, onClose, o
         return { trackId: Number(trackId), field };
       });
       const result = await libraryApi.applyEdits({ edits, exclude, label });
+      refreshSuggestions();
       onApplied?.(result);
     } catch (err) {
       setError(errorMessage(err, "The changes couldn't be saved"));
@@ -63,7 +64,7 @@ export function EditPreview({ title = "Review changes", edits, label, onClose, o
       footer={
         <>
           <span className="settings-hint">
-            Saved in WaveMint first; files are only changed when you write tags. You can undo this in History.
+            Saved into the songs&apos; files too (each one backed up first). You can undo this in History.
           </span>
           <button type="button" className="btn btn--ghost" onClick={onClose}>
             Cancel

@@ -103,6 +103,6 @@ test("playlist entries inherit the playlist's artist and album as fallbacks", ()
 });
 
 test("file names drop characters Windows doesn't allow", () => {
-  assert.equal(buildFinalFileName({ artist: 'AC/DC', title: 'What? "Now" <live>' }), "ACDC - What Now live.mp3");
-  assert.equal(buildFinalFileName({}), "Unknown Artist - Unknown Title.mp3");
+  assert.equal(buildFinalFileName({ artist: 'AC/DC', title: 'What? "Now" <live>' }), "ACDC - What Now live.m4a");
+  assert.equal(buildFinalFileName({}), "Unknown Artist - Unknown Title.m4a");
 });

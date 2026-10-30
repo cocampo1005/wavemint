@@ -4,6 +4,7 @@ import { HeartIcon, MoreIcon, PauseIcon, PlayIcon, WarningIcon } from "./icons";
 import { errorMessage, libraryApi } from "./useLibrary";
 import { Artwork } from "./Artwork";
 
+const scrollPositions = new Map();
 const ROW_HEIGHT = 46;
 const PAGE_SIZE = 200;
 const OVERSCAN = 12;
@@ -18,6 +19,8 @@ const ROW_PADDING = 12;
 // Spare room goes to an empty filler before the favorite and ⋯ buttons, so
 // no column grows or shrinks on its own.
 const TRACK_COLUMNS = [
+  // Only where the caller asks for it (an album's track list).
+  { key: "track", label: "#", sort: "track", align: "end", width: 44, min: 36, optional: true },
   { key: "title", label: "Title", sort: "title", width: 200, min: 120 },
   { key: "artist", label: "Artist", sort: "artist", width: 124, min: 80 },
   { key: "album", label: "Album", sort: "album", width: 124, min: 80 },
@@ -43,14 +46,19 @@ function saveWidths(widths) {
   }
 }
 
-function StatusBadges({ row, lowBitrate }) {
+const WRITABLE_CODECS = new Set(["mp3", "aac", "alac", "flac"]);
+
+/**
+ * Only conditions that need the user: a missing or unreadable file, and an
+ * edit that couldn't be saved into a file WaveMint may write. Versions,
+ * bitrates and other file facts belong to the song panel and the
+ * maintenance sections, not the music list.
+ */
+function StatusBadges({ row }) {
   const badges = [];
   if (row.file_status === "missing") badges.push(["missing", "File missing"]);
   else if (row.file_status === "unreadable") badges.push(["error", "Unreadable"]);
-  if (row.version_count > 1) badges.push(["info", `${row.version_count} versions`]);
-  // Edits to read-only sources wait for consolidation: not a warning.
-  if (row.tags_dirty) badges.push(row.source_read_only ? ["quiet", "Edited"] : ["warn", "Unsaved tags"]);
-  if (lowBitrate && !row.lossless && row.bitrate && row.bitrate < lowBitrate) badges.push(["quiet", "Low bitrate"]);
+  if (row.tags_dirty && !row.source_read_only && row.file_status === "ok" && WRITABLE_CODECS.has(row.codec)) badges.push(["warn", "Not saved to file"]);
   return badges.map(([tone, text]) => (
     <span key={text} className={`lib-badge is-${tone}`}>
       {text}
@@ -66,6 +74,7 @@ function StatusBadges({ row, lowBitrate }) {
  */
 export function TrackTable({
   query,
+  scrollKey = "tracks",
   revision = 0,
   selection,
   onSelectionChange,
@@ -76,9 +85,9 @@ export function TrackTable({
   onPlay,
   onToggleFavorite,
   onRowMenu,
-  lowBitrate = 160,
   emptyText = "No songs match.",
   hideColumns = [],
+  showColumns = [],
   onSort,
 }) {
   const containerRef = useRef(null);
@@ -104,8 +113,13 @@ export function TrackTable({
 
   useEffect(() => () => clearTimeout(activateTimer.current), []);
   const queryKey = JSON.stringify(query);
+  const positionKey = `${scrollKey}:${queryKey}`;
+  const pendingScroll = useRef(null);
 
-  const columns = useMemo(() => TRACK_COLUMNS.filter((column) => !hideColumns.includes(column.key)), [hideColumns]);
+  const columns = useMemo(
+    () => TRACK_COLUMNS.filter((column) => !hideColumns.includes(column.key) && (!column.optional || showColumns.includes(column.key))),
+    [hideColumns, showColumns],
+  );
   const widthOf = (column) => Math.max(column.min, widths[column.key] || column.width);
   const template = [
     ...LEAD.map((px) => `${px}px`),
@@ -140,7 +154,8 @@ export function TrackTable({
   pagesRef.current = pages;
   const loadedQuery = useRef(null);
 
-  // A new query starts over from the top. A data revision (an edit, a
+  // Restore each query's last position after search or navigation.
+  // A data revision (an edit, a
   // finished job) reloads the loaded pages in place, so the list keeps its
   // rows, its height and therefore its scroll position.
   useEffect(() => {
@@ -149,14 +164,24 @@ export function TrackTable({
       loadedQuery.current = queryKey;
       setPages(new Map());
       setTotal(null);
-      if (containerRef.current) containerRef.current.scrollTop = 0;
-      loadPage(0, generation.current);
+      const top = scrollPositions.get(positionKey) || 0;
+      pendingScroll.current = top;
+      setViewport((current) => ({ ...current, top }));
+      loadPage(Math.floor(top / ROW_HEIGHT / PAGE_SIZE), generation.current);
       return;
     }
     const loaded = [...pagesRef.current.keys()];
     for (const pageIndex of loaded.length ? loaded : [0]) loadPage(pageIndex, generation.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadPage, revision]);
+
+  useLayoutEffect(() => {
+    if (total !== null && pendingScroll.current !== null && containerRef.current) {
+      containerRef.current.scrollTop = pendingScroll.current;
+      pendingScroll.current = null;
+      setViewport((current) => ({ ...current, top: containerRef.current.scrollTop }));
+    }
+  }, [total]);
 
   useEffect(() => {
     if (total !== null) onTotalChange?.(total);
@@ -336,10 +361,11 @@ export function TrackTable({
                 <>
                   <span className="lib-cell__primary">{row.title || "Untitled"}</span>
                   <span className="lib-badges">
-                    <StatusBadges row={row} lowBitrate={lowBitrate} />
+                    <StatusBadges row={row} />
                   </span>
                 </>
               )}
+              {column.key === "track" && (row.track_no ? `${row.disc_total > 1 && row.disc_no ? `${row.disc_no}-` : ""}${row.track_no}` : "")}
               {column.key === "artist" && (row.artist || <em className="lib-empty">Unknown</em>)}
               {column.key === "album" && (row.album || <em className="lib-empty">No album</em>)}
               {column.key === "genre" && (row.genre || <em className="lib-empty">—</em>)}
@@ -434,6 +460,10 @@ export function TrackTable({
         onKeyDown={handleKeyDown}
         onScroll={(event) => {
           const element = event.currentTarget;
+          if (pendingScroll.current === null && loadedQuery.current === queryKey) {
+            scrollPositions.set(positionKey, element.scrollTop);
+            if (scrollPositions.size > 200) scrollPositions.delete(scrollPositions.keys().next().value);
+          }
           if (headRef.current) headRef.current.scrollLeft = element.scrollLeft;
           setViewport({ top: element.scrollTop, height: element.clientHeight });
         }}

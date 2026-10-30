@@ -276,7 +276,7 @@ test("tags are written safely: backup, verified tags, identical audio", needsAud
   assert.equal(tags.trackTotal, 10);
   assert.equal(await mediaForTests().audioStreamHash(shiverFile.path), audioBefore, "audio stream untouched");
   assert.equal(fs.readFileSync(shiverFile.path).subarray(0, 4).toString("latin1").slice(0, 3), "ID3");
-  assert.equal(fs.readFileSync(shiverFile.path)[3], 3, "ID3v2.3 for Apple compatibility");
+  assert.equal(fs.readFileSync(shiverFile.path)[3], 4, "existing ID3v2.4 frames retain their version");
 
   const spiesFile = db.prepare("SELECT f.* FROM files f JOIN tracks t ON t.active_file_id = f.id WHERE t.id = ?").get(spies);
   assert.equal(readTags(spiesFile.path).artworkHash, art.hash, "artwork embedded byte-for-byte");
@@ -332,7 +332,7 @@ test("a file changed outside WaveMint since the scan is not overwritten", needsA
   assert.match(db.prepare("SELECT error FROM operation_steps ORDER BY id DESC").get().error, /changed since it was scanned/);
 });
 
-test("an interrupted write is rolled back at the next start", needsAudio, async (t) => {
+for (const numbered of [false, true]) test(`an interrupted write is rolled back at the next start (${numbered ? "numbered" : "legacy"} old copy)`, needsAudio, async (t) => {
   const { db, id } = await sampleLibrary(t, { writable: true });
   const { ops } = fileOpsFor(t, db);
   const shiver = id("Shiver");
@@ -342,14 +342,17 @@ test("an interrupted write is rolled back at the next start", needsAudio, async 
   // Simulate a crash in the middle of the swap: original renamed away, the
   // staged copy not yet in place.
   const operationId = startOperation(db, { kind: "tag-write", label: "Write tags" });
-  addStep(db, operationId, { action: "write-tags", fileId: file.id, trackId: shiver, targetPath: file.path, stagedPath: siblingPath(file.path, "wmtmp") });
+  const old = siblingPath(file.path, numbered ? "wmold (2)" : "wmold");
+  if (numbered) fs.writeFileSync(siblingPath(file.path, "wmold"), "previous retained copy");
+  addStep(db, operationId, { action: "write-tags", fileId: file.id, trackId: shiver, targetPath: file.path, stagedPath: siblingPath(file.path, "wmtmp"), details: numbered ? { oldPath: old } : undefined });
   fs.copyFileSync(file.path, siblingPath(file.path, "wmtmp"));
-  fs.renameSync(file.path, siblingPath(file.path, "wmold"));
+  fs.renameSync(file.path, old);
 
   const report = ops.recover();
   assert.equal(report.length, 1);
   assert.deepEqual(fs.readFileSync(file.path), original, "the original is back");
-  assert.equal(fs.existsSync(siblingPath(file.path, "wmold")), false);
+  assert.equal(fs.existsSync(old), false);
+  if (numbered) assert.equal(fs.readFileSync(siblingPath(file.path, "wmold"), "utf8"), "previous retained copy");
   assert.equal(fs.existsSync(siblingPath(file.path, "wmtmp")), false);
   assert.equal(db.prepare("SELECT status FROM operations WHERE id = ?").get(operationId).status, "interrupted");
 });

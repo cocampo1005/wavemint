@@ -1,12 +1,12 @@
-// One song from a URL to a finished, tagged MP3:
+// One song from a URL to a finished, tagged M4A:
 //   yt-dlp download (extraction.cjs: retries, rate limits, cancellation)
 //   → final metadata (the user's edits + the full extraction's details)
 //   → cover image (artwork.cjs)
-//   → ID3v2.3 tags and cover written by FFmpeg (stream copy, no re-encoding)
+//   → Container metadata and cover written by FFmpeg (stream copy, no re-encoding)
 //   → the finished file moved into the folder the caller chose.
 //
 // Each extraction works in its own private folder under %TEMP%\WaveMint, so
-// half-finished files never reach the library; only the finished MP3 leaves
+// half-finished files never reach the library; only the finished M4A leaves
 // it (outputFiles.cjs).
 
 const fs = require("fs");
@@ -14,15 +14,16 @@ const path = require("path");
 const { normalizeArtworkMode } = require("./artwork.cjs");
 const { CATEGORIES, ExtractionError } = require("./errors.cjs");
 const { moveIntoOutputFolder } = require("./outputFiles.cjs");
-const { buildFinalFileName, getArtworkThumbnailCandidates, normalizeMetadataText, resolveFinalMetadata } = require("./youtubeMetadata.cjs");
+const { buildFinalFileName, getArtworkThumbnailCandidates, getSquareVideoSource, normalizeMetadataText, resolveFinalMetadata } = require("./youtubeMetadata.cjs");
 
 const WORK_FOLDER_PREFIX = "wavemint-temp-";
 const STALE_WORK_FOLDER_MS = 24 * 60 * 60 * 1000;
 
-/** FFmpeg arguments that tag an MP3 (and embed `cover` if given) without re-encoding. */
+/** FFmpeg arguments that tag an M4A (and embed `cover` if given) without re-encoding. */
 function buildTaggingArgs({ input, cover = null, output, metadata }) {
+  const containerArgs = path.extname(output).toLowerCase() === ".mp3" ? ["-id3v2_version", "3"] : ["-movflags", "+faststart"];
   const tags = ["title", "artist", "album", "genre"].flatMap((field) => ["-metadata", `${field}=${metadata[field] || ""}`]);
-  if (!cover) return ["-y", "-i", input, "-map", "0:a", "-c:a", "copy", "-id3v2_version", "3", ...tags, output];
+  if (!cover) return ["-y", "-i", input, "-map", "0:a", "-c:a", "copy", ...containerArgs, ...tags, output];
   return [
     "-y",
     "-i",
@@ -39,8 +40,7 @@ function buildTaggingArgs({ input, cover = null, output, metadata }) {
     "copy",
     "-disposition:v",
     "attached_pic",
-    "-id3v2_version",
-    "3",
+    ...containerArgs,
     ...tags,
     "-metadata:s:v",
     "title=Album cover",
@@ -112,8 +112,8 @@ function createSongExtractor({ extraction, artwork, workRoot, diagnostics, descr
     const baseName = `${WORK_FOLDER_PREFIX}${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
     const workFolder = path.join(workRoot, baseName);
     fs.mkdirSync(workFolder, { recursive: true });
-    const downloaded = path.join(workFolder, `${baseName}.mp3`);
-    const tagged = path.join(workFolder, `${baseName}-tagged.mp3`);
+    const downloaded = path.join(workFolder, `${baseName}.m4a`);
+    const tagged = path.join(workFolder, `${baseName}-tagged.m4a`);
     const title = normalizeMetadataText(metadata.title) || "Track";
     const progress = (status) => onProgress({ title, ...status });
 
@@ -129,7 +129,7 @@ function createSongExtractor({ extraction, artwork, workRoot, diagnostics, descr
         },
       });
       if (!fs.existsSync(downloaded)) {
-        throw postProcessingError("WaveMint downloaded the audio but the MP3 file wasn't created. Try again.", new Error("Temporary MP3 file was not created"), url);
+        throw postProcessingError("WaveMint downloaded the audio but the M4A file wasn't created. Try again.", new Error("Temporary M4A file was not created"), url);
       }
 
       // --write-info-json carries the details of the same full extraction
@@ -144,6 +144,10 @@ function createSongExtractor({ extraction, artwork, workRoot, diagnostics, descr
           mode: normalizeArtworkMode(artworkMode),
           customFilePath,
           thumbnailCandidates: getArtworkThumbnailCandidates(info, thumbnail),
+          // Square artwork: the preview the user saw is reused; without one,
+          // a square video can provide a still (artwork.cjs).
+          squareKey: thumbnail,
+          video: getSquareVideoSource(info),
           folder: workFolder,
           baseName,
           signal,
@@ -156,14 +160,14 @@ function createSongExtractor({ extraction, artwork, workRoot, diagnostics, descr
       try {
         await extraction.runChecked("ffmpeg", buildTaggingArgs({ input: downloaded, cover, output: tagged, metadata: finalMetadata }), { signal });
       } catch (error) {
-        throw postProcessingError("WaveMint couldn't write the song details and cover art into the MP3. Try again.", error, url);
+        throw postProcessingError("WaveMint couldn't write the song details and cover art into the M4A. Try again.", error, url);
       }
 
       const filePath = uniqueFilePath(path.join(outputFolder, buildFinalFileName(finalMetadata)));
       try {
         moveIntoOutputFolder(tagged, filePath);
       } catch (error) {
-        throw postProcessingError("WaveMint couldn't save the finished MP3. Check that there is free space on the drive, then try again.", error, url);
+        throw postProcessingError("WaveMint couldn't save the finished M4A. Check that there is free space on the drive, then try again.", error, url);
       }
       return { filePath, metadata: finalMetadata, info };
     } finally {

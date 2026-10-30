@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { AudioEditor } from "../editor/AudioEditor";
 import { usePlayer } from "../player/usePlayer";
+import { useToast } from "../toasts/useToast";
 import { AlbumIdentifyDialog } from "./AlbumIdentifyDialog";
-import { AlbumHeader, AlbumsView, ArtistsView } from "./CollectionViews";
+import { AlbumDetail, AlbumsView, ArtistDetail, ArtistsView, Breadcrumbs, GenreDetail, GenresView } from "./CollectionViews";
 import { AlbumEditor, WriteTagsDialog } from "./Editors";
 import { pluralize } from "./format";
 import { GenreManager } from "./GenreManager";
@@ -23,11 +24,11 @@ import {
   PlusIcon,
   QueueIcon,
   TrashIcon,
-  WarningIcon,
   WaveformIcon,
 } from "./icons";
 import { ManagedView } from "./ManagedView";
 import { MergeView } from "./MergeView";
+import { FileHealthView } from "./FileHealthView";
 import { EmptyLibrary, OverviewView } from "./OverviewView";
 import { QualityView } from "./QualityView";
 import { ReviewView } from "./ReviewView";
@@ -47,6 +48,7 @@ const TITLES = {
   artists: "Artists",
   genres: "Genres",
   review: "Review",
+  health: "File Health",
   merge: "Merge & Duplicates",
   quality: "Quality & Upgrades",
   identify: "Identify",
@@ -77,7 +79,6 @@ const JOB_LABELS = {
  * owns `route` and the background job state.
  */
 export function LibraryView({ route, onNavigate: navigate, jobsState, status, onAddMusic }) {
-  const [error, setError] = useState("");
   const [writeTags, setWriteTags] = useState(null); // { trackIds } | null
   const [editAlbum, setEditAlbum] = useState(null);
   const [upgrade, setUpgrade] = useState(null); // { trackId, start } | null
@@ -86,7 +87,9 @@ export function LibraryView({ route, onNavigate: navigate, jobsState, status, on
   const [editAudio, setEditAudio] = useState(null); // trackId | null
   const [menu, setMenu] = useState(null); // { x, y, title, items }
   const [deleteRequest, setDeleteRequest] = useState(null); // trackIds | null
-  const [notice, setNotice] = useState(null); // { text, undoId? }
+  // Results and errors are toasts, so the page never shifts when one shows.
+  const { notify } = useToast();
+  const setError = useCallback((message) => message && notify({ tone: "error", text: message }), [notify]);
   const { jobs, running, revision, bump } = jobsState;
   const player = usePlayer();
   const playing = player.playing;
@@ -98,7 +101,6 @@ export function LibraryView({ route, onNavigate: navigate, jobsState, status, on
   const failedAnalysis = lastJob("merge-analysis");
 
   const addSource = async (role) => {
-    setError("");
     try {
       const added = await libraryApi.addSourceFromDialog({ role, scan: true });
       if (added) {
@@ -109,12 +111,6 @@ export function LibraryView({ route, onNavigate: navigate, jobsState, status, on
       setError(errorMessage(err, "The folder couldn't be added"));
     }
   };
-
-  useEffect(() => {
-    if (!notice) return undefined;
-    const timer = setTimeout(() => setNotice(null), 10000);
-    return () => clearTimeout(timer);
-  }, [notice]);
 
   const cancelJob = (id) => libraryApi.cancelJob({ id }).catch(() => {});
   const fail = (fallback) => (err) => setError(errorMessage(err, fallback));
@@ -138,9 +134,9 @@ export function LibraryView({ route, onNavigate: navigate, jobsState, status, on
       const result = await libraryApi.removeFromLibrary({ trackIds });
       bump();
       if (result.removed) {
-        setNotice({
+        notify({
           text: `Removed ${result.removed === 1 && rows?.[0] ? `"${rows[0].title || "Untitled"}"` : pluralize(result.removed, "song")} from your library. The ${result.removed === 1 ? "file wasn't" : "files weren't"} changed.`,
-          undoId: result.operationId,
+          action: undoAction(result.operationId),
         });
       }
     } catch (err) {
@@ -148,23 +144,22 @@ export function LibraryView({ route, onNavigate: navigate, jobsState, status, on
     }
   };
 
-  const undoNotice = async () => {
-    const id = notice?.undoId;
-    setNotice(null);
+  const undo = async (id) => {
     try {
       await libraryApi.undoOperation({ id });
       bump();
-      setNotice({ text: "Restored." });
+      notify({ text: "Restored." });
     } catch (err) {
       setError(errorMessage(err, "That couldn't be undone"));
     }
   };
+  const undoAction = (id) => (id ? { label: "Undo", onClick: () => undo(id) } : null);
 
   const addToPlaylist = async (playlist, trackIds) => {
     try {
       const result = await libraryApi.addToPlaylist({ id: playlist.id, trackIds });
       bump();
-      setNotice({ text: `Added ${pluralize(result.added, "song")} to "${playlist.name}".` });
+      notify({ text: `Added ${pluralize(result.added, "song")} to "${playlist.name}".` });
     } catch (err) {
       setError(errorMessage(err, "The songs couldn't be added to the playlist"));
     }
@@ -174,7 +169,7 @@ export function LibraryView({ route, onNavigate: navigate, jobsState, status, on
     try {
       const created = await libraryApi.createPlaylist({ name: "New Playlist", kind: "manual", trackIds });
       bump();
-      setNotice({ text: `Created "${created.name}" with ${pluralize(trackIds.length, "song")}. Rename it in Playlists.` });
+      notify({ text: `Created "${created.name}" with ${pluralize(trackIds.length, "song")}. Rename it in Playlists.` });
     } catch (err) {
       setError(errorMessage(err, "The playlist couldn't be created"));
     }
@@ -238,16 +233,30 @@ export function LibraryView({ route, onNavigate: navigate, jobsState, status, on
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [player],
   );
-  const openAlbum = (releaseId) => navigate("album", { releaseId });
+  const { view, scope } = route;
+
+  // Artists, Albums and Genres keep their own place: opening an album or an
+  // artist from inside one of them stays in that tab (Genres › Rock › Album).
+  const openAlbum = (releaseId, title = "") => {
+    if (view === "artists" && scope.artist) navigate("artists", { artist: scope.artist, artistName: scope.artistName, releaseId, albumTitle: title });
+    else if (view === "genres" && scope.genre !== undefined) navigate("genres", { genre: scope.genre, releaseId, albumTitle: title });
+    else navigate("albums", { releaseId, albumTitle: title });
+  };
+  const openArtist = (key, name = "") => {
+    if (!key) return;
+    if (view === "genres" && scope.genre !== undefined) navigate("genres", { genre: scope.genre, artist: key, artistName: name });
+    else navigate("artists", { artist: key, artistName: name });
+  };
+  const openGenre = (name) => navigate("genres", { genre: name });
   const openTrack = (trackId) => navigate("songs", { ids: [trackId], activeId: trackId, chip: "Selected song" });
 
   const browserProps = {
     revision,
     onPlayFile: (track, file) => player.playFile(track, file),
     onOpenAlbum: openAlbum,
+    onOpenArtist: openArtist,
     onError: setError,
     onChanged: bump,
-    onWriteTags: (trackIds) => setWriteTags({ trackIds }),
     onUpgrade: (trackId, start = null) => setUpgrade({ trackId, start }),
     onIdentify: (trackId) => setIdentify(trackId),
     onEditAudio: editAudioFor,
@@ -257,29 +266,36 @@ export function LibraryView({ route, onNavigate: navigate, jobsState, status, on
       selection.size > 0 ? <AddToPlaylist trackIds={[...selection]} onDone={() => bump()} onError={setError} /> : null,
   };
 
-  const { view, scope } = route;
   let content = null;
+  const albumDetail = (crumbs) => (
+    <AlbumDetail
+      releaseId={scope.releaseId}
+      crumbs={[...crumbs, { label: scope.albumTitle || "Album" }]}
+      revision={revision}
+      browserProps={browserProps}
+      onEditAlbum={setEditAlbum}
+      onIdentifyAlbum={(album) => setIdentifyAlbum(album.id)}
+      onOpenArtist={view === "albums" ? openArtist : undefined}
+    />
+  );
 
   if (view === "overview") {
     content = <OverviewView revision={revision} onNavigate={navigate} onAddMusic={onAddMusic} onAddSource={addSource} onOpenTrack={openTrack} onTrackMenu={openTrackMenu} />;
   } else if (view === "songs") {
     const filters = {};
     if (scope.sourceId) filters.sourceId = scope.sourceId;
-    if (scope.artist !== undefined) filters.artist = scope.artist;
-    if (scope.genre !== undefined) filters.genre = scope.genre;
     if (scope.ids) filters.ids = scope.ids;
     content = (
       <SongBrowser
         key={JSON.stringify(scope)}
         {...browserProps}
         baseFilters={filters}
-        initialQuick={scope.quick || []}
         initialActiveId={scope.activeId}
         defaultSort={scope.sort || "artist"}
         defaultDirection={scope.direction || "asc"}
         explicitSort={!!scope.sort}
         sortStorageKey={Object.keys(filters).length ? null : "songs"}
-        contextLabel={scope.chip && !scope.chip.startsWith("Newest") ? scope.chip.replace(/^(Artist|Genre): /, "") : "Songs"}
+        contextLabel={scope.chip && !scope.chip.startsWith("Newest") ? scope.chip : "Songs"}
         chips={scope.chip ? [scope.chip] : []}
         onClearScope={() => navigate("songs")}
         emptyState={Object.keys(filters).length || status?.tracks !== 0 ? null : <EmptyLibrary onAddMusic={onAddMusic} onAddSource={addSource} />}
@@ -291,6 +307,7 @@ export function LibraryView({ route, onNavigate: navigate, jobsState, status, on
         key="favorites"
         {...browserProps}
         baseFilters={{ favorite: true }}
+        facets={["artists", "albums", "genres", "decades"]}
         contextLabel="Favorites"
         sortStorageKey="favorites"
         defaultSort="added"
@@ -298,28 +315,79 @@ export function LibraryView({ route, onNavigate: navigate, jobsState, status, on
         emptyState={<span>No favorites yet. Click the heart on any song to add it here.</span>}
       />
     );
-  } else if (view === "album") {
-    content = (
-      <div className="lib-album-view">
-        <AlbumHeader releaseId={scope.releaseId} revision={revision} onEdit={setEditAlbum} onIdentify={(album) => setIdentifyAlbum(album.id)} />
-        <SongBrowser key={scope.releaseId} {...browserProps} baseFilters={{ releaseId: scope.releaseId }} contextLabel="this album" defaultSort="track" explicitSort hideColumns={["album"]} />
-      </div>
-    );
   } else if (view === "albums") {
-    content = <AlbumsView revision={revision} onOpenAlbum={openAlbum} />;
+    const toAlbums = () => navigate("albums");
+    content = scope.releaseId ? albumDetail([{ label: "Albums", onClick: toAlbums }]) : <AlbumsView revision={revision} onOpenAlbum={openAlbum} />;
   } else if (view === "artists") {
-    content = <ArtistsView revision={revision} onOpenArtist={(artist) => navigate("songs", { artist: artist.key, chip: `Artist: ${artist.name}`, sort: "album" })} />;
+    const toArtists = () => navigate("artists");
+    const artistCrumbs = [
+      { label: "Artists", onClick: toArtists },
+      { label: scope.artistName || "Artist", onClick: () => navigate("artists", { artist: scope.artist, artistName: scope.artistName }) },
+    ];
+    if (scope.artist && scope.releaseId) content = albumDetail(artistCrumbs);
+    else if (scope.artist) {
+      content = (
+        <ArtistDetail
+          key={scope.artist}
+          artistKey={scope.artist}
+          crumbs={artistCrumbs}
+          revision={revision}
+          browserProps={browserProps}
+          onOpenAlbum={openAlbum}
+          onOpenGenre={openGenre}
+        />
+      );
+    } else content = <ArtistsView revision={revision} onOpenArtist={(artist) => openArtist(artist.key, artist.name)} />;
   } else if (view === "genres") {
-    content = (
-      <GenreManager
-        revision={revision}
-        onChanged={bump}
-        onError={setError}
-        onOpenGenre={(name) => navigate("songs", { genre: name, chip: `Genre: ${name || "Unclassified"}` })}
-      />
-    );
+    const toGenres = () => navigate("genres");
+    const genreCrumbs = [
+      { label: "Genres", onClick: toGenres },
+      { label: scope.genre || "Unclassified", onClick: () => navigate("genres", { genre: scope.genre }) },
+    ];
+    if (scope.manage) {
+      content = (
+        <div className="lib-detail-view is-scroll">
+          <Breadcrumbs items={[{ label: "Genres", onClick: toGenres }, { label: "Manage genres" }]} />
+          <GenreManager revision={revision} onChanged={bump} onError={setError} onOpenGenre={openGenre} />
+        </div>
+      );
+    } else if (scope.genre !== undefined && scope.releaseId) content = albumDetail(genreCrumbs);
+    else if (scope.genre !== undefined && scope.artist) {
+      content = (
+        <ArtistDetail
+          key={`${scope.genre}:${scope.artist}`}
+          artistKey={scope.artist}
+          genre={scope.genre}
+          crumbs={[...genreCrumbs, { label: scope.artistName || "Artist" }]}
+          revision={revision}
+          browserProps={browserProps}
+          onOpenAlbum={openAlbum}
+        />
+      );
+    } else if (scope.genre !== undefined) {
+      content = (
+        <GenreDetail
+          key={scope.genre}
+          genre={scope.genre}
+          crumbs={[{ label: "Genres", onClick: toGenres }, { label: scope.genre || "Unclassified" }]}
+          revision={revision}
+          browserProps={browserProps}
+          onOpenArtist={(artist) => openArtist(artist.key, artist.name)}
+          onOpenAlbum={openAlbum}
+        />
+      );
+    } else {
+      content = (
+        <GenresView
+          revision={revision}
+          onOpenGenre={openGenre}
+          onManage={() => navigate("genres", { manage: true })}
+          onReviewUnclassified={() => navigate("review", { kind: "unclassified_genre" })}
+        />
+      );
+    }
   } else if (view === "review") {
-    content = <ReviewView revision={revision} onChanged={bump} onOpenTrack={openTrack} onOpenAlbum={openAlbum} onError={setError} />;
+    content = <ReviewView key={scope.kind || "all"} initialKind={scope.kind || ""} revision={revision} browserProps={browserProps} onChanged={bump} onOpenAlbum={openAlbum} onNavigate={navigate} onError={setError} />;
   } else if (view === "merge") {
     content = (
       <>
@@ -337,13 +405,27 @@ export function LibraryView({ route, onNavigate: navigate, jobsState, status, on
   } else if (view === "quality") {
     content = (
       <QualityView
+        key={scope.maxBitrate || "all"}
         revision={revision}
+        initialView={scope.maxBitrate ? "all" : undefined}
+        initialMaxBitrate={scope.maxBitrate ? String(scope.maxBitrate) : ""}
         checking={running.some((job) => job.kind === "quality-check")}
         playing={playing}
+        browserProps={browserProps}
         onPlay={(row) => player.playTrack(row)}
-        onOpenTrack={openTrack}
         onUpgrade={(trackId) => setUpgrade({ trackId, start: null })}
         onChanged={bump}
+        onError={setError}
+      />
+    );
+  } else if (view === "health") {
+    content = (
+      <FileHealthView
+        revision={revision}
+        browserProps={browserProps}
+        scanning={!!scanJob}
+        onNavigate={navigate}
+        onRemove={removeFromLibrary}
         onError={setError}
       />
     );
@@ -396,11 +478,14 @@ export function LibraryView({ route, onNavigate: navigate, jobsState, status, on
               </button>
             </div>
           )}
+          {/* Saving writes into the files; this only shows when some couldn't be written (or are waiting for a task). */}
           {!otherJob && status?.unsavedWritable > 0 && (
             <div className="lib-unsaved" role="status">
-              <span>{pluralize(status.unsavedWritable, "song")} with changes not yet written to files</span>
+              <span>
+                {pluralize(status.unsavedWritable, "song")} not yet saved to {status.unsavedWritable === 1 ? "its file" : "their files"}
+              </span>
               <button type="button" className="btn btn--secondary btn--sm" onClick={() => setWriteTags({ trackIds: null })}>
-                Write Tags…
+                Retry…
               </button>
             </div>
           )}
@@ -408,30 +493,6 @@ export function LibraryView({ route, onNavigate: navigate, jobsState, status, on
             <PlusIcon size={16} /> Add Music
           </button>
         </div>
-
-        {error && (
-          <div className="alert lib-alert" role="alert">
-            <WarningIcon size={18} />
-            <span className="alert__text">{error}</span>
-            <button type="button" className="btn btn--ghost btn--icon" onClick={() => setError("")} aria-label="Dismiss">
-              <CloseIcon size={14} />
-            </button>
-          </div>
-        )}
-
-        {notice && (
-          <div className="lib-notice" role="status">
-            <span className="lib-notice__text">{notice.text}</span>
-            {notice.undoId && (
-              <button type="button" className="btn btn--secondary btn--sm" onClick={undoNotice}>
-                Undo
-              </button>
-            )}
-            <button type="button" className="btn btn--ghost btn--icon" onClick={() => setNotice(null)} aria-label="Dismiss">
-              <CloseIcon size={14} />
-            </button>
-          </div>
-        )}
 
         <div className="lib-content__body">{content}</div>
       </div>
@@ -445,7 +506,7 @@ export function LibraryView({ route, onNavigate: navigate, jobsState, status, on
             setDeleteRequest(null);
             bump();
             const failed = result.failures?.length ? ` ${pluralize(result.failures.length, "file")} couldn't be moved: ${result.failures[0].error}` : "";
-            setNotice({ text: `Moved ${pluralize(result.deleted, "song")} to the Recycle Bin.${failed}` });
+            notify({ tone: failed ? "warning" : "success", text: `Moved ${pluralize(result.deleted, "song")} to the Recycle Bin.${failed}` });
           }}
         />
       )}
@@ -490,9 +551,9 @@ export function LibraryView({ route, onNavigate: navigate, jobsState, status, on
             bump();
           }}
           onDone={(result, track) =>
-            setNotice({
+            notify({
               text: `Upgraded "${track?.title || "Untitled"}".${result?.mode === "copy" && result.target ? ` The new file is ${result.target}.` : ""}`,
-              undoId: result?.operationId,
+              action: undoAction(result?.operationId),
             })
           }
         />

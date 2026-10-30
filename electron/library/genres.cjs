@@ -101,6 +101,62 @@ function adoptLabels(db, { labels } = {}) {
   return { added };
 }
 
+const labelKey = (value) => String(value ?? "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+
+/**
+ * Adds the genres a user saved on songs to the taxonomy, so every picker
+ * offers them from now on. Called only after a save succeeded. A name the
+ * taxonomy already has (ignoring case and spacing) keeps its spelling there,
+ * aliases stay aliases, and each name is added once however many songs got
+ * it. With `operationId`, the genres created are noted on that operation so
+ * undoing it can take them back (releaseCreated).
+ */
+function registerLabels(db, labels, { operationId = null } = {}) {
+  const created = [];
+  transaction(db, () => {
+    const known = new Set(db.prepare("SELECT name FROM genres").all().map((row) => labelKey(row.name)));
+    for (const label of labels) {
+      const key = labelKey(label);
+      if (!key || known.has(key)) continue;
+      known.add(key);
+      const name = cleanName(label);
+      if (db.prepare("SELECT 1 FROM genre_aliases WHERE alias_key = ?").get(normalizeKey(name))) continue;
+      created.push(createGenre(db, { name }).id);
+    }
+    if (created.length && operationId) {
+      db.prepare("UPDATE operations SET summary = json_set(COALESCE(summary, '{}'), '$.createdGenres', json(?)) WHERE id = ?").run(JSON.stringify(created), Number(operationId));
+    }
+  });
+  return { created };
+}
+
+/**
+ * After an operation is undone: removes the genres it added to the taxonomy
+ * (registerLabels) that nothing uses anymore (no song, sub-genre, alias or
+ * rule). Genres something still uses stay.
+ */
+function releaseCreated(db, operationId) {
+  const operation = db.prepare("SELECT summary FROM operations WHERE id = ?").get(Number(operationId));
+  const ids = parseJson(operation?.summary, {})?.createdGenres;
+  if (!Array.isArray(ids) || !ids.length) return { removed: 0 };
+  let removed = 0;
+  transaction(db, () => {
+    for (const id of ids) {
+      const genre = db.prepare("SELECT id, name FROM genres WHERE id = ?").get(Number(id));
+      if (!genre) continue;
+      const used =
+        db.prepare("SELECT 1 FROM tracks WHERE genre = ? COLLATE NOCASE LIMIT 1").get(genre.name) ||
+        db.prepare("SELECT 1 FROM genres WHERE parent_id = ? LIMIT 1").get(genre.id) ||
+        db.prepare("SELECT 1 FROM genre_aliases WHERE genre_id = ? LIMIT 1").get(genre.id) ||
+        db.prepare("SELECT 1 FROM genre_rules WHERE genre_id = ? LIMIT 1").get(genre.id);
+      if (used) continue;
+      db.prepare("DELETE FROM genres WHERE id = ?").run(genre.id);
+      removed += 1;
+    }
+  });
+  return { removed };
+}
+
 function setParent(db, { id, parentId }) {
   const genre = getGenre(db, id);
   if (parentId) {
@@ -360,6 +416,8 @@ module.exports = {
   listTaxonomy,
   mergeGenres,
   previewRules,
+  registerLabels,
+  releaseCreated,
   removeAlias,
   removeRule,
   renameGenre,

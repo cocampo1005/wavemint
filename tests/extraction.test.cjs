@@ -110,9 +110,9 @@ test("analysis arguments: flat playlists, single videos, pacing, URL after --", 
   assert.deepEqual(hostile.slice(-2), ["--", "--exec=calc"]);
 });
 
-test("download arguments: MP3, info JSON, pacing, and the mweb fallback client", () => {
+test("download arguments: native AAC/M4A, info JSON, pacing, and the mweb fallback client", () => {
   const args = buildDownloadArgs({ url: "https://youtu.be/abc", outputTemplate: "C:\\Music\\t.%(ext)s" });
-  for (const expected of ["--no-update", "--write-info-json", "-x", "mp3", "--no-playlist", "--newline"]) {
+  for (const expected of ["--no-update", "--write-info-json", "-f", "m4a", "--no-playlist", "--newline"]) {
     assert.ok(args.includes(expected), expected);
   }
   assert.deepEqual(args.slice(args.indexOf("--sleep-interval"), args.indexOf("--sleep-interval") + 4), [
@@ -121,6 +121,8 @@ test("download arguments: MP3, info JSON, pacing, and the mweb fallback client",
     "--max-sleep-interval",
     "10",
   ]);
+  assert.ok(!args.includes("--audio-format") && !args.includes("--audio-quality"));
+  assert.equal(args[args.indexOf("-f") + 1], "bestaudio[ext=m4a][acodec^=mp4a]/bestaudio[acodec^=aac]");
   assert.ok(!args.includes("--extractor-args"));
   assert.deepEqual(args.slice(-2), ["--", "https://youtu.be/abc"]);
 

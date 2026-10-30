@@ -16,7 +16,7 @@ const { normalizeArtworkMode } = require("../artwork.cjs");
 const { CATEGORIES, ExtractionError } = require("../errors.cjs");
 const { validateMediaUrl } = require("../extraction.cjs");
 const { normalizeRequestId } = require("../operationRegistry.cjs");
-const { buildAnalysisResult, isUsableThumbnailUrl } = require("../youtubeMetadata.cjs");
+const { buildAnalysisResult, getSquareVideoSource, isUsableThumbnailUrl } = require("../youtubeMetadata.cjs");
 
 // Analysis results (titles, artwork URLs, editable metadata; never media
 // URLs or cookies) are reused for a while, so analyzing the same link again
@@ -35,6 +35,9 @@ function registerExtractionHandlers({ ipc, dialog, BrowserWindow, extraction, ar
   const analysisCache = new Map();
   const approvedArtworkFiles = new Set();
   const knownThumbnails = new Set();
+  // Square videos found by an analysis (thumbnail -> stream for a still, see
+  // getSquareVideoSource). Stream URLs never leave the main process.
+  const squareVideos = new Map();
 
   const send = (sender, channel, data) => {
     if (sender && !sender.isDestroyed()) sender.send(channel, data);
@@ -100,6 +103,12 @@ function registerExtractionHandlers({ ipc, dialog, BrowserWindow, extraction, ar
       throw new ExtractionError({ category: CATEGORIES.EXTRACTOR_OUTDATED, message: "WaveMint couldn't read YouTube's response. Its YouTube extraction components may need an update." });
     }
     send(event.sender, "analyze-progress", { phase: "complete", requestId });
+    const squareVideo = analysis.isPlaylist ? null : getSquareVideoSource(parsed);
+    if (squareVideo && isUsableThumbnailUrl(analysis.thumbnail)) {
+      squareVideos.delete(analysis.thumbnail);
+      squareVideos.set(analysis.thumbnail, squareVideo);
+      while (squareVideos.size > ANALYSIS_CACHE_MAX_ENTRIES) squareVideos.delete(squareVideos.keys().next().value);
+    }
     writeCache(cacheKey, analysis);
     return rememberThumbnails(analysis);
   });
@@ -120,7 +129,7 @@ function registerExtractionHandlers({ ipc, dialog, BrowserWindow, extraction, ar
     if (!isUsableThumbnailUrl(thumbnail) || !isKnownThumbnail(thumbnail)) {
       throw new Error("No valid thumbnail was provided for the square preview");
     }
-    return { previewUrl: await artwork.squarePreview(thumbnail) };
+    return { previewUrl: await artwork.squarePreview(thumbnail, { video: squareVideos.get(thumbnail) || null }) };
   });
 
   /**

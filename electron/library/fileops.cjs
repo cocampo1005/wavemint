@@ -14,6 +14,10 @@
 // Each step is recorded in operation_steps. If WaveMint stops in the middle,
 // recover() puts the original back (or keeps the finished new file) and
 // removes temporary files. Undo restores the backups.
+//
+// Saving an edit writes it through (service.cjs, writeThrough): only the
+// changed fields are written, and a save within a day of an earlier one
+// reuses that save's backup of the same file instead of copying it again.
 
 const crypto = require("crypto");
 const fs = require("fs");
@@ -33,7 +37,7 @@ function sha256(filePath) {
     fs.createReadStream(filePath)
       .on("data", (chunk) => hash.update(chunk))
       .on("error", reject)
-      .on("end", () => resolve(hash.digest("hex")));
+      .on("close", () => resolve(hash.digest("hex")));
   });
 }
 
@@ -42,6 +46,26 @@ function moveFile(from, to) {
   if (fs.existsSync(to)) throw new Error(`"${path.basename(to)}" already exists; nothing was overwritten`);
   fs.mkdirSync(path.dirname(to), { recursive: true });
   fs.renameSync(from, to);
+}
+
+// Windows scanners and players can briefly deny renames even after our own
+// handles have closed. Retry only access/sharing errors, without overwriting
+// destinations or changing permissions. Keep the worker responsive while waiting.
+async function moveTagFile(from, to, validate = () => {}) {
+  const delays = [100, 200, 400, 800, 1000];
+  for (let attempt = 0; ; attempt += 1) {
+    validate();
+    try {
+      moveFile(from, to);
+      return;
+    } catch (error) {
+      if (!["EPERM", "EACCES", "EBUSY"].includes(error.code)) throw error;
+      if (attempt === delays.length) {
+        throw new Error(`Windows wouldn't allow replacing "${path.basename(from)}". The file may be in use or its folder may restrict changes. Close any player or file preview using this song, then try saving again.`, { cause: error });
+      }
+      await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
+    }
+  }
 }
 
 /** `target`, or "name (2).ext", "name (3).ext"… if it's taken. */
@@ -124,14 +148,38 @@ function createFileOps({ db, media, artStore, backupsRoot, logger = console }) {
     return { writable, blocked };
   }
 
-  async function writeOne(operationId, item, backupDir) {
+  /**
+   * A verified backup of this file made by an earlier save within
+   * `withinMs` that is still on disk, or null. Saving the same song again
+   * shortly after doesn't copy the whole file again: the earliest copy is the
+   * recovery point, and every later state is in the database's change log.
+   */
+  function recentBackup(fileId, withinMs) {
+    if (!withinMs) return null;
+    const since = new Date(Date.now() - withinMs).toISOString();
+    const rows = db
+      .prepare(
+        `SELECT s.backup_path, s.details FROM operation_steps s JOIN operations o ON o.id = s.operation_id
+         WHERE s.file_id = ? AND s.action = 'write-tags' AND s.state = 'done' AND o.created_at >= ?
+           AND json_extract(s.details, '$.backupReused') IS NULL
+         ORDER BY s.id DESC LIMIT 5`,
+      )
+      .all(fileId, since);
+    return rows.find((row) => row.backup_path && fs.existsSync(row.backup_path))?.backup_path || null;
+  }
+
+  async function writeOne(operationId, item, backupDir, { reuseBackupMs = 0 } = {}) {
     const file = db
       .prepare("SELECT f.*, s.read_only FROM files f JOIN sources s ON s.id = f.source_id WHERE f.id = ?")
       .get(item.fileId);
     const track = db.prepare("SELECT * FROM tracks WHERE id = ?").get(item.trackId);
     const target = file.path;
     const staged = siblingPath(target, "wmtmp");
-    const backup = path.join(backupDir, `${file.id}-${path.basename(target)}`);
+    // A previous save may have left a copy held open by a Windows player.
+    // Never require deleting that copy to save again, or overwrite it.
+    const old = freePath(siblingPath(target, "wmold"));
+    const reused = recentBackup(file.id, reuseBackupMs);
+    const backup = reused || path.join(backupDir, `${file.id}-${path.basename(target)}`);
     const stepId = addStep(db, operationId, {
       action: "write-tags",
       fileId: file.id,
@@ -139,10 +187,12 @@ function createFileOps({ db, media, artStore, backupsRoot, logger = console }) {
       targetPath: target,
       stagedPath: staged,
       backupPath: backup,
+      details: { oldPath: old },
     });
 
     try {
-      // 1. Precheck.
+      // 1. Precheck: the song still uses this file, and it's unchanged since the scan.
+      if (track.active_file_id !== file.id) throw new Error("The song's file changed while saving; nothing was written");
       if (file.read_only) throw new Error("The source is read-only");
       if (!canWriteTags(target)) throw new Error("This format isn't edited by WaveMint");
       const stat = fs.statSync(target);
@@ -150,19 +200,24 @@ function createFileOps({ db, media, artStore, backupsRoot, logger = console }) {
         throw new Error("The file changed since it was scanned. Rescan the source, then try again.");
       }
 
-      // 2. Verified backup.
-      fs.mkdirSync(backupDir, { recursive: true });
-      fs.copyFileSync(target, backup, fs.constants.COPYFILE_EXCL);
+      // 2. Verified backup (or a recent one of the same file, still on disk).
       const originalHash = await sha256(target);
-      if ((await sha256(backup)) !== originalHash) throw new Error("The backup copy didn't match the original");
-      updateStep(db, stepId, { state: "backed_up", details: { originalHash } });
+      if (!reused) {
+        fs.mkdirSync(backupDir, { recursive: true });
+        fs.copyFileSync(target, backup, fs.constants.COPYFILE_EXCL);
+        if ((await sha256(backup)) !== originalHash) throw new Error("The backup copy didn't match the original");
+      }
+      updateStep(db, stepId, { state: "backed_up", details: { oldPath: old, originalHash, ...(reused ? { backupReused: true } : {}) } });
 
-      // 3. Stage and write.
+      // 3. Stage and write. Only the fields that differ are written, so
+      // everything else in the file's tags (extra genres, other frames) stays
+      // exactly as it was.
       fs.rmSync(staged, { force: true });
       fs.copyFileSync(target, staged);
+      const differences = new Set(tagDifferences(track, parseJson(file.tag_snapshot, {})).map((change) => change.field));
       const fields = {};
-      for (const [field, def] of TAG_FIELDS) fields[field] = track[def.column];
-      if (track.artwork_hash) {
+      for (const [field, def] of TAG_FIELDS) if (differences.has(field)) fields[field] = track[def.column];
+      if (track.artwork_hash && differences.has("artwork")) {
         const art = artStore.read(track.artwork_hash, db);
         if (!art) throw new Error("The chosen artwork image is no longer available");
         fields.artwork = art;
@@ -179,23 +234,38 @@ function createFileOps({ db, media, artStore, backupsRoot, logger = console }) {
       updateStep(db, stepId, { state: "verified" });
 
       // 5. Swap with a way back at every point.
-      const old = siblingPath(target, "wmold");
-      fs.rmSync(old, { force: true });
-      fs.renameSync(target, old);
+      await moveTagFile(target, old, () => {
+        const current = fs.statSync(target);
+        if (current.size !== stat.size || current.mtimeMs !== stat.mtimeMs) {
+          throw new Error("The file changed while saving. Rescan the source, then try again.");
+        }
+      });
       try {
-        fs.renameSync(staged, target);
+        await moveTagFile(staged, target);
       } catch (error) {
-        fs.renameSync(old, target);
+        await moveTagFile(old, target);
         throw error;
       }
-      fs.rmSync(old, { force: true });
+      // Windows players/virus scanners can keep the renamed file open.
+      // Cleanup failure must not roll back the database after a successful swap.
+      try { fs.rmSync(old, { force: true }); } catch (error) {
+        logger.warn(`[library] Old tag copy retained for cleanup: ${error.code}`);
+      }
       const newHash = await sha256(target);
-      updateStep(db, stepId, { state: "swapped", details: { originalHash, newHash } });
+      updateStep(db, stepId, { state: "swapped", details: { oldPath: old, originalHash, newHash, ...(reused ? { backupReused: true } : {}) } });
 
-      // 6. Database.
+      // 6. Database. The audio stream is verified unchanged, so a quality
+      // check of the file stays valid for the new size and time.
       const newStat = fs.statSync(target);
       const snapshot = readTags(target, { size: newStat.size });
       transaction(db, () => {
+        db.prepare("UPDATE quality_checks SET size = ?, mtime_ms = ? WHERE file_id = ? AND size = ? AND mtime_ms = ?").run(
+          newStat.size,
+          Math.round(newStat.mtimeMs),
+          file.id,
+          file.size,
+          Math.round(file.mtime_ms),
+        );
         db.prepare(
           `UPDATE files SET size = ?, mtime_ms = ?, quick_sig = ?, content_hash = ?, audio_hash = ?, tag_snapshot = ?,
              artwork_hash = ?, artwork_count = ?, last_seen_at = ? WHERE id = ?`,
@@ -214,7 +284,7 @@ function createFileOps({ db, media, artStore, backupsRoot, logger = console }) {
         db.prepare("UPDATE tracks SET tags_dirty = 0 WHERE id = ?").run(track.id);
         updateStep(db, stepId, { state: "done" });
       });
-      quickSignature(target, newStat.size)
+      await quickSignature(target, newStat.size)
         .then((sig) => db.prepare("UPDATE files SET quick_sig = ? WHERE id = ?").run(sig, file.id))
         .catch(() => {});
       return { ok: true };
@@ -226,26 +296,39 @@ function createFileOps({ db, media, artStore, backupsRoot, logger = console }) {
     }
   }
 
-  async function writeTagsJob({ trackIds = null, signal, progress } = {}) {
+  /**
+   * Writes WaveMint's tags into the files of `trackIds` (every song with
+   * unsaved tags when null). Write Tags is its own undoable operation; a save
+   * passes `partOf` (the edit it belongs to: undoing that edit writes the old
+   * values back), which makes this one a non-undoable record of the file step
+   * and lets it reuse a recent backup of the same file.
+   * Returns { written, failed, blocked, operationId, results: [{ trackId, ok, error? }] }.
+   */
+  async function writeTagsJob({ trackIds = null, signal, progress, partOf = null, reuseBackupMs = 0 } = {}) {
     const { writable, blocked } = previewTagWrite(trackIds);
-    if (!writable.length) return { written: 0, failed: 0, blocked: blocked.length, operationId: null };
+    if (!writable.length) return { written: 0, failed: 0, blocked: blocked.length, operationId: null, results: [] };
 
-    const operationId = startOperation(db, { kind: "tag-write", label: `Write tags to ${writable.length} file${writable.length === 1 ? "" : "s"}` });
+    const files = `${writable.length} file${writable.length === 1 ? "" : "s"}`;
+    const operationId = startOperation(db, {
+      kind: "tag-write",
+      label: partOf ? `Save to ${files}` : `Write tags to ${files}`,
+      undoable: !partOf,
+    });
     const backupDir = path.join(backupsRoot, `op-${operationId}`);
-    let written = 0;
-    let failed = 0;
+    const results = [];
 
     for (const [index, item] of writable.entries()) {
       if (signal?.aborted) break;
       progress?.({ phase: "writing", done: index, total: writable.length, current: item.title });
-      const result = await writeOne(operationId, item, backupDir);
-      if (result.ok) written += 1;
-      else failed += 1;
+      const result = await writeOne(operationId, item, backupDir, { reuseBackupMs });
+      results.push({ trackId: item.trackId, ...result });
     }
 
+    const written = results.filter((result) => result.ok).length;
+    const failed = results.length - written;
     const status = signal?.aborted ? "partial" : failed ? (written ? "partial" : "failed") : "completed";
-    finishOperation(db, operationId, status, { written, failed, blocked: blocked.length, backupDir });
-    return { written, failed, blocked: blocked.length, operationId };
+    finishOperation(db, operationId, status, { written, failed, blocked: blocked.length, backupDir, ...(partOf ? { partOf } : {}) });
+    return { written, failed, blocked: blocked.length, operationId, results };
   }
 
   /** Restores the files changed by a tag-write operation from its backups. */
@@ -270,17 +353,19 @@ function createFileOps({ db, media, artStore, backupsRoot, logger = console }) {
         if ((await sha256(target)) !== details.newHash) throw new Error("The file was changed again after WaveMint wrote it");
 
         const staged = siblingPath(target, "wmtmp");
-        const old = siblingPath(target, "wmold");
+        const old = freePath(siblingPath(target, "wmold"));
         fs.copyFileSync(step.backup_path, staged);
         if ((await sha256(staged)) !== details.originalHash) throw new Error("The backup didn't verify");
-        fs.renameSync(target, old);
+        moveFile(target, old);
         try {
           fs.renameSync(staged, target);
         } catch (error) {
           fs.renameSync(old, target);
           throw error;
         }
-        fs.rmSync(old, { force: true });
+        try { fs.rmSync(old, { force: true }); } catch (error) {
+          logger.warn(`[library] Old tag copy retained for cleanup: ${error.code}`);
+        }
 
         const stat = fs.statSync(target);
         const snapshot = readTags(target, { size: stat.size });
@@ -320,7 +405,7 @@ function createFileOps({ db, media, artStore, backupsRoot, logger = console }) {
       for (const step of steps) {
         const target = step.target_path;
         if (!target) continue;
-        const old = siblingPath(target, "wmold");
+        const old = parseJson(step.details, {}).oldPath || siblingPath(target, "wmold");
         const staged = step.staged_path || siblingPath(target, "wmtmp");
         let outcome = "rolled_back";
         try {

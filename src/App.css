@@ -870,7 +870,8 @@ select.field.is-empty {
   gap: var(--wm-space-2);
 }
 
-.bulk-edit__row > .field {
+.bulk-edit__row > .field,
+.bulk-edit__row > .lib-combo {
   flex: 1 1 160px;
   min-width: 0;
 }

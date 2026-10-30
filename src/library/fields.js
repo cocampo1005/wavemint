@@ -16,6 +16,12 @@ export const EDIT_FIELDS = [
   { key: "compilation", column: "compilation", label: "Part of a compilation", type: "bool", wide: true },
 ];
 
+// Every metadata form shows these four first; the rest of EDIT_FIELDS sit
+// under "Advanced metadata" (collapsed, values kept and saved either way).
+export const PRIMARY_KEYS = ["title", "artist", "album", "genre"];
+export const PRIMARY_FIELDS = PRIMARY_KEYS.map((key) => EDIT_FIELDS.find((field) => field.key === key));
+export const ADVANCED_FIELDS = EDIT_FIELDS.filter((field) => !PRIMARY_KEYS.includes(field.key));
+
 export const FIELD_LABELS = Object.fromEntries([
   ...EDIT_FIELDS.map((field) => [field.key, field.label === "of" ? `${field.key.startsWith("track") ? "Track" : "Disc"} total` : field.label]),
   ...EDIT_FIELDS.map((field) => [field.column, field.label === "of" ? `${field.key.startsWith("track") ? "Track" : "Disc"} total` : field.label]),

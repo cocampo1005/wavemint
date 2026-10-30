@@ -118,7 +118,7 @@ async function* walk(root, { signal, onSkip }) {
           if (!SKIPPED_DIRECTORIES.has(entry.name.toLowerCase()) && !entry.name.startsWith(".")) {
             subdirectories.push(full);
           }
-        } else if (entry.isFile() && isAudioFile(entry.name) && !entry.name.includes(".wmtmp")) {
+        } else if (entry.isFile() && isAudioFile(entry.name) && !/\.wm(?:tmp|old)/i.test(entry.name)) {
           yield full;
         }
       }

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useToast } from "../toasts/useToast";
 import { Dialog } from "./Dialog";
 import { formatBytes, formatDate, formatDuration, formatNumber, formatQuality, pluralize } from "./format";
 import { CheckIcon, MergeIcon, PauseIcon, PlayIcon, RefreshIcon } from "./icons";
@@ -217,7 +218,7 @@ export function MergeView({ revision, analyzing, playing, onPlay, onChanged, onE
   const [onlyMulti, setOnlyMulti] = useState(true);
   const [limit, setLimit] = useState(50);
   const [applyOpen, setApplyOpen] = useState(false);
-  const [done, setDone] = useState(null);
+  const { notify } = useToast();
 
   const { data: session, reload: reloadSession } = useLoader(() => libraryApi.currentMergeSession(), [revision]);
   const sessionId = session?.id;
@@ -237,7 +238,6 @@ export function MergeView({ revision, analyzing, playing, onPlay, onChanged, onE
   };
 
   const analyze = () => {
-    setDone(null);
     act(() => libraryApi.analyzeMerge());
   };
 
@@ -281,17 +281,6 @@ export function MergeView({ revision, analyzing, playing, onPlay, onChanged, onE
           </button>
         </div>
       </section>
-
-      {done && (
-        <div className="lib-notice" role="status">
-          <CheckIcon size={16} />
-          <span>
-            Merged: {pluralize(done.linked, "copy", "copies")} linked as alternate versions
-            {done.album?.tracks ? `, ${pluralize(done.album.tracks, "song")} moved into curated albums` : ""}. Undo it from History
-            if needed.
-          </span>
-        </div>
-      )}
 
       {summary && <Summary summary={summary} />}
 
@@ -362,7 +351,9 @@ export function MergeView({ revision, analyzing, playing, onPlay, onChanged, onE
           onError={onError}
           onApplied={(result) => {
             setApplyOpen(false);
-            setDone(result);
+            notify({
+              text: `Merged: ${pluralize(result.linked, "copy", "copies")} linked as alternate versions${result.album?.tracks ? `, ${pluralize(result.album.tracks, "song")} moved into curated albums` : ""}. Undo it from History if needed.`,
+            });
             onChanged();
           }}
         />

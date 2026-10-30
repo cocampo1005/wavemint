@@ -8,6 +8,7 @@
 const fs = require("fs");
 const path = require("path");
 const { Readable } = require("stream");
+const { readMediaBytes } = require("./mediaBytes.cjs");
 const { Worker } = require("worker_threads");
 const { CATEGORY_IDS, isInsideRoots } = require("./storage.cjs");
 const { v, validate } = require("./validate.cjs");
@@ -37,17 +38,17 @@ const trackFilters = v.obj({
   artist: text(300),
   genre: text(200),
   codec: text(20),
-  lowBitrate: v.bool(),
-  missingArtwork: v.bool(),
-  missingAlbum: v.bool(),
-  missingAlbumArtist: v.bool(),
-  possibleDuplicates: v.bool(),
   missingFile: v.bool(),
   reviewStatus: v.oneOf(["none", "needs_review", "reviewed"]),
   qualityStatus: v.oneOf(["unknown", "review_suggested", "acceptable", "user_marked_poor", "upgrade_available", "upgraded", "keep_original"]),
   multipleVersions: v.bool(),
   favorite: v.bool(),
   ids: v.array(id(), { max: 5000 }),
+  // Browsing (Songs filters).
+  artists: v.array(text(300), { max: 500 }),
+  releaseIds: v.array(id(), { max: 500 }),
+  genres: v.array(text(200), { max: 500 }),
+  decades: v.array(v.int({ min: 1000, max: 9990 }), { max: 100 }),
 });
 
 const listParams = {
@@ -70,8 +71,7 @@ const sourcePatch = v.obj(
 );
 
 // Editable fields (values are normalized again in edits.cjs).
-const editFields = v.obj(
-  {
+const editFieldShape = {
     title: text(500),
     artist: text(500),
     albumArtist: text(500),
@@ -87,9 +87,8 @@ const editFields = v.obj(
     compilation: v.bool(),
     rating: v.int({ min: 0, max: 5, optional: true }),
     notes: text(2000),
-  },
-  { optional: false },
-);
+};
+const editFields = v.obj(editFieldShape, { optional: false });
 const editList = v.array(v.obj({ trackId: id(), fields: editFields }, { optional: false }), { max: 20000, optional: false });
 const fieldNames = v.oneOf(["title", "artist", "albumArtist", "album", "genre", "year", "trackNo", "trackTotal", "discNo", "discTotal", "composer", "comment", "compilation", "rating", "notes"], { optional: false });
 const trackIdList = (options = {}) => v.array(id(), { max: 20000, ...options });
@@ -148,7 +147,9 @@ const WORKER_METHODS = {
   listTracks: listParams,
   listTrackIds: { search: text(200), filters: trackFilters, sort: text(20), direction: v.oneOf(["asc", "desc"]) },
   listAlbums: { search: text(200), sort: text(20), offset: v.int({ min: 0, optional: true }), limit: v.int({ min: 1, max: 1000, optional: true }), filters: v.obj({ artist: text(300), genre: text(200) }) },
-  listArtists: { search: text(200), offset: v.int({ min: 0, optional: true }), limit: v.int({ min: 1, max: 2000, optional: true }) },
+  listArtists: { search: text(200), genre: text(200), offset: v.int({ min: 0, optional: true }), limit: v.int({ min: 1, max: 5000, optional: true }) },
+  getArtist: { key: v.str({ max: 300, optional: false }) },
+  browseFacets: {},
   listGenres: {},
   getTrack: { id: id() },
   getAlbum: { id: id() },
@@ -162,6 +163,7 @@ const WORKER_METHODS = {
 
   // Metadata editing.
   previewEdits: { edits: editList },
+  saveTrack: { trackId: id(), fields: v.obj(editFieldShape), artworkHash: v.str({ max: 40 }) },
   applyEdits: { edits: editList, exclude: v.array(v.obj({ trackId: id(), field: fieldNames }, { optional: false }), { max: 50000 }), label: text(200) },
   suggestTitleCase: { trackIds: trackIdList({ optional: false }) },
   editAlbum: { releaseId: id(), fields: editFields, label: text(200) },
@@ -265,6 +267,7 @@ const WORKER_METHODS = {
   getIdentification: { trackId: id() },
   chooseIdentificationRelease: { trackId: id(), releaseGroupId: v.str({ max: 36, optional: false, allowEmpty: false }) },
   identificationCover: { trackId: id() },
+  findArtwork: { trackId: id() },
   applyIdentification: {
     trackId: id(),
     fields: v.array(v.oneOf(["title", "artist", "album", "albumArtist", "year", "trackNo", "trackTotal", "discNo", "discTotal", "genre", "mbRecordingId", "mbReleaseId", "mbReleaseGroupId"], { optional: false }), { max: 20, optional: false }),
@@ -726,7 +729,7 @@ function createLibraryHost({ app, ipcMain, dialog, shell, BrowserWindow, protoco
 
   // --- protocols ----------------------------------------------------------------
 
-  function streamFile(filePath, request, contentType) {
+  async function streamFile(filePath, request, contentType) {
     const size = fs.statSync(filePath).size;
     const range = /bytes=(\d*)-(\d*)/.exec(request.headers.get("range") || "");
     // Only WaveMint's own window can reach this scheme; "*" lets its page
@@ -738,13 +741,16 @@ function createLibraryHost({ app, ipcMain, dialog, shell, BrowserWindow, protoco
       let end = range[1] && range[2] ? Number(range[2]) : size - 1;
       start = Math.min(start, size - 1);
       end = Math.min(end, size - 1);
-      return new Response(Readable.toWeb(fs.createReadStream(filePath, { start, end })), {
+      // Buffer each response before handing it to Chromium. A paused media
+      // response must not retain an open handle to the editable library file.
+      const bytes = await readMediaBytes(filePath, start, end);
+      return new Response(bytes, {
         status: 206,
         headers: { ...headers, "Content-Range": `bytes ${start}-${end}/${size}`, "Content-Length": String(end - start + 1) },
       });
     }
 
-    return new Response(Readable.toWeb(fs.createReadStream(filePath)), {
+    return new Response(await readMediaBytes(filePath), {
       status: 200,
       headers: { ...headers, "Content-Length": String(size) },
     });
@@ -761,14 +767,14 @@ function createLibraryHost({ app, ipcMain, dialog, shell, BrowserWindow, protoco
           if (!/^[a-f0-9]{32}$/.test(token)) return new Response(null, { status: 400 });
           const staged = await call("resolveStagedExtraction", { token });
           if (!staged || !fs.existsSync(staged.path)) return new Response(null, { status: 404 });
-          return streamFile(staged.path, request, MIME_TYPES[path.extname(staged.path).toLowerCase()] || "application/octet-stream");
+          return await streamFile(staged.path, request, MIME_TYPES[path.extname(staged.path).toLowerCase()] || "application/octet-stream");
         }
         const itemId = Number(url.pathname.replace(/^\/+/, ""));
         if (!["file", "candidate"].includes(url.hostname) || !Number.isInteger(itemId) || itemId < 1) return new Response(null, { status: 400 });
         const file =
           url.hostname === "file" ? await call("resolvePreview", { fileId: itemId }) : await call("resolveCandidatePreview", { candidateId: itemId });
         if (!file || !fs.existsSync(file.path)) return new Response(null, { status: 404 });
-        return streamFile(file.path, request, MIME_TYPES[path.extname(file.path).toLowerCase()] || "application/octet-stream");
+        return await streamFile(file.path, request, MIME_TYPES[path.extname(file.path).toLowerCase()] || "application/octet-stream");
       } catch (error) {
         logger.warn(`[library] Preview failed: ${error.message}`);
         return new Response(null, { status: 500 });

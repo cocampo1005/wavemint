@@ -669,6 +669,68 @@ Evaluated, not implemented:
   columns after it). The ⋯ button had collided with an older `.lib-more`
   class (with a top margin) and is now `.lib-actions-button`.
 
+### Music first: browsing, one-step saving, maintenance (2.3)
+
+- **One Save writes the file.** Edits used to change only the database
+  (`tags_dirty`) and needed a separate Write Tags, a leftover of the
+  read-only-sources design. Now `saveTrack` (the song panel) and
+  `editAndSave` (every other metadata change: bulk and album edits, artwork,
+  identification, genre renames and rules, review suggestions, undo) write
+  the changed fields straight into the file with the existing safe path
+  (backup → staged copy → tags and audio hash verified → swap). Only the
+  fields that differ are written, so other tags stay as they were. A failed
+  single-song write takes the edit back (`discardOperation`, nothing left in
+  History) and the panel keeps the typed values. Songs in read-only folders
+  and WAV/AIFF keep the edit in WaveMint, as before. Writes wait for
+  file-moving jobs (scan, copy, upgrade, import, audio edit) and are made
+  when they finish. The header's "not yet saved to files · Retry" only shows
+  for failures. A quality check stays valid across a tag write (the audio is
+  verified identical).
+- **Backups and versions (findings).** Ordinary metadata saves never create
+  file versions; they replace the file in place after a verified backup in
+  `backups/op-N`. Versions (`files.role = 'archived'`) come from upgrades and
+  audio edits only (the real library: 61 archived files for 4,727 songs). Per
+  save a full copy was the costly part, so a save now reuses the same file's
+  backup from the last 24 hours (the earliest state of the day is the recovery
+  point; later states are in the change log, and undo writes old values back).
+  Retention is unchanged (Storage: 3 days by default; nothing new deletes
+  anything).
+- **Artwork from YouTube.** Measured on real videos: an art track's video is
+  1080 × 1080 while its `maxresdefault` thumbnail is 1280 × 720 with the cover
+  at 720 px between colored bars; its 4:3 `hqdefault` nests the cover inside
+  bars on all four sides, so a plain center crop kept bars; playlist entries
+  only list 336 × 188 thumbnails, so album imports could embed a cover made
+  from a 188 px square. Square artwork now uses the largest version of the
+  same thumbnail, removes bars only when what remains is a standard frame
+  shape, and takes a still from a square video when it is better (art tracks,
+  still-image videos, the same picture at a higher resolution); moving
+  videos and black frames keep the thumbnail. The preview's file is the one
+  embedded. See the header comment of `electron/artwork.cjs`.
+- **Browsing.** Artists, Albums and Genres have their own detail views inside
+  their tab (artist: albums and songs; album: tracks by number; genre: songs,
+  artists, albums; nested: Genres › Rock › Coldplay › Parachutes). The Songs
+  Filter menu offers artist, album, genre, decade and favorites (combinable,
+  shown as removable chips); the maintenance chips moved to Review (missing
+  artwork/album/genre/album artist, duplicates), Quality & Upgrades (bitrate)
+  and the new File Health (missing or unreadable files, earlier versions,
+  backups). Maintenance lists open songs in the same panel beside them.
+- **Speed.** The Artists list took ~1.9 s on a 4,727-song library: since
+  migration 8's `tracks_created(state, created_at)` index, SQLite used it for
+  the per-artist "most common spelling" subquery and scanned every song once
+  per artist. Artists are now grouped in one pass (28 ms, identical results;
+  the Overview went from 1.85 s to 53 ms). Browse lists and headers are cached
+  per library revision in the renderer, so switching tabs doesn't ask the
+  library again (25–40 ms per switch in the real app).
+- **Compilation flag (evaluated, kept in Advanced metadata).** It is the
+  standard ID3 `TCMP` / iTunes `cpil` tag. In WaveMint it groups an album
+  without an album artist under "Various Artists" (`releaseFor`), labels the
+  album "Compilation", names its folder "Various Artists" in the WaveMint
+  Library (`organize.cjs`), and stops Review asking for an album artist.
+  Apple Music uses it to file the album under Compilations. Setting the album
+  artist (e.g. "Various Artists") keeps such albums together too; the flag is
+  rarely needed (the real library has none) but is harmless and
+  interoperable, so it stays, under Advanced metadata.
+
 ## Importing your two libraries (step by step)
 
 Nothing in these steps changes your iTunes or curated folders.

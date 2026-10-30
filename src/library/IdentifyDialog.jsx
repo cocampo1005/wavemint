@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Dialog } from "./Dialog";
+import { Disclosure } from "./Disclosure";
+import { PRIMARY_KEYS } from "./fields";
 import { artworkUrl, formatDate, formatDuration } from "./format";
 import { CheckIcon, RefreshIcon, WarningIcon } from "./icons";
 import { errorMessage, libraryApi } from "./useLibrary";
@@ -103,8 +105,8 @@ export function IdentifyDialog({ trackId, onClose, onApplied }) {
     });
   const apply = () =>
     run(async () => {
-      await libraryApi.applyIdentification({ trackId, fields: [...selected], coverHash: useCover && cover?.hash ? cover.hash : undefined });
-      setDone(true);
+      const result = await libraryApi.applyIdentification({ trackId, fields: [...selected], coverHash: useCover && cover?.hash ? cover.hash : undefined });
+      setDone(result || {});
       onApplied?.();
     });
   const dismiss = () =>
@@ -116,6 +118,30 @@ export function IdentifyDialog({ trackId, onClose, onApplied }) {
 
   const recording = item?.recordings?.[0];
   const changes = (item?.fields || []).filter((field) => !field.same);
+  // Title, artist, album and genre first; everything else (numbers, IDs…) on request.
+  const advancedChanges = changes.filter((field) => !PRIMARY_KEYS.includes(field.field));
+  const fieldRow = (field) => (
+    <label key={field.field} className="lib-upgrade__field lib-identify__field">
+      <input
+        type="checkbox"
+        checked={selected.has(field.field)}
+        onChange={(event) =>
+          setSelected((current) => {
+            const next = new Set(current);
+            if (event.target.checked) next.add(field.field);
+            else next.delete(field.field);
+            return next;
+          })
+        }
+      />
+      <span>
+        {field.label}
+        {field.curated && <span className="lib-badge is-name is-quiet">Edited by you</span>}
+      </span>
+      <span className={field.identifier ? "lib-identify__id" : ""}>{show(field.current)}</span>
+      <span className={field.identifier ? "lib-identify__id" : ""}>{show(field.suggested)}</span>
+    </label>
+  );
   const canApply = !done && item && (selected.size > 0 || (useCover && cover?.hash));
 
   const footer = done ? (
@@ -133,7 +159,7 @@ export function IdentifyDialog({ trackId, onClose, onApplied }) {
         Cancel
       </button>
       <button type="button" className={`btn btn--primary ${busy ? "is-loading" : ""}`} disabled={busy || !canApply} onClick={apply}>
-        <CheckIcon size={14} /> Apply Selected
+        <CheckIcon size={14} /> Save Selected
       </button>
     </>
   );
@@ -158,7 +184,15 @@ export function IdentifyDialog({ trackId, onClose, onApplied }) {
 
       {done && (
         <p className="lib-managed__done">
-          <CheckIcon size={16} /> Applied. The changes are in WaveMint (write tags to put them into files) and can be undone from History.
+          <CheckIcon size={16} />{" "}
+          {done.files?.failed?.length
+            ? `Saved in WaveMint, but the file couldn't be updated: ${done.files.failed[0].error}`
+            : done.files?.written
+              ? "Saved to the file."
+              : done.files?.deferred
+                ? "Saved. It goes into the file when the current task finishes."
+                : "Saved in WaveMint (this song's file isn't one WaveMint changes)."}{" "}
+          You can undo this from History.
         </p>
       )}
 
@@ -228,31 +262,17 @@ export function IdentifyDialog({ trackId, onClose, onApplied }) {
                   <span>Yours</span>
                   <span>MusicBrainz</span>
                 </div>
-                {item.fields
-                  .filter((field) => !field.same)
-                  .map((field) => (
-                    <label key={field.field} className="lib-upgrade__field lib-identify__field">
-                      <input
-                        type="checkbox"
-                        checked={selected.has(field.field)}
-                        onChange={(event) =>
-                          setSelected((current) => {
-                            const next = new Set(current);
-                            if (event.target.checked) next.add(field.field);
-                            else next.delete(field.field);
-                            return next;
-                          })
-                        }
-                      />
-                      <span>
-                        {field.label}
-                        {field.curated && <span className="lib-badge is-name is-quiet">Edited by you</span>}
-                      </span>
-                      <span className={field.identifier ? "lib-identify__id" : ""}>{show(field.current)}</span>
-                      <span className={field.identifier ? "lib-identify__id" : ""}>{show(field.suggested)}</span>
-                    </label>
-                  ))}
+                {changes.filter((field) => PRIMARY_KEYS.includes(field.field)).map(fieldRow)}
               </div>
+              {advancedChanges.length > 0 && (
+                <Disclosure
+                  label="Advanced metadata"
+                  hint={`${advancedChanges.filter((field) => selected.has(field.field)).length} of ${advancedChanges.length} selected`}
+                  className="lib-edit__advanced"
+                >
+                  <div className="lib-upgrade__fields">{advancedChanges.map(fieldRow)}</div>
+                </Disclosure>
+              )}
               {item.tags.length > 0 && <p className="settings-hint">MusicBrainz tags: {item.tags.join(", ")} (genres only suggested when they match your genre list).</p>}
             </>
           )}

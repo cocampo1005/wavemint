@@ -312,3 +312,12 @@ export const StorageIcon = (props) => (
     <path d="M7 16.3h.1M10 16.3h.1" strokeWidth="2.4" />
   </Icon>
 );
+
+/** File Health: a document with a pulse line. */
+export const FileHealthIcon = (props) => (
+  <Icon {...props}>
+    <path d="M14 3.5H7.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8z" />
+    <path d="M14 3.5V8h4.5" />
+    <path d="M8.5 14.5h1.8l1.2-2.5 1.6 4 1.2-1.5h1.2" />
+  </Icon>
+);

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { isSkippableInBatch, parseIpcError } from "../ipcErrors";
 import { pluralize } from "./format";
 import { CheckIcon, UpgradeIcon, WarningIcon } from "./icons";
+import { AlbumInput, ArtistInput, GenreInput } from "./MetadataInputs";
 import { UpgradeDialog } from "./UpgradeDialog";
 import { entryKey, errorMessage, libraryApi, useJobRunner } from "./useLibrary";
 import "./library.css";
@@ -280,12 +281,23 @@ export function PlaylistImport({ playlist, entries, downloadStatus, requestId, o
               ["year", "Year"],
               ["genre", "Genre (where a song has none)"],
               ["edition", "Edition (e.g. Deluxe Edition)"],
-            ].map(([field, label]) => (
-              <label key={field} className="form-field">
-                <span className="form-field__label">{label}</span>
-                <input className="field" value={albumFields[field]} disabled={busy} onChange={(event) => setAlbumFields((current) => ({ ...current, [field]: event.target.value }))} />
-              </label>
-            ))}
+            ].map(([field, label]) => {
+              const props = { value: albumFields[field], disabled: busy, onChange: (value) => setAlbumFields((current) => ({ ...current, [field]: value })) };
+              return (
+                <label key={field} className="form-field">
+                  <span className="form-field__label">{label}</span>
+                  {field === "albumArtist" ? (
+                    <ArtistInput {...props} />
+                  ) : field === "album" ? (
+                    <AlbumInput {...props} artist={albumFields.albumArtist} />
+                  ) : field === "genre" ? (
+                    <GenreInput {...props} />
+                  ) : (
+                    <input className="field" value={props.value} disabled={busy} onChange={(event) => props.onChange(event.target.value)} />
+                  )}
+                </label>
+              );
+            })}
             <label className="form-field">
               <span className="form-field__label">Artwork</span>
               <select className="field" value={albumFields.artworkKey} disabled={busy} onChange={(event) => setAlbumFields((current) => ({ ...current, artworkKey: event.target.value }))}>

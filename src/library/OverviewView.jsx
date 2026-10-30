@@ -209,12 +209,14 @@ export function OverviewView({ revision, onNavigate, onAddMusic, onAddSource, on
   const { totals, issues, duplicates, genres, recent, topArtists } = data;
   if (!totals.tracks) return <EmptyLibrary onAddMusic={onAddMusic} onAddSource={onAddSource} />;
 
+  // Each opens the maintenance section that can fix it.
   const attention = [
-    ["Songs without a genre", issues.missing_genre, () => onNavigate("songs", { quick: ["unclassified"] })],
-    ["Songs without artwork", issues.missing_artwork, () => onNavigate("songs", { quick: ["missingArtwork"] })],
-    ["Songs without an album", issues.missing_album, () => onNavigate("songs", { quick: ["missingAlbum"] })],
-    ["Possible duplicates", duplicates.tracks, () => onNavigate("songs", { quick: ["possibleDuplicates"], sort: "title" }), "info"],
-    ["Missing or unreadable files", issues.missing_files, () => onNavigate("songs", { quick: ["missingFile"] }), "error"],
+    ["Songs without a genre", issues.missing_genre, () => onNavigate("review", { kind: "unclassified_genre" })],
+    ["Songs without artwork", issues.missing_artwork, () => onNavigate("review", { kind: "missing_artwork" })],
+    ["Songs without an album", issues.missing_album, () => onNavigate("review", { kind: "missing_album" })],
+    ["Possible duplicates", duplicates.tracks, () => onNavigate("review", { kind: "possible_duplicate" }), "info"],
+    ["Low-bitrate files", issues.low_bitrate, () => onNavigate("quality", { maxBitrate: data.lowBitrateKbps }), "info"],
+    ["Missing or unreadable files", issues.missing_files, () => onNavigate("health"), "error"],
   ].filter(([, count]) => count > 0);
 
   return (
@@ -242,11 +244,11 @@ export function OverviewView({ revision, onNavigate, onAddMusic, onAddSource, on
         <GenreBars
           genres={genres}
           total={totals.tracks}
-          onOpenGenre={(name) => onNavigate("songs", { genre: name, chip: `Genre: ${name || "Unclassified"}` })}
+          onOpenGenre={(name) => (name ? onNavigate("genres", { genre: name }) : onNavigate("review", { kind: "unclassified_genre" }))}
           onAllGenres={() => onNavigate("genres")}
         />
         <div className="lib-overview__side">
-          <TopArtists artists={topArtists} onOpenArtist={(artist) => onNavigate("songs", { artist: artist.key, chip: `Artist: ${artist.name}`, sort: "album" })} />
+          <TopArtists artists={topArtists} onOpenArtist={(artist) => onNavigate("artists", { artist: artist.key, artistName: artist.name })} />
           {attention.length > 0 && (
             <section className="panel" aria-labelledby="lib-attention">
               <div className="lib-section-head">

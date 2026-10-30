@@ -189,12 +189,22 @@ function writeTags(filePath, fields) {
   }
 
   Id3v2Settings.defaultVersion = 3;
-  Id3v2Settings.forceDefaultVersion = true;
+  // Preserve the on-disk version while parsing and saving existing frames.
+  // Forcing v2.3 before opening a v2.4 tag misreads its frame lengths.
+  Id3v2Settings.forceDefaultVersion = false;
   const file = File.createFromPath(filePath, undefined, ReadStyle.None);
 
   try {
     const tag = file.tag;
     const has = (key) => Object.prototype.hasOwnProperty.call(fields, key);
+
+    // TagLib renders ID3v1 as v1.1, whose comment is only 28 bytes (v1.0
+    // permits 30). Preserve a longer legacy-only comment in ID3v2 before
+    // an unrelated edit silently truncates it. Explicit comment edits still win.
+    if (!has("comment") && file.getTag(TagTypes.Id3v1, false)?.comment?.length > 28) {
+      const id3 = file.getTag(TagTypes.Id3v2, true);
+      if (id3 && !id3.comment) id3.comment = tag.comment;
+    }
 
     if (has("title")) tag.title = fields.title || undefined;
     if (has("artist")) tag.performers = splitList(fields.artist);

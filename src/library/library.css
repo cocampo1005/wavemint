@@ -73,10 +73,6 @@
   overflow: auto;
 }
 
-.lib-alert {
-  margin: 0 var(--wm-space-6) var(--wm-space-3);
-}
-
 .lib-loading,
 .lib-empty-note {
   padding: var(--wm-space-8) 0;
@@ -1033,6 +1029,11 @@ button.lib-stat:hover {
 
 /* ---------- Collections ---------- */
 
+.lib-upgrade__notes { border: 1px solid var(--wm-border); border-radius: 8px; padding: 10px 12px; color: var(--wm-text-muted); font-size: var(--wm-text-sm); }
+.lib-upgrade__notes summary { cursor: pointer; color: var(--wm-text-muted); }
+.lib-upgrade__notes ul { margin: 10px 0 0; padding-left: 18px; }
+.lib-upgrade__notes li + li { margin-top: 6px; }
+
 .lib-collection {
   padding-bottom: var(--wm-space-6);
 }
@@ -1518,11 +1519,6 @@ button.lib-stat:hover {
   align-items: center;
   gap: var(--wm-space-2);
   margin-top: var(--wm-space-4);
-}
-
-.lib-edit__saved {
-  color: var(--wm-success);
-  font-size: var(--wm-text-xs);
 }
 
 .lib-edit__artwork {
@@ -2032,17 +2028,6 @@ button.lib-stat:hover {
   flex-direction: column;
   gap: var(--wm-space-2);
   margin-top: var(--wm-space-4);
-}
-
-.lib-notice {
-  display: flex;
-  align-items: center;
-  gap: var(--wm-space-2);
-  padding: var(--wm-space-3) var(--wm-space-4);
-  border: 1px solid var(--wm-success-border);
-  border-radius: var(--wm-radius-lg);
-  color: var(--wm-success);
-  font-size: var(--wm-text-sm);
 }
 
 /* --- WaveMint Library (managed) ------------------------------------------ */
@@ -3325,23 +3310,6 @@ button.lib-stat:hover {
 
 /* ---------- Notices with an action (Undo) ---------- */
 
-.lib-notice {
-  display: flex;
-  align-items: center;
-  gap: var(--wm-space-3);
-  margin: 0 var(--wm-space-6) var(--wm-space-3);
-  padding: var(--wm-space-2) var(--wm-space-3);
-  border: 1px solid var(--wm-success-border);
-  border-radius: var(--wm-radius-md);
-  background: var(--wm-success-bg);
-  font-size: var(--wm-text-sm);
-}
-
-.lib-notice__text {
-  flex: 1;
-  min-width: 0;
-}
-
 .lib-delete__list {
   max-height: 220px;
   margin: var(--wm-space-3) 0;
@@ -3490,3 +3458,716 @@ button.lib-stat:hover {
   display: flex;
   justify-content: flex-end;
 }
+
+/* ---------- Collapsible sections (Advanced metadata, Technical details, Version history) ---------- */
+
+.lib-disclosure {
+  margin-top: var(--wm-space-3);
+}
+
+.lib-disclosure__toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 0;
+  border: 0;
+  background: none;
+  color: var(--wm-text-muted);
+  font: inherit;
+  font-size: var(--wm-text-xs);
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.lib-disclosure__toggle:hover {
+  color: var(--wm-text);
+}
+
+.lib-disclosure__toggle:focus-visible {
+  outline: none;
+  border-radius: 6px;
+  box-shadow: var(--wm-focus-ring);
+}
+
+.lib-disclosure__hint {
+  margin-left: auto;
+  color: var(--wm-text-subtle);
+  font-weight: 400;
+}
+
+.lib-disclosure__body {
+  padding-top: var(--wm-space-2);
+}
+
+/* Title, Artist, Album and Genre each get a full row. */
+.lib-edit__grid.is-primary .lib-edit__field {
+  grid-column: 1 / -1;
+}
+
+.lib-edit__advanced .lib-disclosure__hint {
+  color: var(--wm-cyan);
+}
+
+/* Inline notes in the editors: saved elsewhere, not yet in the file, errors. */
+.lib-edit__note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: var(--wm-space-3) 0 0;
+  color: var(--wm-text-subtle);
+  font-size: var(--wm-text-xs);
+  line-height: 1.5;
+}
+
+.lib-edit__note.is-warn {
+  color: var(--wm-warning);
+}
+
+.lib-edit__note.is-error {
+  color: var(--wm-danger);
+}
+
+/* ---------- Song panel: artwork, file, versions ---------- */
+
+.lib-detail__artwork {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lib-detail__art {
+  position: relative;
+}
+
+.lib-detail__art.is-pending {
+  border-color: rgba(31, 200, 255, 0.55);
+}
+
+.lib-detail__find-art {
+  position: absolute;
+  right: var(--wm-space-2);
+  bottom: var(--wm-space-2);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--wm-border-strong);
+  border-radius: 999px;
+  background: rgba(8, 13, 36, 0.82);
+  color: var(--wm-text);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  transition: border-color var(--wm-dur) var(--wm-ease), background var(--wm-dur) var(--wm-ease);
+}
+
+.lib-detail__find-art:hover:not(:disabled) {
+  border-color: var(--wm-accent);
+  background: rgba(15, 26, 58, 0.92);
+}
+
+.lib-detail__find-art:disabled {
+  cursor: progress;
+  color: var(--wm-text-muted);
+}
+
+.lib-detail__art-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: var(--wm-space-2);
+  min-height: 18px;
+  font-size: var(--wm-text-xs);
+}
+
+.lib-detail__art-note {
+  margin-right: auto;
+  color: var(--wm-text-muted);
+}
+
+.lib-detail__file {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: var(--wm-space-5);
+  padding-top: var(--wm-space-4);
+  border-top: 1px solid var(--wm-border-subtle);
+}
+
+.lib-detail__file .section-label {
+  margin-bottom: 2px;
+}
+
+.lib-detail__file-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px var(--wm-space-3);
+  color: var(--wm-text-muted);
+  font-size: var(--wm-text-xs);
+}
+
+.lib-detail__file-path {
+  display: flex;
+  align-items: baseline;
+  gap: var(--wm-space-2);
+  min-width: 0;
+  color: var(--wm-text-subtle);
+  font-size: var(--wm-text-xs);
+  overflow-wrap: anywhere;
+}
+
+.lib-detail__file-path .btn--link {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.lib-detail__facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px var(--wm-space-3);
+  margin: 0 0 var(--wm-space-3);
+  font-size: var(--wm-text-xs);
+}
+
+.lib-detail__facts dt {
+  color: var(--wm-text-subtle);
+}
+
+.lib-detail__facts dd {
+  margin: 0;
+  color: var(--wm-text-muted);
+}
+
+.lib-detail__facts dd.is-path {
+  overflow-wrap: anywhere;
+}
+
+.lib-detail__history {
+  margin-top: var(--wm-space-4);
+}
+
+.lib-detail__history .settings-hint {
+  margin: 0 0 var(--wm-space-2);
+  font-size: var(--wm-text-xs);
+}
+
+/* ---------- Song filters (Filter menu and its chips) ---------- */
+
+.lib-filter {
+  position: relative;
+}
+
+.lib-filter__button.is-active {
+  border-color: rgba(74, 141, 255, 0.55);
+}
+
+.lib-filter__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--wm-accent-soft);
+  color: var(--wm-text);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.lib-filter__menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 70;
+  display: grid;
+  grid-template-columns: 140px 280px;
+  height: 340px;
+  border: 1px solid var(--wm-border);
+  border-radius: var(--wm-radius-md);
+  background: var(--wm-surface-2);
+  box-shadow: 0 16px 40px rgba(2, 5, 18, 0.6);
+  overflow: hidden;
+}
+
+.lib-filter__facets {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--wm-space-1);
+  border-right: 1px solid var(--wm-border-subtle);
+}
+
+.lib-filter__facet {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wm-text-muted);
+  font: inherit;
+  font-size: var(--wm-text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.lib-filter__facet:hover {
+  color: var(--wm-text);
+  background: var(--wm-surface-hover);
+}
+
+.lib-filter__facet.is-active,
+.lib-filter__favorite.is-on {
+  color: var(--wm-text);
+  background: var(--wm-accent-soft);
+}
+
+.lib-filter__favorite {
+  margin-bottom: var(--wm-space-1);
+}
+
+.lib-filter__favorite.is-on .wm-icon {
+  color: var(--wm-danger);
+}
+
+.lib-filter__facet .lib-filter__count {
+  margin-left: auto;
+}
+
+.lib-filter__reset {
+  margin-top: auto;
+  padding: 6px 10px;
+  font-size: var(--wm-text-xs);
+  text-align: left;
+}
+
+.lib-filter__options {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: var(--wm-space-2);
+}
+
+.lib-filter__search {
+  flex: 0 0 auto;
+  max-width: none;
+  margin-bottom: var(--wm-space-2);
+}
+
+.lib-filter__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.lib-filter__option {
+  display: flex;
+  align-items: center;
+  gap: var(--wm-space-2);
+  width: 100%;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wm-text);
+  font: inherit;
+  font-size: var(--wm-text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.lib-filter__option:hover,
+.lib-filter__option:focus-visible {
+  outline: none;
+  background: var(--wm-surface-hover);
+}
+
+.lib-filter__check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border: 1px solid var(--wm-border-strong);
+  border-radius: 4px;
+  color: var(--wm-text-on-accent);
+}
+
+.lib-filter__option.is-on .lib-filter__check {
+  border-color: var(--wm-accent);
+  background: var(--wm-accent);
+}
+
+.lib-filter__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lib-filter__hint {
+  color: var(--wm-text-subtle);
+  font-size: var(--wm-text-xs);
+}
+
+.lib-filter__n {
+  color: var(--wm-text-subtle);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.lib-filter__empty {
+  margin: var(--wm-space-3) 8px;
+  color: var(--wm-text-subtle);
+  font-size: var(--wm-text-xs);
+}
+
+.lib-filter__chips {
+  align-items: center;
+}
+
+.lib-filter__chips .lib-filter__reset {
+  margin: 0;
+  padding: 0 4px;
+}
+
+/* ---------- Artists, Albums and Genres: lists and detail views ---------- */
+
+.lib-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  color: var(--wm-text-subtle);
+  font-size: var(--wm-text-xs);
+}
+
+.lib-crumbs__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.lib-crumbs__item [aria-current="page"] {
+  color: var(--wm-text-muted);
+}
+
+.lib-detail-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wm-space-4);
+  height: 100%;
+  min-height: 0;
+}
+
+.lib-detail-view.is-scroll {
+  height: auto;
+}
+
+.lib-detail-view > .lib-browser,
+.lib-detail-view__songs {
+  flex: 1;
+  min-height: 380px;
+}
+
+.lib-detail-view__songs {
+  display: flex;
+  flex-direction: column;
+}
+
+.lib-detail-view__songs .lib-browser {
+  flex: 1;
+  min-height: 0;
+}
+
+.lib-detail-view > .lib-collection {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.lib-collection.is-embedded {
+  padding-bottom: 0;
+}
+
+.lib-album-head__text {
+  min-width: 0;
+}
+
+.lib-album-head__art.is-round {
+  border-radius: 50%;
+}
+
+.lib-album-head__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--wm-space-2);
+  margin-top: var(--wm-space-3);
+}
+
+.lib-detail-head__play {
+  display: flex;
+  gap: var(--wm-space-2);
+}
+
+.lib-detail-head__play .btn,
+.lib-album-head__actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lib-album__art.is-round {
+  border-radius: 50%;
+}
+
+.lib-artist-card {
+  text-align: center;
+}
+
+.lib-album-strip {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 132px;
+  gap: var(--wm-space-4);
+  margin-top: var(--wm-space-2);
+  padding-bottom: var(--wm-space-2);
+  overflow-x: auto;
+}
+
+.lib-genre-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: var(--wm-space-3);
+}
+
+.lib-genre-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: var(--wm-space-3) var(--wm-space-4);
+  border: 1px solid var(--wm-border-subtle);
+  border-radius: var(--wm-radius-lg);
+  background: rgba(10, 18, 48, 0.55);
+  color: var(--wm-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--wm-dur) var(--wm-ease), background var(--wm-dur) var(--wm-ease);
+}
+
+.lib-genre-card:hover {
+  border-color: var(--wm-border-strong);
+  background: rgba(23, 36, 71, 0.55);
+}
+
+.lib-genre-card:focus-visible {
+  outline: none;
+  box-shadow: var(--wm-focus-ring);
+}
+
+.lib-genre-card__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--wm-text-sm);
+  font-weight: 500;
+}
+
+.lib-genre-card__meta {
+  color: var(--wm-text-subtle);
+  font-size: var(--wm-text-xs);
+}
+
+.lib-genre-card__bar {
+  display: block;
+  height: 3px;
+  margin-top: 4px;
+  border-radius: 2px;
+  background: rgba(41, 55, 90, 0.6);
+  overflow: hidden;
+}
+
+.lib-genre-card__bar > span {
+  display: block;
+  height: 100%;
+  background: var(--wm-gradient-progress);
+}
+
+.lib-genre-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--wm-space-3);
+}
+
+.lib-genre-head__sections {
+  align-self: flex-start;
+}
+
+/* ---------- Maintenance lists with the song panel beside them ---------- */
+
+.lib-with-panel {
+  min-height: 0;
+}
+
+.lib-with-panel__main {
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.lib-review-item.is-active {
+  border-color: rgba(74, 141, 255, 0.5);
+}
+
+/* Review with the song panel open: one column, issue types in a dropdown. */
+.lib-review__layout.is-narrow {
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--wm-space-3);
+}
+
+.lib-review__kind-select {
+  max-width: 320px;
+  height: var(--wm-control-h-sm);
+  font-size: var(--wm-text-sm);
+}
+
+/* Narrow lists (a panel beside them): actions move under the text. */
+.lib-with-panel.has-detail .lib-review-item {
+  flex-wrap: wrap;
+}
+
+.lib-with-panel.has-detail .lib-review-item__body {
+  flex-basis: calc(100% - 60px);
+}
+
+.lib-with-panel.has-detail .lib-review-item__actions {
+  justify-content: flex-start;
+  width: 100%;
+  padding-left: 52px;
+}
+
+.lib-with-panel.has-detail .lib-quality-row {
+  flex-wrap: wrap;
+}
+
+.lib-with-panel.has-detail .lib-quality-row__text {
+  flex-basis: 180px;
+}
+
+.lib-review-item__open {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--wm-text);
+  font: inherit;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  cursor: pointer;
+}
+
+.lib-review-item__open:hover {
+  color: var(--wm-cyan);
+}
+
+.lib-quickart {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--wm-space-2);
+}
+
+.lib-quickart__img {
+  width: 36px;
+  height: 36px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.lib-quickart__text {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--wm-text-muted);
+  font-size: var(--wm-text-xs);
+}
+
+.lib-health {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wm-space-3);
+}
+
+.lib-health .lib-toolbar {
+  margin-bottom: 0;
+}
+
+.lib-health-versions {
+  align-items: flex-start;
+}
+
+.lib-health-versions .lib-disclosure {
+  margin-top: var(--wm-space-1);
+}
+
+.lib-health__backups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wm-space-3);
+  max-width: 640px;
+}
+
+.lib-health__backups .lib-toolbar__actions {
+  margin-left: 0;
+}
+
+/* ---------- Metadata pickers (Combobox.jsx: Artist, Album, Genre) ---------- */
+.lib-combo { display: block; min-width: 0; }
+.lib-combo__panel {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--wm-border-strong);
+  border-radius: var(--wm-radius-md);
+  background: var(--wm-surface-2);
+  color: var(--wm-text);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+  animation: wm-fade-in 120ms var(--wm-ease);
+}
+.lib-combo__header { display: flex; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--wm-border); }
+.lib-combo__header strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--wm-text-sm); }
+.lib-combo__header span { flex-shrink: 0; color: var(--wm-text-muted); font-size: var(--wm-text-xs); }
+.lib-combo__list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 6px; }
+.lib-combo__option { display: flex; justify-content: space-between; gap: 12px; min-height: 36px; padding: 8px 10px; border-radius: 6px; cursor: pointer; overflow-wrap: anywhere; }
+.lib-combo__option mark { background: none; color: inherit; font-weight: 600; }
+.lib-combo__option.is-active { background: var(--wm-surface-hover); outline: 1px solid var(--wm-border-strong); outline-offset: -1px; }
+.lib-combo__option[aria-selected="true"] { color: var(--wm-cyan); background: var(--wm-accent-soft); }
+.lib-combo__create { margin-top: 2px; color: var(--wm-cyan); }
+.lib-combo__list > .lib-combo__option + .lib-combo__create { border-top: 1px solid var(--wm-border); border-radius: 0 0 6px 6px; }
+.lib-combo__empty { padding: 18px 10px; color: var(--wm-text-muted); }
+.lib-combo__hint { padding: 10px 14px; border-top: 1px solid var(--wm-border); color: var(--wm-text-muted); font-size: 11px; }

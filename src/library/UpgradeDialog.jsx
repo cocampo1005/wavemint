@@ -5,7 +5,7 @@ import { parseIpcError } from "../ipcErrors";
 import { usePlayer } from "../player/usePlayer";
 import { Artwork } from "./Artwork";
 import { Dialog } from "./Dialog";
-import { GenreOptions, MetadataFields } from "./Editors";
+import { MetadataFields } from "./Editors";
 import { EDIT_FIELDS, displayValue, toApiValue, toFormValue } from "./fields";
 import { codecLabel, formatBytes, formatDuration } from "./format";
 import { FolderOpenIcon, PauseIcon, PlayIcon, SearchIcon, UpgradeIcon, WarningIcon } from "./icons";
@@ -276,7 +276,6 @@ export function UpgradeDialog({ trackId, start = null, candidateId: initialCandi
   const [artwork, setArtwork] = useState("current");
   const [customArt, setCustomArt] = useState(null);
   const [showDetected, setShowDetected] = useState(false);
-  const [confirmedFor, setConfirmedFor] = useState(null);
   const [jobId, setJobId] = useState(null);
   const [applying, setApplying] = useState(false);
   const [jobPhase, setJobPhase] = useState("");
@@ -401,6 +400,7 @@ export function UpgradeDialog({ trackId, start = null, candidateId: initialCandi
   };
 
   // --- Analyze URL -------------------------------------------------------------
+  // Analyze → extract (automatically) → compare → the user confirms the upgrade.
 
   const analyze = async (event) => {
     event?.preventDefault();
@@ -419,11 +419,18 @@ export function UpgradeDialog({ trackId, start = null, candidateId: initialCandi
       if (data.isPlaylist) throw new Error("That's a playlist. Paste the URL of a single video.");
       setAnalysis(data);
       if (data.thumbnail) {
+        const previewSeq = seq.current;
         window.waveMintAPI
           .generateSquareCropPreview({ thumbnail: data.thumbnail })
-          .then((preview) => seq.current === mine && setSquarePreview(preview.previewUrl))
+          // The extraction that follows bumps the sequence by one; the preview still belongs to this analysis.
+          .then((preview) => seq.current <= previewSeq + 1 && setSquarePreview(preview.previewUrl))
           .catch(() => {});
       }
+      // The source is known: extract it right away for the comparison (no
+      // extra step). It only becomes a candidate; nothing in the library
+      // changes until the user upgrades.
+      setAnalyzing(false);
+      await extractFrom(data);
     } catch (err) {
       if (seq.current === mine) {
         const parsed = parseIpcError(err, "That URL couldn't be analyzed.");
@@ -435,9 +442,15 @@ export function UpgradeDialog({ trackId, start = null, candidateId: initialCandi
   };
 
   // Extracts the analyzed source with Add Music's pipeline; the result is a
-  // replacement candidate (nothing changes in the library yet).
-  const extract = async () => {
+  // replacement candidate (nothing changes in the library yet). Runs on its
+  // own after an analysis; the button is only for trying again after a
+  // cancelled or failed extraction.
+  const extract = () => {
     if (!analysis || busy) return;
+    extractFrom(analysis);
+  };
+
+  const extractFrom = async (source) => {
     const mine = ++seq.current;
     setExtracting(true);
     setCancelling(false);
@@ -445,10 +458,10 @@ export function UpgradeDialog({ trackId, start = null, candidateId: initialCandi
     setStatus(null);
     try {
       const response = await window.waveMintAPI.downloadMp3({
-        url: analysis.webpage_url || url.trim(),
+        url: source.webpage_url || url.trim(),
         // The source's own details; the final metadata is written at upgrade time.
-        metadata: analysis.metadata,
-        thumbnail: analysis.thumbnail,
+        metadata: source.metadata,
+        thumbnail: source.thumbnail,
         artwork: { mode: "square_crop" },
         upgradeTrackId: trackId,
         requestId,
@@ -539,13 +552,11 @@ export function UpgradeDialog({ trackId, start = null, candidateId: initialCandi
 
   // --- Upgrade ---------------------------------------------------------------------
 
-  const strong = comparison?.warnings.some((warning) => warning.level === "strong");
-  const confirmed = confirmedFor === comparison?.candidateId;
   const plan = comparison?.plan;
   const blocked = plan?.mode === "needs_library";
   const artworkReady = artwork !== "candidate" || !!sourceArt;
   const customReady = artwork !== "custom" || !!customArt;
-  const canApply = !!comparison && !!form && !busy && !blocked && (!strong || confirmed) && artworkReady && customReady;
+  const canApply = !!comparison && !!form && !busy && !blocked && artworkReady && customReady;
 
   const apply = async () => {
     if (!canApply) return;
@@ -599,7 +610,7 @@ export function UpgradeDialog({ trackId, start = null, candidateId: initialCandi
   });
   const estimate =
     !comparison && method === "url" && analysis
-      ? { format: "MP3 (converted from the source's best audio)", bitrate: "Unknown until extracted", length: analysis.duration ? formatSeconds(Math.round(analysis.duration)) : null }
+      ? { format: "AAC/M4A (original audio, no re-encoding)", bitrate: "Unknown until extracted", length: analysis.duration ? formatSeconds(Math.round(analysis.duration)) : null }
       : null;
 
   const footer = (
@@ -711,9 +722,9 @@ export function UpgradeDialog({ trackId, start = null, candidateId: initialCandi
                       <strong title={analysis.title}>{analysis.title || "Untitled video"}</strong>
                       <span>{[analysis.uploader, analysis.duration ? formatSeconds(Math.round(analysis.duration)) : ""].filter(Boolean).join(" · ")}</span>
                     </div>
-                    {!comparison && (
-                      <button type="button" className={`btn btn--secondary btn--sm ${extracting ? "is-loading" : ""}`} disabled={busy} onClick={extract}>
-                        Extract for Comparison
+                    {!comparison && !extracting && !analyzing && (
+                      <button type="button" className="btn btn--secondary btn--sm" disabled={busy} onClick={extract}>
+                        Extract Again
                       </button>
                     )}
                     {comparison && <span className="lib-badge is-name is-success">Extracted</span>}
@@ -742,16 +753,11 @@ export function UpgradeDialog({ trackId, start = null, candidateId: initialCandi
                     </strong>
                     <span>{comparison.match.evidence.map((item) => item.text).join(" · ")}</span>
                   </div>
-                  {comparison.warnings.map((warning) => (
-                    <p key={warning.text} className={`lib-upgrade__warning is-${warning.level}`}>
-                      <WarningIcon size={14} /> {warning.text}
-                    </p>
-                  ))}
-                  {strong && (
-                    <label className="lib-edit__bool">
-                      <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmedFor(event.target.checked ? comparison.candidateId : null)} />
-                      I&apos;ve listened to both, and this is the version I want for this song.
-                    </label>
+                  {comparison.warnings.length > 0 && (
+                    <details className="lib-upgrade__notes">
+                      <summary>Comparison notes · {comparison.warnings.length}</summary>
+                      <ul>{comparison.warnings.map((warning) => <li key={warning.text}>{warning.text}</li>)}</ul>
+                    </details>
                   )}
                   {!applying && (
                     <AbPlayer
@@ -817,11 +823,9 @@ export function UpgradeDialog({ trackId, start = null, candidateId: initialCandi
                 </span>
               </div>
               <div className="lib-upgrade__form">
-                <GenreOptions id={`upgrade-genres-${trackId}`} />
                 <MetadataFields
                   form={form}
                   initial={original}
-                  listId={`upgrade-genres-${trackId}`}
                   disabled={applying}
                   onChange={(key, value) => setForm((current) => ({ ...current, [key]: value }))}
                 />

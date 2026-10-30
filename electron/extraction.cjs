@@ -105,7 +105,7 @@ function buildAnalyzeArgs({ url, mode }) {
   return args;
 }
 
-/** yt-dlp arguments (after runtime + auth options) for an MP3 download. */
+/** yt-dlp arguments (after runtime + auth options) for a native AAC download. */
 function buildDownloadArgs({ url, outputTemplate, strategy = STRATEGIES.DEFAULT }) {
   const args = [
     "--no-update",
@@ -113,11 +113,10 @@ function buildDownloadArgs({ url, outputTemplate, strategy = STRATEGIES.DEFAULT 
     "--newline",
     "--progress",
     "--write-info-json",
-    "-x",
-    "--audio-format",
-    "mp3",
-    "--audio-quality",
-    "0",
+    "-f",
+    "bestaudio[ext=m4a][acodec^=mp4a]/bestaudio[acodec^=aac]",
+    "--remux-video",
+    "m4a",
     "--no-playlist",
     "-o",
     outputTemplate,

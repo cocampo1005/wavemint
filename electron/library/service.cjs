@@ -108,6 +108,207 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
 
   const refreshQuality = (trackIds = null) => quality.refreshQuality(db, { trackIds, lowBitrateKbps: getSettings().lowBitrateKbps });
 
+  // --- Saving edits into the files ---------------------------------------------
+  // An edit is saved in the database and then written through into the song's
+  // file (only where WaveMint may write: the WaveMint Library and folders the
+  // user allowed changes to, in MP3/M4A/FLAC). One file write runs at a time.
+  // While a task that moves or rescans files runs, writes wait for it and are
+  // made as soon as it finishes; the song stays marked as not yet written.
+  const DEFERRING_JOBS = new Set(["scan", "write-tags", "consolidate", "upgrade", "import", "audio-edit"]);
+  const INLINE_WRITE_LIMIT = 25;
+  const SAVE_BACKUP_REUSE_MS = 24 * 60 * 60 * 1000;
+  const EDIT_KINDS = ["metadata", "artwork", "genre"];
+  let writeChain = Promise.resolve();
+  const pendingWrites = new Set();
+
+  function serialWrite(work) {
+    const run = writeChain.then(work, work);
+    writeChain = run.catch(() => {});
+    return run;
+  }
+
+  function lastOperationId() {
+    return db.prepare("SELECT COALESCE(MAX(id), 0) AS id FROM operations").get().id;
+  }
+
+  /** Songs changed by metadata/artwork/genre operations newer than `afterId`. */
+  function tracksEditedSince(afterId) {
+    return db
+      .prepare(
+        `SELECT DISTINCT c.entity_id AS id FROM change_log c JOIN operations o ON o.id = c.operation_id
+         WHERE o.id > ? AND c.entity_type = 'track' AND o.kind IN (${EDIT_KINDS.map(() => "?").join(",")})`,
+      )
+      .all(afterId, ...EDIT_KINDS)
+      .map((row) => row.id);
+  }
+
+  /**
+   * Writes the tags of `trackIds` into their files. Returns
+   * { written, failed: [{ trackId, error }], blocked, deferred, job }.
+   * Small sets are written before this returns; large ones run as a
+   * background "write-tags" job.
+   */
+  async function writeThrough(trackIds, { partOf = null, background = true } = {}) {
+    const ids = [...new Set(trackIds.map(Number))];
+    const empty = { written: 0, failed: [], blocked: 0, deferred: 0, job: null };
+    if (!ids.length) return empty;
+    const { writable, blocked } = fileOps.previewTagWrite(ids);
+    if (!writable.length) return { ...empty, blocked: blocked.length };
+    const targets = writable.map((item) => item.trackId);
+
+    if (DEFERRING_JOBS.has(jobs.runningKind?.())) {
+      for (const id of targets) pendingWrites.add(id);
+      return { ...empty, blocked: blocked.length, deferred: targets.length };
+    }
+    if (background && targets.length > INLINE_WRITE_LIMIT) {
+      try {
+        const job = jobs.start("write-tags", "Saving changes to files", ({ signal, progress }) =>
+          fileOps.writeTagsJob({ trackIds: targets, signal, progress, partOf, reuseBackupMs: SAVE_BACKUP_REUSE_MS }),
+        );
+        return { ...empty, blocked: blocked.length, job };
+      } catch {
+        for (const id of targets) pendingWrites.add(id);
+        return { ...empty, blocked: blocked.length, deferred: targets.length };
+      }
+    }
+    const result = await serialWrite(() => fileOps.writeTagsJob({ trackIds: targets, partOf, reuseBackupMs: SAVE_BACKUP_REUSE_MS }));
+    return {
+      ...empty,
+      written: result.written,
+      failed: result.results.filter((item) => !item.ok).map((item) => ({ trackId: item.trackId, error: item.error })),
+      blocked: blocked.length,
+    };
+  }
+
+  // Writes that waited for a task are made when it finishes.
+  jobs.onSettled?.(() => {
+    if (!pendingWrites.size || jobs.isBusy()) return;
+    const ids = [...pendingWrites];
+    pendingWrites.clear();
+    writeThrough(ids)
+      .then((result) => (result.written || result.failed.length) && emit("library-changed", { written: ids }))
+      .catch((error) => logger.warn(`[library] Saving waiting changes failed: ${error.message}`));
+  });
+
+  /**
+   * Runs `fn` (a method that edits metadata) and writes what it changed into
+   * the files. The result gains `files` (see writeThrough).
+   */
+  async function editAndSave(fn) {
+    const before = lastOperationId();
+    const result = await fn();
+    const ids = tracksEditedSince(before);
+    if (!ids.length) return result;
+    const operationId = result?.operationId || null;
+    const files = await writeThrough(ids, { partOf: operationId });
+    return result && typeof result === "object" && !Array.isArray(result) ? { ...result, files } : result;
+  }
+
+  /**
+   * Saves one song's edited fields and/or artwork in a single step: the
+   * database edit, then the file. If the file can't be written the edit is
+   * taken back and the error is reported, so nothing is half-saved. Songs
+   * WaveMint may not write keep the edit in WaveMint (`files.blocked`).
+   */
+  async function saveTrack({ trackId, fields = {}, artworkHash }) {
+    const id = Number(trackId);
+    const track = db.prepare("SELECT id, title, artwork_hash, curated_fields, tags_dirty, active_file_id FROM tracks WHERE id = ? AND state = 'active'").get(id);
+    if (!track) throw new Error("This song is no longer in your library.");
+    const values = { ...fields };
+    if (artworkHash !== undefined) {
+      if (artworkHash && !artStore.locate(artworkHash)) throw new Error("That image isn't available anymore. Choose it again.");
+      values.artworkHash = artworkHash;
+      // Artwork that only lives in the file is stored first, so undoing the
+      // change can put it back.
+      if (!track.artwork_hash) pinFileArtwork(id);
+    }
+    const previous = new Map([[id, { curated_fields: track.curated_fields, tags_dirty: track.tags_dirty }]]);
+    const result = edits.applyEdits(db, [{ trackId: id, fields: values }], { label: `Edit "${track.title || "song"}"` });
+    if (!result.operationId) return { ...result, files: { written: 0, failed: [], blocked: 0, deferred: 0, job: null } };
+
+    let files;
+    try {
+      files = await writeThrough([id], { partOf: result.operationId, background: false });
+    } catch (error) {
+      files = { written: 0, failed: [{ trackId: id, error: error.message }] };
+    }
+    if (files.failed.length) {
+      edits.discardOperation(db, result.operationId, previous);
+      throw new Error(`Your changes weren't saved: ${files.failed[0].error}`);
+    }
+    if (fields.genre !== undefined) registerGenres([fields.genre], result.operationId);
+    return { ...result, files };
+  }
+
+  /** Undoes one operation from History, the way its kind is undone. */
+  async function undoOperation(id) {
+    requireIdle();
+    const operation = db.prepare("SELECT kind, undoable, summary FROM operations WHERE id = ?").get(Number(id));
+    if (!operation) throw new Error("This change no longer exists.");
+    if (!operation.undoable) {
+      const expired = JSON.parse(operation.summary || "{}").expired;
+      throw new Error(expired ? `This change can no longer be undone: ${expired.reason}` : "This change can't be undone.");
+    }
+    if (operation.kind === "tag-write") return fileOps.undoTagWrite(id);
+    if (operation.kind === "merge") return merge.undoMerge(id);
+    if (operation.kind === "consolidate") {
+      const result = consolidator.undoConsolidation(id);
+      refreshQuality();
+      return result;
+    }
+    if (operation.kind === "upgrade") return upgrader.undoUpgrade(id);
+    if (operation.kind === "import") {
+      const result = importer.undoImport(id);
+      review.refreshReview(db);
+      return result;
+    }
+    if (operation.kind === "remove") {
+      const result = edits.undoMetadataOperation(db, id);
+      emit("library-changed", { restored: true });
+      scheduleReview();
+      return result;
+    }
+    if (operation.kind === "quality") {
+      const result = edits.undoMetadataOperation(db, id);
+      refreshQuality();
+      return result;
+    }
+    // Undoing an edit puts the old values back into the files as well.
+    return editAndSave(() => edits.undoMetadataOperation(db, id));
+  }
+
+  /**
+   * Adds the genres a successful save gave songs to the genre list (see
+   * genres.registerLabels). Never fails the save it follows.
+   */
+  function registerGenres(labels, operationId = null) {
+    try {
+      genres.registerLabels(db, labels, { operationId });
+    } catch (error) {
+      logger.warn(`[library] Couldn't add the genre to your genres: ${error.message}`);
+    }
+  }
+
+  /** The genres `list` (applyEdits' edits) sets, minus the changes left out in the preview. */
+  function editedGenres(list, exclude = []) {
+    const skipped = new Set(exclude.filter((item) => item.field === "genre").map((item) => Number(item.trackId)));
+    return list.filter((edit) => edit.fields?.genre !== undefined && !skipped.has(Number(edit.trackId))).map((edit) => edit.fields.genre);
+  }
+
+  /** Stores a song's embedded cover in the artwork store and makes it the song's chosen artwork. */
+  function pinFileArtwork(trackId) {
+    const row = db.prepare("SELECT t.artwork_hash, f.path, f.artwork_hash AS file_art FROM tracks t LEFT JOIN files f ON f.id = t.active_file_id WHERE t.id = ?").get(trackId);
+    if (!row || row.artwork_hash || !row.file_art || !row.path) return;
+    try {
+      const art = readArtwork(row.path);
+      if (!art) return;
+      const { hash } = artStore.save(art.data);
+      db.prepare("UPDATE tracks SET artwork_hash = ? WHERE id = ? AND artwork_hash IS NULL").run(hash, trackId);
+    } catch (error) {
+      logger.warn(`[library] Couldn't keep the file's artwork: ${error.message}`);
+    }
+  }
+
   // Songs added or removed one at a time refresh the review queue once
   // things settle, not after every song of a playlist.
   let reviewTimer = null;
@@ -142,6 +343,8 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
     listTrackIds: (params) => queries.listTrackIds(db, params),
     listAlbums: (params) => queries.listAlbums(db, params),
     listArtists: (params) => queries.listArtists(db, params),
+    getArtist: ({ key }) => queries.getArtist(db, key),
+    browseFacets: () => queries.browseFacets(db),
     getAlbum: ({ id }) => queries.getAlbum(db, id),
     listGenres: () => queries.listGenres(db),
     getTrack: ({ id }) => queries.getTrack(db, id),
@@ -179,24 +382,34 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
 
     // --- metadata editing --------------------------------------------------------
     previewEdits: ({ edits: list }) => edits.previewEdits(db, list),
-    applyEdits: ({ edits: list, exclude, label }) => edits.applyEdits(db, list, { exclude, label: label || "Edit metadata" }),
+    // Every edit is saved into the files too (see writeThrough).
+    saveTrack: (params) => saveTrack(params),
+    applyEdits: async ({ edits: list, exclude = [], label }) => {
+      const result = await editAndSave(() => edits.applyEdits(db, list, { exclude, label: label || "Edit metadata" }));
+      if (result.operationId) registerGenres(editedGenres(list, exclude), result.operationId);
+      return result;
+    },
     suggestTitleCase: ({ trackIds }) =>
       db
         .prepare(`SELECT id, title FROM tracks WHERE id IN (${trackIds.map(() => "?").join(",")})`)
         .all(...trackIds)
         .map((row) => ({ trackId: row.id, fields: { title: edits.titleCase(row.title) } })),
-    editAlbum: ({ releaseId, fields, label }) => {
+    editAlbum: async ({ releaseId, fields, label }) => {
       const ids = activeTrackIds(releaseId);
       if (!ids.length) throw new Error("This album has no songs.");
-      return edits.applyEdits(db, ids.map((trackId) => ({ trackId, fields })), { label: label || "Edit album" });
+      const result = await editAndSave(() => edits.applyEdits(db, ids.map((trackId) => ({ trackId, fields })), { label: label || "Edit album" }));
+      if (result.operationId && fields.genre !== undefined) registerGenres([fields.genre], result.operationId);
+      return result;
     },
     setArtworkFromPath: ({ trackIds, filePath }) => {
       const { hash } = artStore.saveFromFile(filePath);
-      return { hash, ...edits.setTrackArtwork(db, trackIds, hash, { label: "Change artwork" }) };
+      for (const id of trackIds) pinFileArtwork(Number(id));
+      return editAndSave(() => ({ hash, ...edits.setTrackArtwork(db, trackIds, hash, { label: "Change artwork" }) }));
     },
     copyArtwork: ({ trackIds, fromTrackId }) => {
       const hash = artworkFromTrack(fromTrackId);
-      return { hash, ...edits.setTrackArtwork(db, trackIds, hash, { label: "Use artwork from another song" }) };
+      for (const id of trackIds) pinFileArtwork(Number(id));
+      return editAndSave(() => ({ hash, ...edits.setTrackArtwork(db, trackIds, hash, { label: "Use artwork from another song" }) }));
     },
     clearArtwork: ({ trackIds }) => edits.setTrackArtwork(db, trackIds, null, { label: "Use the file's own artwork" }),
     albumTrackIds: ({ releaseId }) => activeTrackIds(releaseId),
@@ -212,38 +425,14 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
     listOperations: (params) => operations.listOperations(db, params),
     getOperation: ({ id }) => operations.getOperationDetail(db, id),
     undoOperation: async ({ id }) => {
-      requireIdle();
-      const operation = db.prepare("SELECT kind, undoable, summary FROM operations WHERE id = ?").get(Number(id));
-      if (!operation) throw new Error("This change no longer exists.");
-      if (!operation.undoable) {
-        const expired = JSON.parse(operation.summary || "{}").expired;
-        throw new Error(expired ? `This change can no longer be undone: ${expired.reason}` : "This change can't be undone.");
+      const result = await undoOperation(id);
+      // Genres the change added to the genre list go too, unless something uses them now.
+      try {
+        genres.releaseCreated(db, id);
+      } catch (error) {
+        logger.warn(`[library] Couldn't take back the change's genres: ${error.message}`);
       }
-      if (operation.kind === "tag-write") return fileOps.undoTagWrite(id);
-      if (operation.kind === "merge") return merge.undoMerge(id);
-      if (operation.kind === "consolidate") {
-        const result = consolidator.undoConsolidation(id);
-        refreshQuality();
-        return result;
-      }
-      if (operation.kind === "upgrade") return upgrader.undoUpgrade(id);
-      if (operation.kind === "import") {
-        const result = importer.undoImport(id);
-        review.refreshReview(db);
-        return result;
-      }
-      if (operation.kind === "remove") {
-        const result = edits.undoMetadataOperation(db, id);
-        emit("library-changed", { restored: true });
-        scheduleReview();
-        return result;
-      }
-      if (operation.kind === "quality") {
-        const result = edits.undoMetadataOperation(db, id);
-        refreshQuality();
-        return result;
-      }
-      return edits.undoMetadataOperation(db, id);
+      return result;
     },
 
     // --- merging libraries ----------------------------------------------------
@@ -255,10 +444,12 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
     acceptMergeSuggestions: (params) => merge.acceptSuggestions(params),
     applyMerge: (params) => {
       requireIdle();
-      const result = merge.apply(params);
-      review.refreshReview(db);
-      refreshQuality();
-      return result;
+      return editAndSave(() => {
+        const result = merge.apply(params);
+        review.refreshReview(db);
+        refreshQuality();
+        return result;
+      });
     },
 
     // --- Managed Library -------------------------------------------------------
@@ -346,8 +537,11 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
     listUpgradeCandidates: (params) => upgrader.listCandidates(params),
     applyUpgrade: ({ candidateId, metadata, choices, artwork, artworkHash }) => {
       const staged = upgrader.resolveCandidateFile({ candidateId });
+      const before = db.prepare("SELECT t.genre FROM upgrade_candidates c JOIN tracks t ON t.id = c.track_id WHERE c.id = ?").get(Number(candidateId));
       return jobs.start("upgrade", "Upgrading song", async ({ signal, progress }) => {
         const result = await upgrader.applyJob({ candidateId, metadata, choices, artwork, artworkHash, signal, progress });
+        // The form always sends every field: only a genre the user changed is new.
+        if (metadata?.genre !== undefined && metadata.genre !== before?.genre) registerGenres([metadata.genre], result.operationId);
         // WaveMint's copy is in the library now; a staged extraction can go.
         // The upgrade is complete at this point: tidying up must never turn
         // it into a reported failure.
@@ -395,23 +589,32 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
       requireOnline();
       return identifier.cover({ trackId });
     },
+    // A cover for the song (title/artist/album only); assigned when the user saves.
+    findArtwork: async ({ trackId }) => {
+      requireOnline();
+      return identifier.findArtwork({ trackId });
+    },
     applyIdentification: ({ trackId, fields, coverHash }) => {
       // Only covers WaveMint itself stored can be used.
       if (coverHash && !artStore.locate(coverHash)) throw new Error("That cover isn't available anymore. Load it again.");
-      const result = identifier.apply({ trackId, fields, coverHash: coverHash || null });
-      review.refreshReview(db);
-      return result;
+      if (coverHash) pinFileArtwork(Number(trackId));
+      return editAndSave(() => {
+        const result = identifier.apply({ trackId, fields, coverHash: coverHash || null });
+        review.refreshReview(db);
+        return result;
+      });
     },
     dismissIdentifications: (params) => {
       const result = identifier.dismiss(params);
       review.refreshReview(db);
       return result;
     },
-    applyConfidentIdentifications: ({ minConfidence }) => {
-      const result = identifier.applyConfident({ minConfidence: minConfidence || 0.9 });
-      review.refreshReview(db);
-      return result;
-    },
+    applyConfidentIdentifications: ({ minConfidence }) =>
+      editAndSave(() => {
+        const result = identifier.applyConfident({ minConfidence: minConfidence || 0.9 });
+        review.refreshReview(db);
+        return result;
+      }),
     listIdentifications: (params) => identifier.list(params),
     identificationSummary: () => ({ ...identifier.summary(), enabled: !!getSettings().musicBrainzEnabled }),
     identifyAlbumCandidates: async (params) => {
@@ -424,9 +627,11 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
     },
     applyAlbumIdentification: async (params) => {
       requireOnline();
-      const result = await identifier.applyAlbum({ ...params, exclude: params.exclude || [] });
-      review.refreshReview(db);
-      return result;
+      return editAndSave(async () => {
+        const result = await identifier.applyAlbum({ ...params, exclude: params.exclude || [] });
+        review.refreshReview(db);
+        return result;
+      });
     },
 
     // --- playlist import ------------------------------------------------------------
@@ -437,6 +642,13 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
     commitImport: ({ sessionId, decisions }) =>
       jobs.start("import", "Importing into the WaveMint Library", async ({ signal, progress }) => {
         const report = await importer.commitJob({ sessionId, decisions, signal, progress });
+        registerGenres(
+          db
+            .prepare("SELECT t.genre FROM import_items i JOIN tracks t ON t.id = i.result_track_id WHERE i.session_id = ? AND i.outcome = 'added'")
+            .all(Number(sessionId))
+            .map((row) => row.genre),
+          report.operationId,
+        );
         review.refreshReview(db);
         refreshQuality();
         return report;
@@ -451,6 +663,7 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
     getStagedExtraction: (params) => audioEditor.extractionInfo(params),
     commitStagedExtraction: async (params) => {
       const added = await audioEditor.commitExtraction(params);
+      registerGenres([db.prepare("SELECT genre FROM tracks WHERE id = ?").get(added.trackId)?.genre]);
       songsAdded([added.trackId]);
       return added;
     },
@@ -565,8 +778,8 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
     listGenreTaxonomy: () => genres.listTaxonomy(db),
     genreReport: () => genres.genreReport(db),
     createGenre: (params) => genres.createGenre(db, params),
-    renameGenre: (params) => genres.renameGenre(db, params),
-    mergeGenres: (params) => genres.mergeGenres(db, params),
+    renameGenre: (params) => editAndSave(() => genres.renameGenre(db, params)),
+    mergeGenres: (params) => editAndSave(() => genres.mergeGenres(db, params)),
     deleteGenre: (params) => genres.deleteGenre(db, params),
     setGenreParent: (params) => genres.setParent(db, params),
     addGenreAlias: (params) => genres.addAlias(db, params),
@@ -577,14 +790,14 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
     updateGenreRule: (params) => genres.updateRule(db, params),
     removeGenreRule: (params) => genres.removeRule(db, params),
     previewGenreRules: () => genres.previewRules(db),
-    applyGenreRules: (params) => genres.applyRules(db, params),
+    applyGenreRules: (params) => editAndSave(() => genres.applyRules(db, params)),
 
     // --- review queue ----------------------------------------------------------
     refreshReview: () => review.refreshReview(db),
     reviewSummary: () => review.reviewSummary(db),
     listReviewItems: (params) => review.listReviewItems(db, params),
     setReviewStatus: (params) => review.setReviewStatus(db, params),
-    approveSuggestions: (params) => review.approveSuggestions(db, params),
+    approveSuggestions: (params) => editAndSave(() => review.approveSuggestions(db, params)),
 
     // --- jobs ----------------------------------------------------------------
     listJobs: () => jobs.list(),

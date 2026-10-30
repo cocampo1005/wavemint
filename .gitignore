@@ -47,3 +47,6 @@ WaveMint-Dev/
 *.njsproj
 *.sln
 *.sw?
+
+# Data and the one-time script from the legacy library migration (local only).
+migration-data/

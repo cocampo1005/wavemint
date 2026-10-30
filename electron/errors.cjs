@@ -264,6 +264,10 @@ function classifyFailure(text, { auth = null, timedOut = false } = {}) {
     return result(CATEGORIES.POST_PROCESSING);
   }
 
+  if (/Requested format is not available/i.test(errors)) {
+    return result(CATEGORIES.VIDEO_UNAVAILABLE, "A native AAC audio stream is not available for this video. Try another upload. WaveMint saves M4A without re-encoding.");
+  }
+
   if (
     /Unable to extract|Failed to extract any player response|Signature extraction failed|nsig extraction failed|n challenge solving failed|Unable to decode n|challenge solving failed|Requested format is not available|No video formats found|Some formats may be missing|jsc.*failed/i.test(
       errors,

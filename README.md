@@ -2,348 +2,369 @@
 
 <img src="src/assets/Horizontal%20Logo.png" alt="WaveMint" width="420" />
 
-### A desktop music library manager for Windows
+### Your music library, your way.
 
-Organize, tag, edit and play your music collection. Add songs from YouTube as tagged MP3s,<br />
-replace songs with better-quality versions, and keep every change undoable.
+**A Windows desktop app for organizing, editing, upgrading, and listening to your personal music collection.**
+
+Browse existing music folders, curate metadata and artwork, manage playlists, prepare files for Apple Music, and process audio from supported sources—all in one place.
 
 </div>
 
----
+> [!IMPORTANT]
+> **Use WaveMint responsibly.** Only download, copy, or process media when you are authorized to do so. A video being publicly accessible does **not** necessarily mean you have permission to download its audio. Read [Responsible use and copyright](#responsible-use-and-copyright) before using online media features.
 
-## Contents
+## At a glance
 
-**Using WaveMint**
-[Overview](#overview) · [Features](#features) · [Project status](#project-status) · [Installation](#download-and-installation) · [System requirements](#system-requirements) · [Getting started](#getting-started) · [YouTube access](#youtube-access-and-optional-sign-in) · [Keeping extraction working](#keeping-extraction-working) · [Troubleshooting](#troubleshooting) · [Privacy and your data](#privacy-and-your-data)
-
-**Developing WaveMint**
-[Building from source](#building-from-source) · [Architecture](#architecture) · [Testing](#testing) · [Releasing](#releasing)
-
-**Legal**
-[Responsible use and copyright](#responsible-use-and-copyright) · [Third-party software](#third-party-software-and-non-affiliation) · [Disclaimer](#disclaimer-of-warranty-and-limitation-of-liability) · [License](#license)
-
----
-
-## Overview
-
-WaveMint started as a small tool for turning YouTube videos into tagged MP3s and grew into a music library manager for people who keep their own collection of audio files. It reads the folders you already have (an old iTunes Media folder, a curated collection, downloads) without changing them, helps you clean up their metadata, artwork, duplicates and quality problems, and keeps the result in a tidy **WaveMint Library** folder.
-
-It's built around a few principles:
-
-- **Your files are safe by default.** Music folders you add are read-only unless you allow writing. Every file change is copied, verified, journaled and undoable from History; nothing is deleted without asking (deletions go to the Recycle Bin).
-- **Local first.** Your library, metadata and history live on your computer. Online services are only contacted when you use a feature that needs them.
-- **One place for the whole workflow:** browsing and playback, metadata and artwork, audio trimming, adding new songs, upgrading old ones, and preparing files for Apple Music on an iPhone.
+|                      |                                                                                       |
+| -------------------- | ------------------------------------------------------------------------------------- |
+| **Platform**         | Windows 10 and 11, 64-bit                                                             |
+| **Availability**     | No public installer has been released yet; [build from source](#building-from-source) |
+| **Storage**          | Local music library, metadata, playlists, and history                                 |
+| **Media processing** | Bundled yt-dlp, Deno, FFmpeg, and FFprobe                                             |
+| **Project**          | Independent, personally maintained; [source-use terms](#source-code-and-licensing)    |
 
 ## Features
 
-**Library**
-- Browse and search songs, albums, artists, genres, favorites and playlists, starting from an Overview of recently added music, genres and top artists.
-- Add any number of music folders. Scans are read-only; folders stay untouched unless you mark them writable.
-- Edit metadata for one song, many songs at once, or a whole album, with a preview of every change. Changes are stored in WaveMint and written into files only when you choose **Write Tags**, after a verified backup.
-- Organize copies of your songs into the **WaveMint Library** folder with a naming pattern (default `Album Artist/Album/Track Title`).
-- Manual and smart playlists (rules on genre, artist, album and more), with M3U8 import and export.
-- **History** lists every change, and almost all of them can be undone.
+### Organize your library
 
-**Playback**
-- A player with a queue (Play Next, Add to Queue, drag to reorder), shuffle and repeat, and Windows media keys.
-- **Listen Mode**: fullscreen-ready large artwork with a visualizer whose translucent contours flow from the artwork's edges, driven by the music that's playing.
+- **Browse your collection.** Explore songs, albums, artists, genres, favorites, and playlists. The Overview highlights recently added music, genres, and top artists.
+- **Bring your existing folders.** Add curated, legacy/iTunes, or other music folders. Scanning is read-only; a source must be marked writable before WaveMint can modify its files.
+- **Curate metadata and artwork.** Edit individual tracks, multiple selections, or entire albums; **Save Changes** writes supported tags straight into the audio file after a verified backup. **Find Artwork** looks up a missing cover from the title, artist, and album.
+- **Build an organized collection.** Consolidate copies into a dedicated **WaveMint Library** folder using a configurable naming pattern (default: `Album Artist/Album/Track Title`).
+- **Manage playlists.** Create manual and rule-based smart playlists; import and export M3U8 playlists.
+- **Review and recover changes.** History records file operations and supports undo where available. Backups and a journal help protect against interrupted operations; [see data safety](#file-safety-and-backups).
 
-**Adding music**
-- **Add Music** analyzes a YouTube video or playlist, pre-fills title, artist, album and genre (including YouTube Music's "Provided to YouTube by…" details), and lets you edit everything before adding.
-- Artwork from the original thumbnail, a centered 1000 × 1000 square crop, or your own image, previewed before extraction.
-- Songs are converted to MP3 with ID3v2.3 tags and embedded artwork, and added straight to your library. A playlist can also be imported as an album, with a review step before anything is added.
+### Listen and edit
 
-**Editing and upgrading**
-- A built-in **audio editor** trims songs and adds fades, with a waveform and live preview (for library songs and for new songs before they're added).
-- **Upgrade Track** replaces a song's file with a better version, either a file from your computer or a URL. The song's current details are prefilled and editable; WaveMint writes your final metadata and artwork into the new file, compares quality side by side (with A/B listening and spectrograms), warns about likely live or alternate versions, and keeps the old file so the upgrade can be undone.
-- **Quality & Upgrades** flags low-bitrate, transcoded and damaged files.
+- **Integrated player.** Queue tracks, use Play Next or Add to Queue, reorder playback, shuffle, repeat, and control playback with Windows media keys.
+- **Listen Mode.** Enjoy large artwork with a smooth, layered, audio-reactive visualizer that flows from the artwork's borders.
+- **Audio editor.** Trim recordings and add fades using a waveform preview, including while preparing new tracks.
+- **Track upgrades.** Replace an existing recording using a local audio file or a supported URL. Compare versions with quality information, A/B listening, and spectrograms; edit the prefilled metadata and artwork before generating the replacement. Previous versions are retained for supported undo operations.
 
-**Maintenance**
-- **Merge & Duplicates** finds the same song across folders and merges them into one entry with several file versions.
-- **Review** collects metadata problems (missing artwork, inconsistent albums, unclassified genres).
-- **Identify** (optional, off by default) looks songs and albums up on MusicBrainz and the Cover Art Archive.
-- **Storage** shows WaveMint's disk usage and cleans up old backups and previous versions after a retention period you choose.
+### Add and maintain music
 
-**Apple Music and iPhone**
-- **Prepare for iPhone** keeps an export folder of finished files for Apple Music or iTunes (FLAC is converted to Apple Lossless; MP3, AAC and ALAC are copied as they are), plus playlists and a report of what changed. WaveMint never edits Apple's library or talks to the iPhone; see [limitations](#apple-music-and-itunes).
+- **Analyze media.** Review a YouTube video or playlist and edit suggested title, artist, album, genre, and artwork before processing. Available metadata may include official release information surfaced through YouTube Music.
+- **Process tracks and playlists.** Save native AAC audio as M4A without audio re-encoding, with metadata and embedded artwork. Sources without a native AAC stream are reported as unavailable. Review selected playlist tracks or import a playlist as an album.
+- **Choose your cover art.** Use the source thumbnail, **1000 × 1000** square artwork (bars around square covers are removed, and album-art videos supply their full-resolution picture), or a custom image. The preview is exactly what gets embedded. Songs without artwork display a consistent in-app placeholder.
+- **Find library issues.** **Merge & Duplicates** groups matching files, **Quality & Upgrades** flags potentially poor-quality audio, **Review** surfaces metadata problems, and **File Health** lists missing files, earlier versions, and backups.
+- **Identify music (optional).** Look up recording and album information through MusicBrainz and the Cover Art Archive when enabled.
+- **Manage storage.** Review disk usage and remove eligible old backups or versions according to your chosen retention settings.
+- **Prepare for Apple Music/iPhone.** Generate an export folder with compatible music files, playlists, and a change report. WaveMint does **not** directly sync an iPhone or modify the Apple Music/iTunes library database.
 
-**Extraction engine**
-- yt-dlp, Deno and FFmpeg are bundled; nothing else needs to be installed.
-- The YouTube extraction engine (yt-dlp) can be updated from Settings without reinstalling. Updates are verified against yt-dlp's signed checksums and tested before use, and the built-in version is always the fallback.
-- Requests are paced, brief connection problems are retried, and WaveMint pauses itself if YouTube rate-limits the session. Errors are explained in plain language with technical details one click away.
+### Extraction engine
 
-## Project status
-
-- **Platform:** Windows 10 and 11 (64-bit) only. The build configuration, bundled tools and file handling target Windows; other platforms are not supported.
-- **Releases:** no release has been published yet. Until one is, build WaveMint from source ([below](#building-from-source)).
-- **License:** not yet chosen; see [License](#license).
-- WaveMint is an independent personal project, maintained in spare time.
+WaveMint bundles yt-dlp, Deno, FFmpeg, and FFprobe in packaged builds. The extraction engine supports separately verified updates, conservative retries, and rate-limit feedback. Availability of online media can change without notice; [learn more](#youtube-access-and-extraction).
 
 ## Download and installation
 
-When a release is published, it will be on the **[Releases page](https://github.com/cocampo1005/wavemint/releases)** as `WaveMint-Setup-<version>.exe`, with a `SHA256SUMS.txt` file to verify the download.
+**There is no published WaveMint release yet.** For now, use the [build-from-source instructions](#building-from-source).
 
-1. Download and run the installer. It installs for your Windows account only (no administrator rights needed); you can choose the folder and whether to add a desktop shortcut.
-2. Start **WaveMint** from the Start menu.
+When an installer becomes available, find it on the [official GitHub Releases page](https://github.com/cocampo1005/wavemint/releases). The planned Windows asset is named `WaveMint-Setup-<version>.exe`, accompanied by a `SHA256SUMS.txt` file.
 
-> [!NOTE]
-> Builds are not code-signed yet, so Windows SmartScreen may show "Windows protected your PC". Choose **More info**, then **Run anyway**, after checking the download's hash: `Get-FileHash .\WaveMint-Setup-<version>.exe` in PowerShell should match `SHA256SUMS.txt`.
+1. Download the installer from the project's official release page.
+2. Verify the downloaded file's SHA-256 checksum against the release's published checksum:
 
-**Uninstalling:** Windows Settings → Apps → Installed apps → WaveMint → Uninstall. This removes the app **and its data folder `%APPDATA%\WaveMint`, including the library database** (your edits, playlists and history). Your music files, the WaveMint Library folder and any exported files are not touched. If you might reinstall, back up `%APPDATA%\WaveMint\library` first.
+   ```powershell
+   Get-FileHash .\WaveMint-Setup-<version>.exe -Algorithm SHA256
+   ```
 
-## System requirements
+3. Run the installer and open WaveMint from the Start menu. The described installer is per-user and should not require administrator rights.
 
-| | |
-|---|---|
-| Operating system | Windows 10 or 11, 64-bit |
-| Disk space | About 650 MB for the app and its bundled tools, plus room for your WaveMint Library, backups and caches |
-| Internet | Only for adding music from YouTube, engine updates and the optional MusicBrainz lookups. The library, player and editors work offline. |
-| Other software | None. yt-dlp, Deno, FFmpeg and FFprobe are included. |
+> [!CAUTION]
+> **Unsigned installer:** Windows SmartScreen may warn about a build that has not been code-signed. Confirm the publisher/source and independently assess the risk before choosing to run it. A checksum comparison helps detect an altered or incomplete download, but a checksum hosted alongside the download does **not** independently prove who published it. Do not bypass a security warning if you cannot establish trust in the file.
+
+### System requirements
+
+| Requirement                | Details                                                                                                                                             |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Operating system           | Windows 10 or 11, x64                                                                                                                               |
+| App disk space             | Approximately 650 MB for the packaged app and tools, plus space for audio, cache, and backups                                                       |
+| Internet                   | Needed for online analysis/extraction, engine updates, and optional MusicBrainz lookups; library browsing, playback, and local editing work offline |
+| Additional media utilities | None for packaged builds; the required tools are bundled                                                                                            |
+
+### Uninstalling and preserving your data
+
+> [!WARNING]
+> **Current uninstall behavior removes `%APPDATA%\WaveMint`, including the library database.** This can delete your saved metadata edits, playlists, history, and application settings even though your actual music files and export folders remain on disk. **Back up your application data before uninstalling or reinstalling.** The uninstaller has not yet been independently validated as part of a full installer test.
+
+To back up your app data, exit WaveMint and copy the entire `%APPDATA%\WaveMint` folder to another location. This is safer than copying only the `library` subfolder because configuration and engine-related state are stored elsewhere within it.
+
+Use **Windows Settings → Apps → Installed apps → WaveMint → Uninstall** when ready. The data-deletion behavior is a known issue to resolve before wider distribution.
 
 ## Getting started
 
-### 1. Set up your library
+### 1. Connect your music folders
 
-1. WaveMint opens on the **Overview**. Choose **Add iTunes / Legacy Folder** there, or go to **Manage → Sources** and choose **Add Curated Folder**, **Add Legacy Folder** or **Add Other…**, then pick a folder of music. It's scanned read-only; the folder's role decides which copy is preferred when the same song appears in several folders.
-2. Under **Manage → WaveMint Library**, choose the folder where WaveMint should keep its own organized copies. Songs you add or upgrade are saved there.
-3. Browse with **Songs**, **Albums**, **Artists** and **Genres**; double-click a song to play it.
+1. On **Overview**, choose **Add iTunes / Legacy Folder**; or open **Manage → Sources** and choose **Add Curated Folder**, **Add Legacy Folder**, or **Add Other…**.
+2. Choose the folders containing your music. A scan indexes them without modifying the files. Source roles help determine which version is preferred when duplicates exist.
+3. Open **Manage → WaveMint Library** to choose where WaveMint saves organized copies and newly added or upgraded songs.
+4. Browse **Songs**, **Albums**, **Artists**, and **Genres**. Double-click a track to play it.
 
-### 2. Add music from YouTube
+### 2. Add music from a supported online source
 
-1. Click **Add Music** at the top of the navigation.
-2. Choose **Single Video** or **Playlist**, paste the link and click **Analyze**.
-3. Check the title, artist, album and genre. For a playlist, tick the songs you want and optionally use **Apply to all songs**.
-4. Pick the artwork under the preview: **Original**, **Square** or **Custom**.
-5. Click **Add to Library** (or **Add Selected to Library**). Tick **Edit audio before adding** to trim or fade a song first.
+> Only process media when you have the necessary rights or permissions, and comply with applicable platform terms. See [Responsible use](#responsible-use-and-copyright).
 
-You can cancel an analysis or extraction from its progress bar. Songs that can't be added (removed, private, region-locked) are skipped and marked; the others are added.
+1. Open **Add Music**, then choose **Single Video** or **Playlist**.
+2. Paste the link and click **Analyze**.
+3. Review or correct the suggested metadata. For playlists, select the songs you want; **Apply to all songs** can simplify shared fields.
+4. Choose **Original**, **Square**, or **Custom** artwork and review the preview.
+5. Select **Add to Library** or **Add Selected to Library**. Use **Edit audio before adding** if you want to trim or fade a recording first.
+
+Progress is shown in the interface, and individual operations can be canceled. Some sources may be unavailable because of permissions, access restrictions, removal, or third-party changes.
 
 ### 3. Edit metadata and artwork
 
-Select a song to open its details, edit the fields and **Save**. Select several songs for bulk editing, or open an album to edit it as a whole. Use **Choose Image…** for artwork. Edits are saved in WaveMint first; songs with unsaved file changes show **Write to File…**, which writes them after a verified backup (only for formats WaveMint can tag: MP3, M4A/AAC, ALAC and FLAC).
+Select a song to edit its details and click **Save Changes**. Title, artist, album, and genre are shown first; other tags are under **Advanced metadata**. You can also bulk-edit selected songs or update an album. Use **Change Artwork…** to select an image, or **Find Artwork** when a song has none; a new cover is previewed and saved with your other changes.
 
-### 4. Trim or fade a song
+Saving writes the changes into the audio file after a verified backup. Supported tag-writing formats include MP3, M4A/AAC, ALAC, and FLAC; WAV and AIFF are playable but do not support tag writing in WaveMint, and songs in read-only folders keep their edits in WaveMint.
 
-Select a song and choose **Edit Audio…**. Drag the handles to trim, set fade-in and fade-out lengths, preview, and save. The edited audio becomes the song's new version; the previous one is kept and the edit can be undone from **History**.
+### 4. Trim or fade a recording
 
-### 5. Upgrade a song
+Select a track and choose **Edit Audio…**. Set trim boundaries and fade lengths, listen to the preview, then save. WaveMint retains the previous version for supported recovery through **History**.
 
-1. Select the song and choose **Upgrade Track…**.
-2. Choose **Choose File** to pick a replacement from your computer, or **Analyze URL**, paste a video link, **Analyze**, then **Extract for Comparison**.
-3. Compare the quality, listen to both, and adjust the prefilled metadata and the artwork (**Current**, **Source**, **Custom** or **None**). Detected details are never applied automatically; **Use Detected Metadata…** lets you pick fields to take.
-4. Click **Upgrade Track**. The new file is written with your details into the WaveMint Library; the old file is kept and the upgrade can be undone from **History**.
+### 5. Upgrade an existing track
 
-### 6. Keep things tidy
+1. Select a song and choose **Upgrade Audio…** (under **Technical details**, or **Upgrade…** in **Quality & Upgrades**).
+2. Use **Choose File** for a local replacement, or **Analyze URL** to review an online source; its audio is extracted for the comparison automatically.
+3. Compare technical quality information and listen to both versions. Check that the proposed audio is the intended recording, not a live version, remix, or alternate take.
+4. Review the **prefilled but editable** metadata and choose **Current**, **Source**, **Custom**, or **None** for artwork. Detected metadata will not silently replace your curated fields; **Use Detected Metadata…** lets you select changes explicitly.
+5. Click **Upgrade Track** to generate and apply the new file using your finalized metadata and artwork. The prior version is retained for supported undo operations.
 
-Check **Review** for metadata problems, **Merge & Duplicates** for songs found in several folders, **Quality & Upgrades** for files worth replacing, and **Storage** for disk usage.
+### 6. Organize and prepare files
 
-## YouTube access and optional sign-in
+Use **Review** to find metadata issues, **Merge & Duplicates** to reconcile repeated tracks, **Quality & Upgrades** to review suspect audio, **File Health** to repair missing files or restore an earlier version, and **Storage** to manage disk usage. Use **Prepare for iPhone** to export files for subsequent import into Apple Music or iTunes.
 
-Public videos work without any setup. Some videos (age-restricted, members-only, or private videos shared with you) need a signed-in account; WaveMint says when that's the case. Signing in can help with those videos, but it doesn't guarantee access or lift YouTube's rate limits.
+## File safety and backups
 
-**Settings → YouTube Access → Advanced Authentication** offers:
+WaveMint is designed to avoid modifying original music folders without your permission. Supported file-changing operations use staged writes, verification, backups, and a journal to support recovery and undo. The scope of verification depends on the operation: for example, a metadata-only write can verify that audio was not changed, whereas a deliberate trim or audio upgrade necessarily changes it.
 
-| Method | How it works |
-|---|---|
-| **Off** (default) | No cookies are used. |
-| **Browser Cookies** | yt-dlp reads your YouTube sign-in from a browser profile on this PC (Chrome, Edge, Firefox, Brave, Opera, Vivaldi, Chromium, Whale). |
-| **Cookies File** | A `cookies.txt` file (Netscape format) you exported from your browser. |
+These protections reduce risk; they are **not** a substitute for your own backups or a guarantee against hardware failure, software bugs, or interruption. Keep an independent backup of important music and the WaveMint application-data folder, especially before large imports, consolidations, deletions, or upgrades.
 
-**Test Authentication** makes one small request (nothing is downloaded) and reports separately whether the cookies could be read and whether YouTube accepted them as a signed-in session.
+## YouTube access and extraction
+
+Online extraction depends on the third-party platform, the user's permissions, and the current capabilities of yt-dlp. **Not every publicly viewable video is downloadable or permitted to be downloaded.** Some sources require authentication, and authentication does not itself grant permission to copy content.
+
+### Optional sign-in
+
+Under **Settings → YouTube Access → Advanced Authentication**, WaveMint offers:
+
+| Method              | Description                                                                                                              |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| **Off** (default)   | Does not supply account cookies                                                                                          |
+| **Browser Cookies** | Asks yt-dlp to read a supported local browser profile (Chrome, Edge, Firefox, Brave, Opera, Vivaldi, Chromium, or Whale) |
+| **Cookies File**    | Uses a user-provided Netscape-format `cookies.txt` file                                                                  |
+
+**Test Authentication** performs a small request to assess whether cookies can be read and whether the platform recognizes the session; it does not download media. Browser security protections or locked profiles may prevent access. WaveMint does not attempt to defeat browser encryption protections.
 
 > [!WARNING]
-> Recent Chromium-based browsers on Windows protect cookies with app-bound encryption and lock them while the browser is open. If the test says the cookies couldn't be accessed, close the browser completely and retry, or use a cookies file. WaveMint does not try to bypass these protections.
+> **Protect your cookies.** A cookies file can provide access to an authenticated account and should be treated like a password. Never upload or share it in bug reports. Delete exported cookie files when they are no longer needed. WaveMint stores the selected cookie-file path rather than its values; yt-dlp may update the file during use.
 
-A cookies file is as sensitive as a password: it can give access to your Google account. Keep it private and delete it when you no longer need it. WaveMint stores only the file's location, never cookie values; yt-dlp may update the file with refreshed cookies.
+### Engine updates and rate limits
 
-## Keeping extraction working
+Use **Settings → Extraction Engine → Check for Updates** to check for a newer yt-dlp release. The application verifies downloaded updates, tests them, and retains the bundled engine as a fallback. Update checks can run at most once a day by default and can be turned off; updates are not installed automatically.
 
-YouTube changes frequently, and extraction sometimes needs a newer yt-dlp. **Settings → Extraction Engine → Check for Updates** finds the latest official release; **Install** downloads it, verifies its signature and checksum, tests it, and switches to it. **Use Built-in Version** and a button to return to the previous version are always available. By default WaveMint checks quietly at most once a day and never installs anything on its own; you can turn the check off.
-
-Extraction from YouTube is never guaranteed to work: YouTube can change or restrict access at any time, and a fix can take days to appear.
+Online services can restrict access, change behavior, or throttle requests. WaveMint reports detected rate limits and can pause processing temporarily. Neither an engine update nor signing in guarantees that extraction will work.
 
 ## Troubleshooting
 
 <details>
-<summary><b>"Some of WaveMint's built-in components could not be started"</b></summary>
+<summary><strong>A bundled component could not be started</strong></summary>
 
-A bundled tool is missing or was blocked, often by antivirus software. Restore or allow it, or reinstall WaveMint. In a source checkout, run `npm run binaries:fetch`.
+A required tool may be missing or blocked. Check antivirus or system security notifications and confirm that the software came from a trusted source. For a source checkout, run `npm run binaries:fetch` to fetch the pinned media utilities.
+
 </details>
 
 <details>
-<summary><b>"Paste the web address of a video or playlist"</b></summary>
+<summary><strong>“Paste the web address of a video or playlist”</strong></summary>
 
-The text isn't a web link WaveMint can analyze (for example a local file path). Paste the link from the browser's address bar.
+The input is not a supported online address (for example, it may be a local file path). Copy a valid source URL instead. For local audio, use the appropriate file-selection workflow.
+
 </details>
 
 <details>
-<summary><b>The video is unavailable, private or region-locked</b></summary>
+<summary><strong>A video is unavailable, restricted, or private</strong></summary>
 
-These are final for that video. For private or age-restricted videos, set up [sign-in](#youtube-access-and-optional-sign-in) with an account that has access.
+Access can be restricted or withdrawn. Use only sources you are permitted to access and process. An authorized account may be required for some material, but signing in does not guarantee availability or permission to download.
+
 </details>
 
 <details>
-<summary><b>"YouTube temporarily rate-limited this session"</b></summary>
+<summary><strong>YouTube rate-limited the session</strong></summary>
 
-YouTube is throttling requests from your connection. WaveMint pauses analysis and extraction for up to an hour and shows how long is left.
+WaveMint may temporarily pause analysis and extraction, potentially for up to an hour. Review the application's message before trying again.
+
 </details>
 
 <details>
-<summary><b>"YouTube refused to send the audio" / "extraction components may need an update"</b></summary>
+<summary><strong>Extraction components may need an update</strong></summary>
 
-WaveMint already tried the safe alternatives. Use **Check for Updates** in the message (or Settings → Extraction Engine), install the newest engine, and try again.
+Use **Settings → Extraction Engine → Check for Updates** to check for a verified engine update. Platform restrictions may still prevent access.
+
 </details>
 
 <details>
-<summary><b>A file can't be tagged, edited or upgraded</b></summary>
+<summary><strong>A track cannot be tagged, edited, or upgraded</strong></summary>
 
-- WAV and AIFF files are read and played, but WaveMint doesn't write tags into them.
-- Files in a read-only source keep their tags; your edits stay in WaveMint and are written into copies (WaveMint Library, Prepare for iPhone).
-- "In use" or permission errors: close other apps using the file (media players, tag editors, cloud-sync tools) and check that the folder isn't read-only. Failed operations leave the original file unchanged.
+- WAV and AIFF can be played but are not supported for tag writing.
+- Read-only source folders are not modified; edits can instead be written into managed copies.
+- For permission or file-in-use errors, close other programs using the file and check folder permissions.
+
 </details>
 
 <details>
-<summary><b>An upgrade or edit failed</b></summary>
+<summary><strong>An edit or upgrade failed</strong></summary>
 
-The song keeps its current file: replacements are prepared and verified before anything moves, and a failure rolls back. If WaveMint was closed mid-operation, it finishes or rolls back the operation at the next start.
+WaveMint is designed to prepare and validate replacements before applying them and to recover incomplete journaled operations on startup. If the operation fails or was interrupted, inspect **History** and verify the current file; restore from your backup if necessary.
+
 </details>
 
 <details>
-<summary><b>Reporting a problem</b></summary>
+<summary><strong>How do I report an issue?</strong></summary>
 
-Click **Details** in the error, then **Copy Error Details**, and include that in your report. Cookies, sign-in tokens, signed media URLs and your Windows user folder are removed from these details.
+Use **Details → Copy Error Details** where available. Review the copied report before sharing it: although WaveMint is designed to redact credentials, account data, signed media URLs, and sensitive local paths, you should check that no private information remains. Describe the steps to reproduce the issue.
+
 </details>
 
-### Apple Music and iTunes
+### Apple Music and iTunes limitations
 
-WaveMint never writes to Apple's library database. Apple Music and iTunes keep their own copy of each song's details and point at specific files. If you edit or upgrade a song that lives in your iTunes folder, Apple Music keeps showing (and playing) the old file and details until you update or re-add the song there. **Prepare for iPhone** lists replaced and changed songs in its report so you know what to refresh.
+WaveMint does **not** directly edit Apple's library database or sync files to an iPhone. Apple Music/iTunes tracks metadata and file locations separately, so a file changed in WaveMint may need to be refreshed or re-imported in Apple's app. **Prepare for iPhone** generates an export folder with compatible files, playlists, and a change report to help you make those updates.
 
 ## Privacy and your data
 
-WaveMint has no accounts, analytics, telemetry or crash reporting.
+WaveMint does not currently provide user accounts, in-app analytics, telemetry, or crash-report uploading, according to the documented implementation. Music library management is local, but certain optional and requested features contact external services.
 
-**Stored on your computer**
+### Local storage
 
-| What | Where |
-|---|---|
-| Library database: song details, file paths, playlists, history, settings | `%APPDATA%\WaveMint\library\` |
-| Artwork store, caches, verified backups of files before tag writes, previous versions | `%APPDATA%\WaveMint\library\` and your WaveMint Library's `.wavemint-archive` folder |
-| App settings: YouTube access method, chosen browser and profile, the cookies file's **location**, engine preferences (never cookie values) | `%APPDATA%\WaveMint\settings.json` |
-| Updated yt-dlp versions, yt-dlp's cache | `%APPDATA%\WaveMint\engine\`, `%APPDATA%\WaveMint\yt-dlp-cache\` |
-| Player preferences (volume, shuffle, column widths) | the app's local browser storage |
+| Data                                                                  | Location                                                                  |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Track details, library indexes, playlists, edits, and history         | `%APPDATA%\WaveMint\library\`                                             |
+| Artwork, caches, backups, previous versions                           | App library folder and your WaveMint Library's `.wavemint-archive` folder |
+| App settings and the selected cookie-file **path** (not its contents) | `%APPDATA%\WaveMint\settings.json`                                        |
+| Updated yt-dlp and its cache                                          | `%APPDATA%\WaveMint\engine\` and `%APPDATA%\WaveMint\yt-dlp-cache\`       |
+| Player preferences                                                    | App-local browser storage                                                 |
 
-Error details are kept in memory only (the last 25), sanitized, and shared only if you copy them. Logs go to the console and aren't written to files.
+The application keeps a limited number of sanitized error details in memory and uses console logging rather than persistent log files, as described in the current implementation.
 
-**Network connections**
+### Network activity
 
-| Service | When | What's sent |
-|---|---|---|
-| YouTube / Google (through yt-dlp) and thumbnail servers | When you analyze or extract a link, or test sign-in | The link; with sign-in turned on, your YouTube cookies (read locally by yt-dlp) |
-| GitHub | Engine update checks (at most daily, can be turned off) and installs | Standard requests for yt-dlp's release information and files |
-| MusicBrainz and Cover Art Archive | Only if you turn on Identify | Song and album details you look up, with an app identifier as required by MusicBrainz |
+| Service                                     | When contacted                                                  | Data involved                                                  |
+| ------------------------------------------- | --------------------------------------------------------------- | -------------------------------------------------------------- |
+| YouTube/Google and media or thumbnail hosts | When you analyze/extract media or test authentication           | Source URL; authenticated cookies if you opted into that mode  |
+| GitHub                                      | Optional or periodic engine-update checks and explicit installs | Requests for release information and binary downloads          |
+| MusicBrainz / Cover Art Archive             | When **Identify** is enabled and used                           | Music metadata queries and the required application identifier |
 
-Third-party services handle these requests under their own privacy policies.
+Those services may process request information under their own terms and privacy policies. Review their policies if you use the corresponding features.
 
 ## Building from source
 
-**Prerequisites:** Windows 10/11 x64, [Node.js](https://nodejs.org/) 24 or newer (npm included), and Git.
+**Prerequisites:** Windows 10/11 x64, [Node.js](https://nodejs.org/) 24 or later, npm, and Git. The Node version requirement comes from the current project configuration; packaged builds also depend on the version of Node bundled with Electron.
 
 ```powershell
 git clone https://github.com/cocampo1005/wavemint.git
 cd wavemint
 npm install
-npm run binaries:fetch   # downloads the pinned yt-dlp, Deno and FFmpeg into resources/bin and verifies them
-npm start                # Vite dev server + Electron, with hot reload
+npm run binaries:fetch
+npm start
 ```
 
-| Command | Description |
-|---|---|
-| `npm start` | Dev server (`http://localhost:5173`) and Electron together |
-| `npm run dev` / `npm run electron` | The two halves separately |
-| `npm run build` | Build the UI into `dist/` |
-| `npm run lint` | ESLint (UI, main process, scripts, tests) |
-| `npm test` | All tests (`node --test`) |
-| `npm run binaries:fetch` / `binaries:verify` | Fetch or re-verify the pinned tools |
-| `npm run binaries:check-updates` | Show newer upstream tool versions (`-- --write` updates the pins) |
-| `npm run check:release` | Release safety checks on the build inputs |
-| `npm run pack:win` | Unpacked app in `release/<version>/win-unpacked/` |
-| `npm run dist:win` | Installer `release/<version>/WaveMint-Setup-<version>.exe` |
-| `npm run icon` | Regenerate `build/icon.ico` from the logo |
+`binaries:fetch` downloads and verifies pinned yt-dlp, Deno, FFmpeg, and FFprobe binaries for development. `npm start` runs Vite and Electron together with hot reload.
 
-**Development notes**
+| Command                                              | Purpose                                                     |
+| ---------------------------------------------------- | ----------------------------------------------------------- |
+| `npm start`                                          | Launch Vite and Electron together                           |
+| `npm run dev` / `npm run electron`                   | Start the renderer or Electron separately                   |
+| `npm run build`                                      | Build the renderer into `dist/`                             |
+| `npm run lint`                                       | Run ESLint                                                  |
+| `npm test`                                           | Run automated tests                                         |
+| `npm run binaries:fetch` / `npm run binaries:verify` | Fetch or validate pinned media tools                        |
+| `npm run binaries:check-updates`                     | Check for upstream tool versions; `-- --write` updates pins |
+| `npm run check:release`                              | Validate release inputs                                     |
+| `npm run pack:win`                                   | Generate an unpacked Windows application                    |
+| `npm run dist:win`                                   | Build the Windows installer                                 |
+| `npm run icon`                                       | Regenerate the Windows application icon                     |
 
-- Without `npm run binaries:fetch`, development falls back to `yt-dlp`, `ffmpeg`, `ffprobe` and `deno` on your `PATH`; `WAVEMINT_USE_SYSTEM_BINARIES=1` forces that.
-- Development uses `%APPDATA%\WaveMint-Dev`, separate from an installed copy. `--user-data-dir=<folder>` overrides it (handy for testing with a throwaway profile).
-- `WAVEMINT_RENDERER=dist` makes Electron load the built `dist/` instead of the dev server.
-- If Electron starts as plain Node, unset `ELECTRON_RUN_AS_NODE` (some editors set it).
+**Development notes:**
+
+- If bundled tools have not been fetched, development can use `yt-dlp`, `ffmpeg`, `ffprobe`, and `deno` from `PATH`. Set `WAVEMINT_USE_SYSTEM_BINARIES=1` to force system binaries.
+- Development data defaults to `%APPDATA%\WaveMint-Dev`; `--user-data-dir=<folder>` selects another profile for isolated tests.
+- Set `WAVEMINT_RENDERER=dist` to load a previously built renderer instead of the dev server.
+- If Electron unexpectedly runs in plain Node mode, check and remove an inherited `ELECTRON_RUN_AS_NODE` environment variable.
 
 ## Architecture
 
-WaveMint is an Electron app with a strict split between the sandboxed React UI and the privileged main process:
+WaveMint uses Electron with a sandboxed React renderer, an explicit preload API, main-process services, and a worker-thread-backed SQLite library.
 
-```
-React UI (src/)                       sandboxed, no Node access, strict CSP
-   │  window.waveMintAPI (electron/preload.cjs): an explicit allowlist
+```text
+React UI (src/)
+   │  window.waveMintAPI  (electron/preload.cjs)
    ▼
-Main process (electron/)              every handler rejects other pages (ipc/trustedIpc.cjs)
-   ├─ ipc/extractionHandlers.cjs      analyze, extract, previews, cancel (per request id)
-   │     ├─ youtubeMetadata.cjs       yt-dlp JSON → song details and thumbnails (pure)
-   │     └─ songExtraction.cjs        URL → tagged MP3: extraction.cjs (yt-dlp, retries,
-   │                                  rate limits), artwork.cjs (download, square crop), FFmpeg
-   ├─ ipc/engineHandlers.cjs          verified yt-dlp updates (engine.cjs, pgp.cjs)
-   ├─ ipc/authHandlers.cjs            YouTube sign-in options (auth.cjs, settings.cjs)
-   └─ library/host.cjs                schema-validated library API, dialogs, media protocols
-         │  worker thread
-         ▼
-   library/worker.cjs + service.cjs   SQLite (node:sqlite) and the library's domain modules:
-                                      scanner, edits/fileops, merge, consolidate, upgrade,
-                                      audioedit, playlists, exporter, identify, storage…
+Electron main process (electron/)
+   ├── ipc/trustedIpc.cjs         IPC sender validation
+   ├── ipc/extractionHandlers.cjs Analysis, extraction, previews, cancellation
+   │     ├── youtubeMetadata.cjs  Parse yt-dlp metadata
+   │     └── songExtraction.cjs   Extraction and tagging workflow
+   ├── artwork.cjs               Artwork download and crop processing
+   ├── ipc/engineHandlers.cjs     Engine updates and verification
+   ├── ipc/authHandlers.cjs       Optional authentication settings
+   └── library/host.cjs           Validated library requests
+             │
+             ▼
+       library/worker.cjs         SQLite and domain operations
 ```
 
-Key decisions:
+**Design principles**
 
-- **Security boundary.** The renderer never receives file paths or runs commands. Files and folders are chosen in main-process dialogs; songs are referred to by database ids and served through custom `wavemint-media://` and `wavemint-art://` protocols. Renderer input is validated against schemas; IPC senders are checked; external processes run with argument arrays, never a shell; browser permissions are denied except fullscreen.
-- **File safety.** Every change to a music file is a journaled operation: copy to a temporary file, verify (SHA-256, tags read back, audio stream unchanged), then move into place. Interrupted operations are finished or rolled back at the next start, and History undoes them.
-- **One extraction path.** All yt-dlp runs go through `extraction.cjs`, which classifies failures and applies a deliberately conservative retry policy (a pure, tested function). Analysis, extraction, album imports and Upgrade Track share it.
-- **Off the main thread.** The library runs in a worker thread so scans of large collections never block the UI. The renderer has no state library: a player context, small hooks and paged, virtualized lists.
-- **Tools are pinned.** Bundled binaries are pinned by SHA-256 to upstream checksums, and the release check fails the build if anything credential-like or unpinned would ship.
+- **Restricted renderer access:** privileged operations are exposed through a defined preload API; IPC senders and payloads are validated.
+- **Recoverable file operations:** changes use staging, operation-specific verification, backups, and journaling where supported.
+- **Shared extraction pipeline:** analysis, single tracks, playlists, and upgrades share extraction infrastructure and request-scoped cancellation.
+- **Responsive library operations:** scanning and database work run off the renderer's main thread.
+- **Pinned media tools:** packaged utilities are tied to verified upstream downloads and checked during release preparation.
 
-More detail: [`docs/ENGINEERING.md`](docs/ENGINEERING.md) (extraction, engine updates, evaluations), [`docs/LIBRARY.md`](docs/LIBRARY.md) (library design, data model, safety model) and [`CLAUDE.md`](CLAUDE.md) (a module-by-module map).
+See [`docs/ENGINEERING.md`](docs/ENGINEERING.md), [`docs/LIBRARY.md`](docs/LIBRARY.md), and [`CLAUDE.md`](CLAUDE.md) for more detail. These repository documents and links should be checked during release preparation.
 
-## Testing
+## Testing and release builds
 
-`npm test` runs the whole suite with Node's built-in test runner; no extra framework. Tests build synthetic music libraries in temporary folders (never a real library) and cover metadata parsing and resolution, artwork crop and download rules, extraction arguments and the retry policy, IPC validation and sender checks, request-scoped cancellation, tag writing with verification, upgrades with rollback and undo, imports, merging, playlists, storage cleanup, the player queue and the visualizer model. Tests that need FFmpeg run when the tools have been fetched. Network services are replaced by fakes; no test downloads from YouTube.
+`npm test` uses Node's built-in test runner. The reported test suite covers metadata processing, artwork behavior, extraction parameters and retries, IPC validation, cancellation isolation, file tagging, upgrade recovery, playlists, storage, the player queue, and visualizer logic. Tests use temporary synthetic libraries and mock external services rather than downloading live media.
 
-## Releasing
+For release preparation, run the applicable lint, test, build, and packaged-application checks, and test the **actual installer and uninstaller** on an isolated Windows profile. At present, the previous audit reported that the installer itself and the repository-contained end-to-end test workflow had not been fully validated.
 
-Releases are built by [`.github/workflows/release.yml`](.github/workflows/release.yml) on a version tag (`v1.2.3`, matching `package.json`): it fetches and verifies the tools, runs lint and tests, builds the installer, and creates a **draft** GitHub Release with the installer, its blockmap, `SHA256SUMS.txt` and the FFmpeg source archive (for the LGPL). Test the draft with [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md) before publishing.
-
-Installers are unsigned. To sign them, add a code-signing certificate (or Azure Trusted Signing) to electron-builder, and sign only WaveMint's own executables: the bundled third-party tools must stay byte-identical to their pinned hashes, which the release check enforces.
+The repository describes a version-tag-based release workflow in [`.github/workflows/release.yml`](.github/workflows/release.yml) that creates a **draft** GitHub Release with installer artifacts, checksums, and associated third-party source materials. Review [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md) before publishing. Release executables are not currently code-signed.
 
 ---
 
 ## Responsible use and copyright
 
-WaveMint is intended for lawful management and processing of your own music collection.
+**WaveMint is intended for lawful management, organization, and processing of music and other media you own or are authorized to use.**
 
-- Only access, download, copy, convert or modify media when you have the rights or permission to do so. Music, videos, artwork and other content remain the property of their respective rights holders, and WaveMint grants no license to any third-party content.
-- Content being available on a streaming or video platform doesn't mean downloading or converting it is permitted. Platforms' terms of service (including YouTube's) may restrict downloading, and the law differs between countries. You are responsible for complying with the laws and terms that apply to you.
-- WaveMint is not designed or intended to circumvent technical protection measures, and must not be used to access protected services without authorization, to infringe copyright, or to redistribute content without permission.
+- **Know your rights.** Only access, download, copy, convert, edit, or distribute content when the applicable rights holder has authorized it or applicable law otherwise permits it. WaveMint does not grant rights to music, videos, thumbnails, artwork, or other third-party content.
+- **Respect platform terms.** A source being available online does not mean it may be downloaded. YouTube's [Terms of Service](https://www.youtube.com/t/terms), for example, restrict downloading and other use except in specified circumstances. Users are responsible for complying with the laws, permissions, and contractual terms applicable to their activities.
+- **No unauthorized circumvention or access.** WaveMint is not intended to be used for infringement, unauthorized redistribution, unlawful circumvention of technological protection measures, or access to services without authorization.
+- **Your decisions are your responsibility.** The user selects the media sources and the operations to perform. Technical support for a format or website does not constitute permission to use the underlying content.
+
+This section describes intended use; it is not a legal opinion or a guarantee that any particular use is lawful.
 
 ## Third-party software and non-affiliation
 
-WaveMint builds on [Electron](https://www.electronjs.org/), [React](https://react.dev/), [Vite](https://vite.dev/), [yt-dlp](https://github.com/yt-dlp/yt-dlp), [Deno](https://deno.com/), [FFmpeg](https://ffmpeg.org/) (LGPL build), [node-taglib-sharp](https://github.com/benrr101/node-taglib-sharp) and the [Poppins](https://github.com/itfoundry/Poppins) typeface, and can use [MusicBrainz](https://musicbrainz.org/) and the [Cover Art Archive](https://coverartarchive.org/). Each is distributed under its own license; see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). License texts are installed in `resources\licenses\` and `resources\bin\licenses\`.
+WaveMint uses independent third-party software and services, including [Electron](https://www.electronjs.org/), [React](https://react.dev/), [Vite](https://vite.dev/), [yt-dlp](https://github.com/yt-dlp/yt-dlp), [Deno](https://deno.com/), [FFmpeg](https://ffmpeg.org/), [node-taglib-sharp](https://github.com/benrr101/node-taglib-sharp), and the [Poppins](https://github.com/itfoundry/Poppins) typeface. Optional metadata lookups use [MusicBrainz](https://musicbrainz.org/) and the [Cover Art Archive](https://coverartarchive.org/).
 
-WaveMint is an independent project. It is not affiliated with, sponsored or endorsed by YouTube, Google, Apple, MusicBrainz or any other platform or service it works with, or by the authors of the software it uses. Product names and trademarks belong to their owners. Third-party services can change their interfaces, policies or availability at any time, so features that depend on them may stop working. Using a particular tool does not make downloading or converting any content lawful.
+These projects have their **own** licenses and terms. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md); the packaged release also contains third-party license materials under `resources\licenses\` and `resources\bin\licenses\` as documented by the project. Distribution requirements must be checked against the actual shipped binaries and dependencies.
+
+WaveMint is an independent project and is not affiliated with, sponsored by, or endorsed by YouTube, Google, Apple, MusicBrainz, or the other third-party projects and services mentioned here. Their names and trademarks belong to their respective owners. External interfaces, terms, and availability can change.
 
 ## Disclaimer of warranty and limitation of liability
 
-WaveMint is provided **"as is"**, without warranty of any kind, express or implied, including warranties of merchantability, fitness for a particular purpose and non-infringement.
+**WaveMint is provided on an “as is” and “as available” basis, without warranties of any kind, express or implied, to the extent permitted by applicable law**, including implied warranties of merchantability, fitness for a particular purpose, and non-infringement.
 
-Although WaveMint is designed to protect your files (verified copies, backups, journaled and undoable operations), software can fail. Possible problems include corrupted or replaced audio files, lost or incorrect metadata, library and Apple Music/iTunes synchronization differences, unsupported formats, crashes, and failed downloads or conversions, including failures of third-party services. **Keep backups of your music library before large operations** such as writing tags, consolidating, upgrading or deleting files.
+Music processing and file-management operations involve risk. Despite precautions such as staged file operations, verification, backups, and recovery mechanisms, the application may contain defects or encounter failures. Potential consequences include data loss, corrupted or replaced audio, incorrect metadata or artwork, unavailable sources, incompatibility with other applications, and interrupted processing. **Maintain independent backups before making significant changes to your library.**
 
-To the extent permitted by applicable law, the author and contributors are not liable for any damages or losses arising from the use of, or inability to use, WaveMint. Some jurisdictions don't allow certain warranty exclusions or liability limitations, so parts of this section may not apply to you.
+**To the maximum extent permitted by applicable law**, the author and contributors disclaim liability for damages or losses arising from use of or inability to use WaveMint, including loss of data or other direct or indirect losses, except where liability cannot legally be excluded or limited. Applicable consumer-protection and other mandatory laws may provide rights that these statements cannot waive.
 
-## License
+These notices do not replace compliance with copyright, contract, privacy, software-distribution, or other applicable legal obligations. Anyone planning to distribute WaveMint broadly should obtain qualified legal advice concerning those obligations.
 
-No license has been chosen for WaveMint yet, so there is no `LICENSE` file. Until one is added, the source code is copyright © 2026 Christian Ocampo, all rights reserved: you may view it on GitHub, but no other rights are granted. The third-party components WaveMint includes are covered by their own licenses (see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)).
+## Public Source Code
+
+WaveMint's source code is publicly available on GitHub for transparency, learning, and reference.
+
+© 2026 Christian Ocampo. All rights reserved. No license for modification or redistribution is currently granted.
+
+Third-party components remain subject to their respective licenses. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).

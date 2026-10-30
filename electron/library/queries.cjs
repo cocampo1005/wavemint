@@ -30,8 +30,7 @@ const TRACK_COLUMNS = `
   t.disc_total, t.year, t.genre, t.composer, t.compilation, t.duration_ms, t.review_status, t.quality_status,
   t.rating, t.favorite, t.tags_dirty, t.created_at,
   f.id AS file_id, f.codec, f.container, f.lossless, f.bitrate, f.sample_rate, f.bit_depth, f.size,
-  f.status AS file_status, COALESCE(t.artwork_hash, f.artwork_hash) AS artwork_hash, f.source_id, s.name AS source_name, s.role AS source_role, s.read_only AS source_read_only,
-  (SELECT COUNT(*) FROM files v WHERE v.track_id = t.id) AS version_count`;
+  f.status AS file_status, COALESCE(t.artwork_hash, f.artwork_hash) AS artwork_hash, f.source_id, s.name AS source_name, s.role AS source_role, s.read_only AS source_read_only`;
 
 const TRACK_FROM = `
   FROM tracks t
@@ -74,16 +73,8 @@ function trackFilterSql(filters = {}, search = "") {
     where.push("f.codec = ?");
     params.push(filters.codec);
   }
-  if (filters.lowBitrate) {
-    where.push(`f.lossless = 0 AND f.bitrate > 0 AND f.bitrate < ${LOW_BITRATE_KBPS}`);
-  }
-  if (filters.missingArtwork) where.push("(t.artwork_hash IS NULL AND f.artwork_hash IS NULL)");
-  if (filters.missingAlbum) where.push("t.album = ''");
-  if (filters.missingAlbumArtist) where.push("t.album != '' AND t.album_artist = '' AND t.compilation = 0");
-  if (filters.possibleDuplicates) {
-    where.push(`t.title_key != '' AND EXISTS (SELECT 1 FROM tracks d WHERE d.state = 'active' AND d.id != t.id
-      AND d.artist_key = t.artist_key AND d.title_key = t.title_key)`);
-  }
+  // File Health. (Missing artwork, albums, genres, duplicates and low
+  // bitrates are listed by Review and Quality & Upgrades, not as song filters.)
   if (filters.missingFile) where.push("(f.id IS NULL OR f.status != 'ok')");
   if (filters.favorite) where.push("t.favorite = 1");
   if (typeof filters.reviewStatus === "string") {
@@ -97,6 +88,20 @@ function trackFilterSql(filters = {}, search = "") {
   if (filters.multipleVersions) {
     where.push("(SELECT COUNT(*) FROM files v WHERE v.track_id = t.id) > 1");
   }
+  // Browsing filters (Songs): any of several artists, albums, genres, decades.
+  const anyOf = (values, clause, map = (value) => value) => {
+    const list = values.map(map).filter((value) => value !== null && value !== undefined).slice(0, 500);
+    if (!list.length) return;
+    where.push(clause(list.map(() => "?").join(",")));
+    params.push(...list);
+  };
+  if (Array.isArray(filters.artists)) anyOf(filters.artists, (marks) => `t.artist_key IN (${marks})`, String);
+  if (Array.isArray(filters.releaseIds)) anyOf(filters.releaseIds, (marks) => `t.release_id IN (${marks})`, (value) => (Number.isInteger(Number(value)) ? Number(value) : null));
+  if (Array.isArray(filters.genres)) anyOf(filters.genres, (marks) => `t.genre COLLATE NOCASE IN (${marks})`, String);
+  if (Array.isArray(filters.decades)) {
+    anyOf(filters.decades, (marks) => `(t.year / 10) * 10 IN (${marks})`, (value) => (Number.isInteger(Number(value)) ? Number(value) : null));
+  }
+
   if (Array.isArray(filters.ids)) {
     const ids = filters.ids.map(Number).filter((id) => Number.isInteger(id) && id > 0).slice(0, 5000);
     where.push(ids.length ? `t.id IN (${ids.map(() => "?").join(",")})` : "0");
@@ -199,32 +204,82 @@ function getAlbum(db, id) {
   );
 }
 
-function listArtists(db, { search = "", offset = 0, limit = 500 } = {}) {
+/**
+ * Artists with their songs, grouped in one pass: each artist's most common
+ * spelling, song and album counts, and the artwork of their first song that
+ * has some. (A per-artist subquery here scanned every song once per artist:
+ * about 2 s for 1,300 artists.) `where`/`params` narrow the songs counted.
+ */
+function artistRows(db, { where = "", params = [], order = "name COLLATE NOCASE", limit, offset = 0 }) {
+  return db
+    .prepare(
+      `WITH active AS MATERIALIZED (
+         SELECT t.id, t.artist_key, t.artist, t.release_id, COALESCE(t.artwork_hash, f.artwork_hash) AS art
+         FROM tracks t LEFT JOIN files f ON f.id = t.active_file_id
+         WHERE t.state = 'active' AND t.artist_key != '' ${where}
+       ),
+       counts AS MATERIALIZED (
+         SELECT artist_key, COUNT(*) AS track_count, COUNT(DISTINCT release_id) AS album_count FROM active GROUP BY artist_key
+       ),
+       -- The name is the artist's most common spelling across the whole library.
+       names AS MATERIALIZED (
+         SELECT artist_key, artist FROM (
+           SELECT artist_key, artist, ROW_NUMBER() OVER (PARTITION BY artist_key ORDER BY COUNT(*) DESC, artist) AS rn
+           FROM tracks WHERE state = 'active' AND artist_key IN (SELECT artist_key FROM counts) GROUP BY artist_key, artist)
+         WHERE rn = 1
+       ),
+       arts AS MATERIALIZED (
+         SELECT artist_key, art FROM (
+           SELECT artist_key, art, ROW_NUMBER() OVER (PARTITION BY artist_key ORDER BY id) AS rn FROM active WHERE art IS NOT NULL)
+         WHERE rn = 1
+       )
+       SELECT c.artist_key AS key, n.artist AS name, c.track_count, c.album_count, ar.art AS artwork_hash
+       FROM counts c
+       JOIN names n ON n.artist_key = c.artist_key
+       LEFT JOIN arts ar ON ar.artist_key = c.artist_key
+       ORDER BY ${order} LIMIT ? OFFSET ?`,
+    )
+    .all(...params, limit, offset);
+}
+
+function listArtists(db, { search = "", genre, offset = 0, limit = 500 } = {}) {
   const params = [];
-  let filter = "";
+  let where = "";
   const text = String(search || "").trim();
   if (text) {
-    filter = "AND t.artist LIKE ? ESCAPE '\\'";
+    where += " AND t.artist LIKE ? ESCAPE '\\'";
     params.push(`%${text.replace(/[\\%_]/g, "\\$&")}%`);
   }
+  if (typeof genre === "string") {
+    where += " AND t.genre = ? COLLATE NOCASE";
+    params.push(genre);
+  }
 
-  const total = db
-    .prepare(`SELECT COUNT(DISTINCT t.artist_key) AS n FROM tracks t WHERE t.state = 'active' AND t.artist_key != '' ${filter}`)
-    .get(...params).n;
-  const rows = db
-    .prepare(
-      `SELECT t.artist_key AS key,
-              (SELECT t2.artist FROM tracks t2 WHERE t2.artist_key = t.artist_key AND t2.state = 'active'
-               GROUP BY t2.artist ORDER BY COUNT(*) DESC LIMIT 1) AS name,
-              COUNT(*) AS track_count,
-              COUNT(DISTINCT t.release_id) AS album_count,
-              (SELECT COALESCE(t3.artwork_hash, f.artwork_hash) FROM tracks t3 JOIN files f ON f.id = t3.active_file_id
-               WHERE t3.artist_key = t.artist_key AND COALESCE(t3.artwork_hash, f.artwork_hash) IS NOT NULL LIMIT 1) AS artwork_hash
-       FROM tracks t WHERE t.state = 'active' AND t.artist_key != '' ${filter}
-       GROUP BY t.artist_key ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?`,
-    )
-    .all(...params, clampInt(limit, 1, 2000, 500), clampInt(offset, 0, Number.MAX_SAFE_INTEGER, 0));
+  const total = db.prepare(`SELECT COUNT(DISTINCT t.artist_key) AS n FROM tracks t WHERE t.state = 'active' AND t.artist_key != '' ${where}`).get(...params).n;
+  const rows = artistRows(db, { where, params, limit: clampInt(limit, 1, 5000, 500), offset: clampInt(offset, 0, Number.MAX_SAFE_INTEGER, 0) });
   return { total, rows };
+}
+
+/** One artist (by artist key) with counts, artwork and the genres of their songs. */
+function getArtist(db, key) {
+  const [row] = artistRows(db, { where: "AND t.artist_key = ?", params: [String(key)], limit: 1 });
+  if (!row) return null;
+  const genres = db
+    .prepare("SELECT genre AS name, COUNT(*) AS count FROM tracks WHERE state = 'active' AND artist_key = ? AND genre != '' GROUP BY genre COLLATE NOCASE ORDER BY count DESC LIMIT 8")
+    .all(String(key));
+  const duration = db.prepare("SELECT COALESCE(SUM(duration_ms), 0) AS ms FROM tracks WHERE state = 'active' AND artist_key = ?").get(String(key)).ms;
+  return { ...row, duration_ms: duration, genres };
+}
+
+/** Values the Songs filters offer that aren't lists of their own: release decades. */
+function browseFacets(db) {
+  const decades = db
+    .prepare(
+      `SELECT (year / 10) * 10 AS decade, COUNT(*) AS count FROM tracks
+       WHERE state = 'active' AND year BETWEEN 1000 AND 9999 GROUP BY decade ORDER BY decade DESC`,
+    )
+    .all();
+  return { decades };
 }
 
 function listGenres(db) {
@@ -285,13 +340,17 @@ function getStatus(db) {
          AND f.ext IN ('.mp3', '.m4a', '.m4b', '.flac')`,
     )
     .get().n;
-  const review = db.prepare("SELECT COUNT(*) AS n FROM review_items WHERE status IN ('needs_review', 'suggested')").get().n;
+  // File problems are counted for File Health, not Review.
+  const review = db.prepare("SELECT COUNT(*) AS n FROM review_items WHERE status IN ('needs_review', 'suggested') AND kind != 'file_problem'").get().n;
+  const fileProblems = db
+    .prepare("SELECT COUNT(*) AS n FROM tracks t LEFT JOIN files f ON f.id = t.active_file_id WHERE t.state = 'active' AND (f.id IS NULL OR f.status != 'ok')")
+    .get().n;
   const sources = db.prepare("SELECT COUNT(*) AS n FROM sources").get().n;
   const qualityAttention = db
     .prepare("SELECT COUNT(*) AS n FROM tracks WHERE state = 'active' AND quality_status IN ('user_marked_poor', 'upgrade_available')")
     .get().n;
   const tracks = db.prepare("SELECT COUNT(*) AS n FROM tracks WHERE state = 'active'").get().n;
-  return { unsavedWritable: unsaved, reviewOpen: review, qualityAttention, sources, tracks };
+  return { unsavedWritable: unsaved, reviewOpen: review, fileProblems, qualityAttention, sources, tracks };
 }
 
 function getDashboard(db) {
@@ -321,18 +380,7 @@ function getDashboard(db) {
     .prepare(`SELECT ${TRACK_COLUMNS} ${TRACK_FROM} WHERE t.state = 'active' ORDER BY t.created_at DESC, t.id DESC LIMIT 18`)
     .all();
 
-  const topArtists = db
-    .prepare(
-      `SELECT t.artist_key AS key,
-              (SELECT t2.artist FROM tracks t2 WHERE t2.artist_key = t.artist_key AND t2.state = 'active'
-               GROUP BY t2.artist ORDER BY COUNT(*) DESC LIMIT 1) AS name,
-              COUNT(*) AS track_count, COUNT(DISTINCT t.release_id) AS album_count,
-              (SELECT COALESCE(t3.artwork_hash, f.artwork_hash) FROM tracks t3 JOIN files f ON f.id = t3.active_file_id
-               WHERE t3.artist_key = t.artist_key AND t3.state = 'active' AND COALESCE(t3.artwork_hash, f.artwork_hash) IS NOT NULL LIMIT 1) AS artwork_hash
-       FROM tracks t WHERE t.state = 'active' AND t.artist_key != ''
-       GROUP BY t.artist_key ORDER BY track_count DESC, name COLLATE NOCASE LIMIT 8`,
-    )
-    .all();
+  const topArtists = artistRows(db, { order: "track_count DESC, name COLLATE NOCASE", limit: 8 });
 
   const favorites = one("SELECT COUNT(*) AS n FROM tracks WHERE state = 'active' AND favorite = 1").n;
 
@@ -375,7 +423,9 @@ function getDashboard(db) {
 
 module.exports = {
   LOW_BITRATE_KBPS,
+  browseFacets,
   getAlbum,
+  getArtist,
   getDashboard,
   getStatus,
   getTrack,

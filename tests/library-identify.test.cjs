@@ -355,3 +355,23 @@ test("a whole album is matched to a release tracklist and applied in one edit", 
   assert.deepEqual(rows.map((row) => row.track_no), [1, 2, 3, 4]);
   assert.ok(rows.every((row) => row.track_total === 10 && row.year === 2000 && row.album_artist === "Coldplay" && row.mb_recording_id && row.artwork_hash));
 });
+
+test("Find Artwork looks up only the cover: by album and artist, without changing the song", needsAudio, async (t) => {
+  const lib = await identifyLibrary(t);
+  const yellow = lib.id("Coldplay/Parachutes/05 Yellow.mp3");
+  const before = lib.db.prepare("SELECT * FROM tracks WHERE id = ?").get(yellow);
+
+  const found = await lib.identifier.findArtwork({ trackId: yellow });
+  assert.ok(found && lib.artStore.locate(found.hash), "the cover is stored locally");
+  assert.equal(found.release.title, "Parachutes");
+  assert.deepEqual(lib.db.prepare("SELECT * FROM tracks WHERE id = ?").get(yellow), before, "nothing about the song changed");
+  assert.equal(lib.db.prepare("SELECT COUNT(*) AS n FROM identifications").get().n, 0, "no identification was made");
+  const caa = lib.fake.calls.filter((call) => call.url.includes("coverartarchive.org"));
+  assert.match(caa[0].url, /front-1200$/, "the large cover is asked for first");
+
+  // Without an album, the song's recordings are searched; an unknown song finds nothing.
+  const loose = lib.id("Loose/yellow.mp3");
+  assert.equal((await lib.identifier.findArtwork({ trackId: loose }))?.release.title, "Parachutes");
+  lib.db.prepare("UPDATE tracks SET title = 'Unknown Song', album = '' WHERE id = ?").run(loose);
+  assert.equal(await lib.identifier.findArtwork({ trackId: loose }), null);
+});

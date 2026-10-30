@@ -1,23 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useToast } from "../toasts/useToast";
 import { Dialog } from "./Dialog";
+import { Disclosure } from "./Disclosure";
 import { EditPreview } from "./EditPreview";
-import { EDIT_FIELDS, FIELD_LABELS, displayValue, toApiValue, toFormValue } from "./fields";
+import { ADVANCED_FIELDS, EDIT_FIELDS, FIELD_LABELS, PRIMARY_FIELDS, PRIMARY_KEYS, displayValue, toApiValue, toFormValue } from "./fields";
 import { pluralize } from "./format";
 import { CloseIcon, EditIcon, WarningIcon } from "./icons";
-import { errorMessage, libraryApi, useGenreNames, useLoader } from "./useLibrary";
+import { AlbumInput, ArtistInput, GenreInput } from "./MetadataInputs";
+import { errorMessage, libraryApi, refreshSuggestions, useLoader } from "./useLibrary";
 
-export function GenreOptions({ id }) {
-  const names = useGenreNames();
-  return (
-    <datalist id={id}>
-      {names.map((name) => (
-        <option key={name} value={name} />
-      ))}
-    </datalist>
-  );
-}
-
-function FieldInput({ field, value, onChange, placeholder, listId, changed, original }) {
+/** The input for one field. `artist` is the form's artist, whose albums the Album field suggests. */
+function FieldInput({ field, value, onChange, placeholder, artist = "", changed, original }) {
   if (field.type === "bool") {
     return (
       <label className={`settings-toggle lib-edit__bool ${changed ? "is-changed" : ""}`}>
@@ -30,15 +23,22 @@ function FieldInput({ field, value, onChange, placeholder, listId, changed, orig
   return (
     <label className={`form-field lib-edit__field ${field.wide ? "is-wide" : ""} ${field.type === "number" ? "is-number" : ""} ${changed ? "is-changed" : ""}`}>
       <span className="form-field__label">{field.label}</span>
-      <input
-        className="field"
-        type={field.type === "number" ? "number" : "text"}
-        min={field.type === "number" ? 0 : undefined}
-        value={value}
-        placeholder={placeholder}
-        list={field.key === "genre" ? listId : undefined}
-        onChange={(event) => onChange(event.target.value)}
-      />
+      {field.key === "genre" ? (
+        <GenreInput value={value} onChange={onChange} placeholder={placeholder} />
+      ) : field.key === "artist" || field.key === "albumArtist" ? (
+        <ArtistInput value={value} onChange={onChange} placeholder={placeholder} />
+      ) : field.key === "album" ? (
+        <AlbumInput value={value} onChange={onChange} artist={artist} placeholder={placeholder} />
+      ) : (
+        <input
+          className="field"
+          type={field.type === "number" ? "number" : "text"}
+          min={field.type === "number" ? 0 : undefined}
+          value={value}
+          placeholder={placeholder}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      )}
       {changed && original !== undefined && (
         <span className="lib-edit__original">Was: {displayValue(original)}</span>
       )}
@@ -46,160 +46,188 @@ function FieldInput({ field, value, onChange, placeholder, listId, changed, orig
   );
 }
 
+/** The artist whose albums a form's Album field suggests: the song artist, else the album artist. */
+const formArtist = (form) => String(form.artist ?? "").trim() || String(form.albumArtist ?? "").trim();
+
+function FieldGroup({ fields, form, initial, onChange }) {
+  return fields.map((field) => (
+    <FieldInput
+      key={field.key}
+      field={field}
+      value={form[field.key]}
+      artist={formArtist(form)}
+      changed={form[field.key] !== initial[field.key]}
+      original={initial[field.key]}
+      onChange={(value) => onChange(field.key, value)}
+    />
+  ));
+}
+
 /**
- * The metadata form (every editable field), shared by the song editor and
- * Upgrade Track. `form` and `initial` are form values (see fields.js);
- * fields that differ from `initial` are marked with their old value.
+ * The metadata form, shared by the song editor and Upgrade Track: Title,
+ * Artist, Album and Genre always, every other tag under a collapsed
+ * "Advanced metadata". `form` and `initial` are form values (see fields.js);
+ * fields that differ from `initial` are marked with their old value. Hidden
+ * fields keep their values and are saved like the visible ones.
  */
-export function MetadataFields({ form, initial, onChange, listId, disabled = false }) {
+export function MetadataFields({ form, initial, onChange, disabled = false }) {
+  const changedAdvanced = ADVANCED_FIELDS.filter((field) => form[field.key] !== initial[field.key]).length;
   return (
-    <fieldset className="lib-edit__grid lib-edit__fieldset" disabled={disabled}>
-      {EDIT_FIELDS.map((field) => (
-        <FieldInput
-          key={field.key}
-          field={field}
-          value={form[field.key]}
-          listId={listId}
-          changed={form[field.key] !== initial[field.key]}
-          original={initial[field.key]}
-          onChange={(value) => onChange(field.key, value)}
-        />
-      ))}
+    <fieldset className="lib-edit__fieldset" disabled={disabled}>
+      <div className="lib-edit__grid is-primary">
+        <FieldGroup fields={PRIMARY_FIELDS} form={form} initial={initial} onChange={onChange} />
+      </div>
+      <Disclosure label="Advanced metadata" hint={changedAdvanced ? pluralize(changedAdvanced, "change") : ""} className="lib-edit__advanced">
+        <div className="lib-edit__grid">
+          <FieldGroup fields={ADVANCED_FIELDS} form={form} initial={initial} onChange={onChange} />
+        </div>
+      </Disclosure>
     </fieldset>
   );
 }
 
-/** Tag status of one song: in sync, unsaved, or not writable here. */
-function TagStatus({ track, onWriteTags }) {
+const SOURCE_FORMATS = ["mp3", "m4a", "m4b", "flac"];
+
+/**
+ * Why this song's edits stay in WaveMint instead of its file (a read-only
+ * folder, a format WaveMint doesn't tag), or that saving to the file is still
+ * pending (a failed or waiting write, which can be retried). Null when the
+ * file matches.
+ */
+function FileSaveNote({ track, onRetry, retrying }) {
   const active = track.files.find((file) => file.id === track.active_file_id);
   if (!track.tags_dirty || !active) return null;
-  const editable = ["mp3", "m4a", "m4b", "flac"].includes(String(active.ext).replace(".", "").toLowerCase());
-
-  let note;
+  const editable = SOURCE_FORMATS.includes(String(active.ext).replace(".", "").toLowerCase());
   if (active.source_read_only) {
-    note = `Saved in WaveMint. "${active.source_name}" is read-only, so the file keeps its old tags until you consolidate it into your managed library.`;
-  } else if (!editable) {
-    note = "Saved in WaveMint. WaveMint doesn't change tags in this file format.";
+    return <p className="lib-edit__note">Saved in WaveMint. &ldquo;{active.source_name}&rdquo; is read-only, so the file keeps its old tags until the song is copied into your WaveMint Library.</p>;
   }
-
+  if (!editable) return <p className="lib-edit__note">Saved in WaveMint. WaveMint doesn&apos;t change tags in this file format.</p>;
   return (
-    <div className="lib-tagstatus">
-      <WarningIcon size={14} />
-      <span>{note || "Saved in WaveMint, not yet written to the file."}</span>
-      {!note && (
-        <button type="button" className="btn btn--secondary btn--sm" onClick={() => onWriteTags([track.id])}>
-          Write to File…
-        </button>
-      )}
-    </div>
+    <p className="lib-edit__note is-warn">
+      <WarningIcon size={13} /> Saved in WaveMint, not yet in the file.{" "}
+      <button type="button" className={`btn btn--link ${retrying ? "is-loading" : ""}`} disabled={retrying} onClick={onRetry}>
+        Save to File
+      </button>
+    </p>
   );
 }
 
-/** Editor for one song (inside the details panel). */
-export function TrackEditor({ track, onChanged, onError, onWriteTags }) {
-  const initial = useMemo(
-    () => Object.fromEntries(EDIT_FIELDS.map((field) => [field.key, toFormValue(field, track[field.column])])),
-    [track],
-  );
+const formValuesOf = (track) => Object.fromEntries(EDIT_FIELDS.map((field) => [field.key, toFormValue(field, track[field.column])]));
+
+/**
+ * Editor for one song (inside the details panel). Save Changes writes the
+ * edited fields and the chosen artwork (`pendingArtwork`, set from the
+ * artwork panel: a chosen image or a found cover) into the song's file in
+ * one step. Nothing is shown as saved until the file write succeeded; if it
+ * fails, the form keeps the edits and says why.
+ */
+export function TrackEditor({ track, pendingArtwork = null, onPendingArtworkChange, onChanged }) {
+  const initial = useMemo(() => formValuesOf(track), [track]);
   const [form, setForm] = useState(initial);
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(null);
+  const [error, setError] = useState("");
+  const { notify } = useToast();
+  const [retrying, setRetrying] = useState(false);
+  const previousInitial = useRef(initial);
 
+  // A reload (after a save, or anything else that changed the library)
+  // refreshes the fields the user hasn't touched and keeps the ones they're
+  // editing.
   useEffect(() => {
-    setForm(initial);
+    const before = previousInitial.current;
+    previousInitial.current = initial;
+    setForm((current) => Object.fromEntries(EDIT_FIELDS.map((field) => [field.key, current[field.key] === before[field.key] ? initial[field.key] : current[field.key]])));
   }, [initial]);
 
-  // "Saved · Undo" belongs to this song; another song starts fresh.
-  useEffect(() => {
-    setSaved(null);
-  }, [track.id]);
-
   const changedKeys = EDIT_FIELDS.filter((field) => form[field.key] !== initial[field.key]).map((field) => field.key);
+  const changeCount = changedKeys.length + (pendingArtwork ? 1 : 0);
 
   const save = async () => {
     setSaving(true);
+    setError("");
     try {
       const fields = {};
       for (const field of EDIT_FIELDS) if (changedKeys.includes(field.key)) fields[field.key] = toApiValue(field, form[field.key]);
-      const result = await libraryApi.applyEdits({ edits: [{ trackId: track.id, fields }], label: `Edit "${track.title || "song"}"` });
-      setSaved(result);
+      const result = await libraryApi.saveTrack({ trackId: track.id, fields, ...(pendingArtwork ? { artworkHash: pendingArtwork.hash } : {}) });
+      const files = result.files || {};
+      const name = `"${form.title.trim() || "Untitled"}"`;
+      const text = files.deferred ? `Saved ${name}. It goes into the file when the current task finishes.` : files.blocked ? `Saved ${name} in WaveMint.` : `Saved ${name} to the file.`;
+      const operationId = result.operationId;
+      notify({ text, action: operationId ? { label: "Undo", onClick: () => undo(operationId) } : null });
+      onPendingArtworkChange?.(null);
+      refreshSuggestions();
       onChanged?.();
-    } catch (error) {
-      onError?.(errorMessage(error, "The changes couldn't be saved"));
+    } catch (err) {
+      // The edits stay in the form so nothing typed is lost.
+      setError(errorMessage(err, "Your changes couldn't be saved."));
     } finally {
       setSaving(false);
     }
   };
 
-  const undo = async () => {
+  const discard = () => {
+    setForm(initial);
+    setError("");
+    onPendingArtworkChange?.(null);
+  };
+
+  const undo = async (id) => {
     try {
-      await libraryApi.undoOperation({ id: saved.operationId });
-      setSaved(null);
+      await libraryApi.undoOperation({ id });
+      refreshSuggestions();
       onChanged?.();
-    } catch (error) {
-      onError?.(errorMessage(error));
+      notify({ text: "Changes undone." });
+    } catch (err) {
+      notify({ tone: "error", text: errorMessage(err, "That couldn't be undone.") });
     }
   };
 
-  const artworkAction = async (action) => {
+  const retryFileSave = async () => {
+    setRetrying(true);
+    setError("");
     try {
-      const result = await action();
-      if (result) onChanged?.();
-    } catch (error) {
-      onError?.(errorMessage(error));
+      await libraryApi.writeTags({ trackIds: [track.id] });
+      onChanged?.();
+    } catch (err) {
+      setError(errorMessage(err, "The file couldn't be saved."));
+    } finally {
+      setRetrying(false);
     }
   };
 
   return (
     <div className="lib-edit">
-      <GenreOptions id={`genres-${track.id}`} />
       <MetadataFields
         form={form}
         initial={initial}
-        listId={`genres-${track.id}`}
+        disabled={saving}
         onChange={(key, value) => setForm((current) => ({ ...current, [key]: value }))}
       />
 
+      {error && (
+        <p className="lib-edit__note is-error" role="alert">
+          <WarningIcon size={13} /> {error}
+        </p>
+      )}
+
       <div className="lib-edit__actions">
-        <button type="button" className={`btn btn--primary btn--sm ${saving ? "is-loading" : ""}`} onClick={save} disabled={!changedKeys.length || saving}>
-          Save {changedKeys.length ? pluralize(changedKeys.length, "change") : ""}
+        <button type="button" className={`btn btn--primary btn--sm ${saving ? "is-loading" : ""}`} onClick={save} disabled={!changeCount || saving}>
+          Save Changes
         </button>
-        {changedKeys.length > 0 && (
-          <button type="button" className="btn btn--ghost btn--sm" onClick={() => setForm(initial)}>
+        {changeCount > 0 && !saving && (
+          <button type="button" className="btn btn--ghost btn--sm" onClick={discard}>
             Discard
           </button>
         )}
-        {saved?.operationId && !changedKeys.length && (
-          <span className="lib-edit__saved">
-            Saved.{" "}
-            <button type="button" className="btn btn--link" onClick={undo}>
-              Undo
-            </button>
-          </span>
-        )}
       </div>
 
-      <div className="lib-edit__artwork">
-        <span className="form-field__label">Artwork</span>
-        <div className="lib-edit__artwork-actions">
-          <button type="button" className="btn btn--ghost btn--sm" onClick={() => artworkAction(() => libraryApi.setArtworkFromDialog({ trackIds: [track.id] }))}>
-            Choose Image…
-          </button>
-          {track.artwork_hash && (
-            <button type="button" className="btn btn--ghost btn--sm" onClick={() => artworkAction(() => libraryApi.clearArtwork({ trackIds: [track.id] }))}>
-              Use the File&apos;s Artwork
-            </button>
-          )}
-        </div>
-      </div>
-
-      <TagStatus track={track} onWriteTags={onWriteTags} />
+      <FileSaveNote track={track} onRetry={retryFileSave} retrying={retrying} />
     </div>
   );
 }
 
-/** Editor for several songs at once. Empty fields keep each song's value. */
-export function BulkEditor({ trackIds, query, onClose, onChanged, onError, onWriteTags }) {
+/** Editor for several songs at once. Empty fields keep each song's value. Applying saves into the files. */
+export function BulkEditor({ trackIds, query, onClose, onChanged, onError }) {
   const ids = useMemo(() => [...trackIds], [trackIds]);
   const [form, setForm] = useState(() => Object.fromEntries(EDIT_FIELDS.map((field) => [field.key, field.type === "bool" ? null : ""])));
   const [cleared, setCleared] = useState(() => new Set());
@@ -265,6 +293,63 @@ export function BulkEditor({ trackIds, query, onClose, onChanged, onError, onWri
   };
 
   const hasInput = Object.keys(fieldsToApply()).length > 0;
+  const advancedPending = ADVANCED_FIELDS.filter((field) => cleared.has(field.key) || (field.type === "bool" ? form[field.key] !== null : String(form[field.key]).trim() !== "")).length;
+
+  const bulkField = (field) =>
+    field.type === "bool" ? (
+      <label key={field.key} className="settings-toggle lib-edit__bool is-wide">
+        <select
+          className="field"
+          value={form[field.key] === null ? "" : form[field.key] ? "yes" : "no"}
+          onChange={(event) => setForm((current) => ({ ...current, [field.key]: event.target.value === "" ? null : event.target.value === "yes" }))}
+        >
+          <option value="">Keep existing</option>
+          <option value="yes">Yes</option>
+          <option value="no">No</option>
+        </select>
+        <span>{field.label}</span>
+      </label>
+    ) : (
+      <div key={field.key} className={`lib-edit__bulkfield ${field.wide ? "is-wide" : ""} ${field.type === "number" ? "is-number" : ""}`}>
+        <FieldInput
+          field={field}
+          value={cleared.has(field.key) ? "" : form[field.key]}
+          artist={field.key === "album" ? formArtist(form) || formArtist(shared || {}) : ""}
+          placeholder={
+            cleared.has(field.key)
+              ? "Will be cleared"
+              : shared && shared[field.key] !== undefined
+                ? `${displayValue(shared[field.key])} (all)`
+                : "Keep existing"
+          }
+          changed={cleared.has(field.key) || String(form[field.key]).trim() !== ""}
+          onChange={(value) => {
+            setCleared((current) => {
+              const next = new Set(current);
+              next.delete(field.key);
+              return next;
+            });
+            setForm((current) => ({ ...current, [field.key]: value }));
+          }}
+        />
+        {!field.type && (
+          <button
+            type="button"
+            className="btn btn--link lib-edit__clear"
+            onClick={() =>
+              setCleared((current) => {
+                const next = new Set(current);
+                if (next.has(field.key)) next.delete(field.key);
+                else next.add(field.key);
+                return next;
+              })
+            }
+          >
+            {cleared.has(field.key) ? "Keep" : "Clear"}
+          </button>
+        )}
+      </div>
+    );
 
   return (
     <aside className="lib-detail" aria-label="Edit several songs">
@@ -276,65 +361,10 @@ export function BulkEditor({ trackIds, query, onClose, onChanged, onError, onWri
       </div>
       <div className="lib-detail__body">
         <p className="settings-help">Fill in only what should change. Empty fields keep each song&apos;s own value.</p>
-        <GenreOptions id="genres-bulk" />
-        <div className="lib-edit__grid">
-          {EDIT_FIELDS.map((field) =>
-            field.type === "bool" ? (
-              <label key={field.key} className="settings-toggle lib-edit__bool is-wide">
-                <select
-                  className="field"
-                  value={form[field.key] === null ? "" : form[field.key] ? "yes" : "no"}
-                  onChange={(event) => setForm((current) => ({ ...current, [field.key]: event.target.value === "" ? null : event.target.value === "yes" }))}
-                >
-                  <option value="">Keep existing</option>
-                  <option value="yes">Yes</option>
-                  <option value="no">No</option>
-                </select>
-                <span>{field.label}</span>
-              </label>
-            ) : (
-              <div key={field.key} className={`lib-edit__bulkfield ${field.wide ? "is-wide" : ""} ${field.type === "number" ? "is-number" : ""}`}>
-                <FieldInput
-                  field={field}
-                  value={cleared.has(field.key) ? "" : form[field.key]}
-                  listId="genres-bulk"
-                  placeholder={
-                    cleared.has(field.key)
-                      ? "Will be cleared"
-                      : shared && shared[field.key] !== undefined
-                        ? `${displayValue(shared[field.key])} (all)`
-                        : "Keep existing"
-                  }
-                  changed={cleared.has(field.key) || String(form[field.key]).trim() !== ""}
-                  onChange={(value) => {
-                    setCleared((current) => {
-                      const next = new Set(current);
-                      next.delete(field.key);
-                      return next;
-                    });
-                    setForm((current) => ({ ...current, [field.key]: value }));
-                  }}
-                />
-                {!field.type && (
-                  <button
-                    type="button"
-                    className="btn btn--link lib-edit__clear"
-                    onClick={() =>
-                      setCleared((current) => {
-                        const next = new Set(current);
-                        if (next.has(field.key)) next.delete(field.key);
-                        else next.add(field.key);
-                        return next;
-                      })
-                    }
-                  >
-                    {cleared.has(field.key) ? "Keep" : "Clear"}
-                  </button>
-                )}
-              </div>
-            ),
-          )}
-        </div>
+        <div className="lib-edit__grid">{PRIMARY_FIELDS.map(bulkField)}</div>
+        <Disclosure label="Advanced metadata" hint={advancedPending ? pluralize(advancedPending, "change") : ""} className="lib-edit__advanced">
+          <div className="lib-edit__grid">{ADVANCED_FIELDS.map(bulkField)}</div>
+        </Disclosure>
 
         <div className="lib-edit__actions">
           <button type="button" className="btn btn--primary btn--sm" onClick={review} disabled={!hasInput}>
@@ -352,9 +382,6 @@ export function BulkEditor({ trackIds, query, onClose, onChanged, onError, onWri
           </button>
           <button type="button" className="btn btn--ghost btn--sm" onClick={coverForAll}>
             Use One Cover for All…
-          </button>
-          <button type="button" className="btn btn--ghost btn--sm" onClick={() => onWriteTags(ids)}>
-            Write Tags to Files…
           </button>
         </div>
         <p className="settings-note">Track numbers follow the order the songs are listed in.</p>
@@ -378,7 +405,7 @@ export function BulkEditor({ trackIds, query, onClose, onChanged, onError, onWri
   );
 }
 
-/** Writes saved WaveMint changes into the files (preview first). */
+/** Retries saving changes into files that couldn't be written when they were saved (preview first). */
 export function WriteTagsDialog({ trackIds = null, onClose, onStarted }) {
   const [preview, setPreview] = useState(null);
   const [error, setError] = useState("");
@@ -407,7 +434,7 @@ export function WriteTagsDialog({ trackIds = null, onClose, onStarted }) {
 
   return (
     <Dialog
-      title="Write tags to files"
+      title="Save changes to files"
       onClose={onClose}
       wide
       footer={
@@ -417,7 +444,7 @@ export function WriteTagsDialog({ trackIds = null, onClose, onStarted }) {
             Cancel
           </button>
           <button type="button" className={`btn btn--primary ${starting ? "is-loading" : ""}`} onClick={start} disabled={!writable.length || starting}>
-            Write {pluralize(writable.length, "file")}
+            Save {pluralize(writable.length, "file")}
           </button>
         </>
       }
@@ -428,7 +455,7 @@ export function WriteTagsDialog({ trackIds = null, onClose, onStarted }) {
         </div>
       )}
       {!preview && !error && <p className="text-muted">Comparing WaveMint with the files…</p>}
-      {preview && !writable.length && !blocked.length && <p className="text-muted">The files already match WaveMint. Nothing to write.</p>}
+      {preview && !writable.length && !blocked.length && <p className="text-muted">The files already match WaveMint. Nothing to save.</p>}
 
       {writable.length > 0 && (
         <>
@@ -477,6 +504,7 @@ export function AlbumEditor({ album, onClose, onChanged, onError }) {
   );
   const [form, setForm] = useState(initial);
   const [pending, setPending] = useState(null);
+  const setField = (key, value) => setForm((current) => ({ ...current, [key]: value }));
 
   const review = async () => {
     const changed = {};
@@ -523,20 +551,14 @@ export function AlbumEditor({ album, onClose, onChanged, onError }) {
         These values apply to all {pluralize(album.track_count, "song")} on this album. Song titles, artists and track
         numbers stay as they are.
       </p>
-      <GenreOptions id="genres-album" />
       <div className="lib-edit__grid">
-        {fields.map((field) => (
-          <FieldInput
-            key={field.key}
-            field={field}
-            value={form[field.key]}
-            listId="genres-album"
-            changed={form[field.key] !== initial[field.key]}
-            original={initial[field.key]}
-            onChange={(value) => setForm((current) => ({ ...current, [field.key]: value }))}
-          />
-        ))}
+        <FieldGroup fields={fields.filter((field) => PRIMARY_KEYS.includes(field.key))} form={form} initial={initial} onChange={setField} />
       </div>
+      <Disclosure label="Advanced metadata" className="lib-edit__advanced">
+        <div className="lib-edit__grid">
+          <FieldGroup fields={fields.filter((field) => !PRIMARY_KEYS.includes(field.key))} form={form} initial={initial} onChange={setField} />
+        </div>
+      </Disclosure>
       <div className="lib-edit__artwork">
         <span className="form-field__label">Artwork</span>
         <button type="button" className="btn btn--ghost btn--sm" onClick={cover}>

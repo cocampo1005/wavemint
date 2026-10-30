@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { usePlayer } from "../player/usePlayer";
+import { useToast } from "../toasts/useToast";
 import { formatDuration, formatLongDuration, pluralize } from "./format";
 import { CloseIcon, MoreIcon, PauseIcon, PlayIcon, PlaylistIcon, ShuffleIcon } from "./icons";
 import { errorMessage, libraryApi, useLoader } from "./useLibrary";
@@ -156,7 +157,7 @@ function PlaylistDetail({ id, revision, playing, onOpenTrack, onTrackMenu, onCha
   const { data: playlist, reload } = useLoader(() => libraryApi.getPlaylist({ id }), [id, revision]);
   const [rules, setRules] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [notice, setNotice] = useState("");
+  const { notify } = useToast();
 
   const act = async (action, after) => {
     try {
@@ -233,7 +234,7 @@ function PlaylistDetail({ id, revision, playing, onOpenTrack, onTrackMenu, onCha
           <button
             type="button"
             className="btn btn--secondary btn--sm"
-            onClick={() => act(() => libraryApi.exportPlaylistFile({ id, relative: false }), (result) => result && setNotice(`Exported ${pluralize(result.written, "song")} to ${result.filePath}`))}
+            onClick={() => act(() => libraryApi.exportPlaylistFile({ id, relative: false }), (result) => result && notify({ text: `Exported ${pluralize(result.written, "song")} to ${result.filePath}` }))}
           >
             Export M3U8…
           </button>
@@ -254,7 +255,6 @@ function PlaylistDetail({ id, revision, playing, onOpenTrack, onTrackMenu, onCha
           )}
         </div>
       </div>
-      {notice && <p className="settings-hint">{notice}</p>}
 
       {editing && (
         <div className="panel lib-playlist__rules">
@@ -343,7 +343,7 @@ function PlaylistDetail({ id, revision, playing, onOpenTrack, onTrackMenu, onCha
 export function PlaylistsView({ revision, playing, onOpenTrack, onTrackMenu, onChanged, onError }) {
   const { data: lists, reload } = useLoader(() => libraryApi.listPlaylists(), [revision]);
   const [selected, setSelected] = useState(null);
-  const [notice, setNotice] = useState("");
+  const { notify } = useToast();
   const active = selected ?? lists?.[0]?.id ?? null;
 
   const create = async (kind) => {
@@ -366,9 +366,10 @@ export function PlaylistsView({ revision, playing, onOpenTrack, onTrackMenu, onC
       const result = await libraryApi.importPlaylistFile();
       if (!result) return;
       setSelected(result.playlist.id);
-      setNotice(
-        `Imported "${result.playlist.name}": ${result.matched} of ${result.total} songs found${result.unmatchedCount ? `; not in your library: ${result.unmatched.slice(0, 5).join(", ")}${result.unmatchedCount > 5 ? "…" : ""}` : ""}.`,
-      );
+      notify({
+        tone: result.unmatchedCount ? "warning" : "success",
+        text: `Imported "${result.playlist.name}": ${result.matched} of ${result.total} songs found${result.unmatchedCount ? `; not in your library: ${result.unmatched.slice(0, 5).join(", ")}${result.unmatchedCount > 5 ? "…" : ""}` : ""}.`,
+      });
       reload();
       onChanged();
     } catch (error) {
@@ -402,7 +403,6 @@ export function PlaylistsView({ revision, playing, onOpenTrack, onTrackMenu, onC
         {lists && !lists.length && <p className="settings-hint">No playlists yet.</p>}
       </aside>
       <div className="lib-review__main">
-        {notice && <p className="settings-hint">{notice}</p>}
         {active ? (
           <PlaylistDetail
             key={active}

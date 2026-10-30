@@ -1,0 +1,88 @@
+/* ---------- Toasts (Toasts.jsx) ---------- */
+
+/* Over the app in the bottom-right corner, above the player bar and beside
+   any open side panel (Toasts.jsx places it; these are the defaults). The
+   newest toast is nearest the corner; only the toasts themselves take
+   clicks. */
+.wm-toasts {
+  position: fixed;
+  right: var(--wm-space-4);
+  bottom: calc(76px + var(--wm-space-4));
+  z-index: 1100;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--wm-space-2);
+  width: min(380px, calc(100vw - 2 * var(--wm-space-4)));
+  pointer-events: none;
+  transition:
+    right var(--wm-dur) var(--wm-ease),
+    bottom var(--wm-dur) var(--wm-ease);
+}
+
+.wm-toast {
+  --wm-toast-tone: var(--wm-accent);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--wm-space-3);
+  width: 100%;
+  padding: var(--wm-space-3) var(--wm-space-2) var(--wm-space-3) var(--wm-space-4);
+  border: 1px solid var(--wm-border-strong);
+  border-left: 3px solid var(--wm-toast-tone);
+  border-radius: var(--wm-radius-md);
+  background: var(--wm-surface-2);
+  color: var(--wm-text);
+  font-size: var(--wm-text-sm);
+  line-height: 1.45;
+  box-shadow: 0 16px 40px rgba(2, 5, 18, 0.5);
+  pointer-events: auto;
+  animation: wm-toast-in 200ms var(--wm-ease);
+}
+
+.wm-toast.is-leaving {
+  animation: wm-toast-out 180ms var(--wm-ease) forwards;
+}
+
+.wm-toast.is-success { --wm-toast-tone: var(--wm-success); }
+.wm-toast.is-warning { --wm-toast-tone: var(--wm-warning); }
+.wm-toast.is-error { --wm-toast-tone: var(--wm-danger); }
+.wm-toast.is-info { --wm-toast-tone: var(--wm-cyan); }
+
+.wm-toast__icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--wm-toast-tone);
+}
+
+.wm-toast__text {
+  flex: 1;
+  min-width: 0;
+  padding-top: 1px;
+  overflow-wrap: anywhere;
+}
+
+.wm-toast__action {
+  flex-shrink: 0;
+}
+
+.wm-toast__close {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  margin-top: -4px;
+}
+
+@keyframes wm-toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+}
+
+@keyframes wm-toast-out {
+  to {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+}

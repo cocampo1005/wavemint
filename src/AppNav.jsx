@@ -3,6 +3,7 @@ import {
   AddMusicIcon,
   AlbumIcon,
   ArtistIcon,
+  FileHealthIcon,
   FolderOpenIcon,
   GenreIcon,
   HeartIcon,
@@ -20,8 +21,10 @@ import {
   StorageIcon,
 } from "./library/icons";
 
-// The library is the main workspace; maintenance and management tools sit
-// below it. Add Music (YouTube extraction) has its own entry at the top.
+// The library is the main workspace (browsing your music); maintenance
+// (what needs attention: metadata, audio quality, file integrity) and
+// management tools sit below it. Add Music (YouTube extraction) has its own
+// entry at the top.
 const NAV_GROUPS = [
   {
     label: "Library",
@@ -41,6 +44,7 @@ const NAV_GROUPS = [
       { id: "review", label: "Review", Icon: ReviewIcon, badge: "reviewOpen" },
       { id: "merge", label: "Merge & Duplicates", Icon: MergeIcon },
       { id: "quality", label: "Quality & Upgrades", Icon: QualityIcon, badge: "qualityAttention" },
+      { id: "health", label: "File Health", Icon: FileHealthIcon, badge: "fileProblems" },
       { id: "identify", label: "Identify", Icon: SearchIcon },
     ],
   },

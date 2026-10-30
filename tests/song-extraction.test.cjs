@@ -84,7 +84,7 @@ function fakeExtraction({ info, fail = null } = {}) {
       if (fail) throw fail;
       onStatus({ phase: "downloading", percent: 50 });
       const base = outputTemplate.replace(".%(ext)s", "");
-      fs.writeFileSync(`${base}.mp3`, "audio");
+      fs.writeFileSync(`${base}.m4a`, "audio");
       fs.writeFileSync(`${base}.info.json`, JSON.stringify(info));
     },
     async runChecked(tool, args) {
@@ -95,7 +95,7 @@ function fakeExtraction({ info, fail = null } = {}) {
   };
 }
 
-test("an extraction tags the song with the final metadata and leaves only the finished MP3", async (t) => {
+test("an extraction tags the song with the final metadata and leaves only the finished M4A", async (t) => {
   const dir = tempDir(t);
   const workRoot = path.join(dir, "work");
   const outputFolder = path.join(dir, "staging");
@@ -124,7 +124,7 @@ test("an extraction tags the song with the final metadata and leaves only the fi
   });
 
   assert.deepEqual(result.metadata, { title: "Song", artist: "Artist", album: "Album", genre: "Synthpop" });
-  assert.equal(result.filePath, path.join(outputFolder, "Artist - Song.mp3"));
+  assert.equal(result.filePath, path.join(outputFolder, "Artist - Song.m4a"));
   assert.equal(fs.readFileSync(result.filePath, "utf8"), "tagged audio");
   assert.equal(covers[0].thumbnailCandidates[0], "https://i.ytimg.com/vi/x/shown.jpg", "the cover uses the thumbnail the user saw");
   assert.equal(covers[0].mode, "square_crop");
