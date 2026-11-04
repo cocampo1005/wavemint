@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import "./App.css";
 import { AddMusicView } from "./addMusic/AddMusicView";
 import { AppNav } from "./AppNav";
@@ -10,6 +10,7 @@ import { usePlayer } from "./player/usePlayer";
 import "./player/player.css";
 import { SettingsDialog } from "./SettingsDialog";
 import { LibraryView } from "./library/LibraryView";
+import { resolveRoute, sectionOf } from "./library/sections";
 import { ToastProvider } from "./toasts/Toasts";
 import { libraryApi, useLibraryJobs, useLoader } from "./library/useLibrary";
 
@@ -37,7 +38,7 @@ function PlayerOverlays() {
 
 /**
  * The app shell: navigation, the Library (the main workspace; it opens on
- * the Overview) and Add Music, with the player underneath both. Both
+ * Music → Overview) and Add Music, with the player underneath both. Both
  * workspaces stay mounted, so switching between them keeps the library's
  * place and any extraction in progress.
  */
@@ -95,8 +96,13 @@ function AppShell() {
     };
   }, []);
 
+  // The last view of each section with tabs: the sidebar returns to it.
+  const lastViews = useRef({});
   const navigate = useCallback((view, scope = {}) => {
-    setRoute({ view, scope });
+    const next = resolveRoute(view, scope, lastViews.current);
+    const section = sectionOf(next.view);
+    if (section === "music" || section === "tools") lastViews.current[section] = next.view;
+    setRoute(next);
     setWorkspace("library");
   }, []);
 
@@ -125,7 +131,7 @@ function AppShell() {
   const authIndicator = authState && authState.mode !== "none" ? (authState.lastTest?.status === "authenticated" ? "success" : "warning") : "";
   const engineUpdateAvailable = engineStatus?.lastCheck?.status === "available";
   const settingsIndicator = authIndicator === "warning" ? "warning" : engineUpdateAvailable ? "update" : authIndicator;
-  const activeNav = workspace === "add" ? "add" : route.view;
+  const activeNav = workspace === "add" ? "add" : sectionOf(route.view);
 
   return (
     <div className="app-shell">

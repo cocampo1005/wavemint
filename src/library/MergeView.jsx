@@ -261,13 +261,14 @@ export function MergeView({ revision, analyzing, playing, onPlay, onChanged, onE
       <section className="panel lib-merge__intro">
         <MergeIcon size={22} />
         <div>
-          <strong>Combine your libraries</strong>
+          <strong>Import and merge separate libraries</strong>
           <p className="settings-hint">
-            WaveMint compares every source, groups copies of the same recording and keeps your curated copy where one exists. Analysis and
-            merging only change WaveMint&apos;s library, never your music files.
+            For bringing another music folder (an old iTunes library, a legacy collection) into WaveMint: it compares every source, groups copies of the
+            same recording and keeps your curated copy where one exists. Analysis and merging only change WaveMint&apos;s library, never your music files.
+            Duplicates inside your library are found automatically in Review → Possible Duplicates.
           </p>
           {sources.length > 0 && !hasCurated && (
-            <p className="settings-hint">Tip: mark your carefully edited folder as Curated in Sources so its copies are preferred.</p>
+            <p className="settings-hint">Tip: mark your carefully edited folder as Curated in Library Tools → Sources so its copies are preferred.</p>
           )}
         </div>
         <div className="lib-merge__intro-actions">

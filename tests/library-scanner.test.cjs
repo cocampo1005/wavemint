@@ -175,7 +175,7 @@ test("scanning reads tags, groups albums, and never modifies the source", needsA
 
   const overview = queries.getDashboard(db);
   assert.equal(overview.totals.tracks, 6);
-  assert.equal(overview.issues.missing_genre, 5);
+  assert.equal(overview.genres.find((row) => row.name === "")?.count, 5, "songs without a genre are counted, not flagged");
 });
 
 test("rescans are incremental, notice edits, and respect curated fields", needsAudio, async (t) => {

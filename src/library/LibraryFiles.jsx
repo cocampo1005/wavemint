@@ -1,48 +1,59 @@
 import { useState } from "react";
 import { usePlayer } from "../player/usePlayer";
 import { Artwork } from "./Artwork";
+import { Disclosure } from "./Disclosure";
 import { formatBytes, formatDate, formatNumber, pluralize } from "./format";
-import { CheckIcon, FolderOpenIcon, HistoryIcon, RefreshIcon, StorageIcon, UpgradeIcon, WarningIcon } from "./icons";
-import { WithSongPanel } from "./SongPanel";
+import { CheckIcon, FolderOpenIcon, RefreshIcon, UpgradeIcon, WarningIcon } from "./icons";
 import { VersionHistory } from "./TrackDetail";
 import { errorMessage, libraryApi, useJobRunner, useLoader } from "./useLibrary";
 
-const SECTIONS = [
-  ["missing", "Missing or unreadable files"],
-  ["formats", "Audio formats"],
-  ["versions", "Earlier versions"],
-  ["backups", "Backups and recovery"],
-];
+// The library's files: what's wrong with them (Review → Diagnostics), what
+// they're made of (Library Tools → Storage → Audio formats, with the genre
+// tag check) and the earlier versions kept after upgrades and edits.
 
 const PAGE = 100;
 
-/** One song whose current file is missing or can't be read, with the ways to repair it. */
-function MissingRow({ row, onOpen, onReplace, onRemove }) {
+// What each kind of file problem means, in a word and in a sentence.
+const PROBLEM_KINDS = {
+  missing: ["Missing", "is-missing"],
+  moved: ["Moved or renamed", "is-missing"],
+  drive: ["Drive not connected", "is-warn"],
+  unreadable: ["Unreadable", "is-error"],
+  back: ["Back in place", "is-success"],
+};
+
+const ACTION_HELP = {
+  locate: "Point WaveMint at the file where it is now. The song keeps its details, playlists, history and iTunes entry.",
+  replace: "Choose a different audio file for this song (Upgrade Track). The song keeps its details and playlists.",
+  remove: "Remove the song from WaveMint. No file on disk changes, and you can undo it from History.",
+  forget: "Forget this leftover entry in WaveMint's database. No file is deleted, and no song in your library changes.",
+};
+
+/** A song with no file at all (not even a missing one). */
+function NoFileRow({ row, onOpen, onReplace, onRemove }) {
   return (
     <div className="lib-review-item">
       <Artwork className="lib-review-item__art" hash={row.artwork_hash} size={64} loading="lazy" />
       <div className="lib-review-item__body">
         <div className="lib-review-item__title">
-          <span className={`lib-badge ${row.file_status === "missing" || !row.file_id ? "is-missing" : "is-error"}`}>{!row.file_id ? "No file" : row.file_status === "missing" ? "Missing" : "Unreadable"}</span>
+          <span className="lib-badge is-missing">No file</span>
           <button type="button" className="lib-review-item__open" onClick={() => onOpen(row.id)}>
             {`${row.title || "Untitled"} — ${row.artist || "Unknown artist"}`}
           </button>
         </div>
-        <span className="lib-review-item__text">{row.source_name ? `In "${row.source_name}"` : "Not in any library folder"}</span>
+        <span className="lib-review-item__text">This song has no audio file in WaveMint. Choose one, or remove the song.</span>
       </div>
       <div className="lib-review-item__actions">
-        <button type="button" className="btn btn--secondary btn--sm" onClick={() => onReplace(row.id)} title="Choose the file (or another copy) to use for this song">
-          <UpgradeIcon size={13} /> Replace File…
+        <button type="button" className="btn btn--secondary btn--sm" onClick={() => onReplace(row.id)} title={ACTION_HELP.replace}>
+          <UpgradeIcon size={13} /> Choose File…
         </button>
-        <button type="button" className="btn btn--ghost btn--sm" onClick={() => onRemove(row)} title="Remove the song from your library (nothing on disk changes; undo from History)">
+        <button type="button" className="btn btn--ghost btn--sm" onClick={() => onRemove(row)} title={ACTION_HELP.remove}>
           Remove from Library
         </button>
       </div>
     </div>
   );
 }
-
-const percent = (share) => `${(share * 100).toFixed(share > 0 && share < 0.001 ? 2 : 1)}%`;
 
 /** One file WaveMint can't find: which song, where it should be, why, and the safe repairs. */
 function MissingFileRow({ item, onOpen, onReplace, onRemove, onChanged, onError }) {
@@ -58,11 +69,13 @@ function MissingFileRow({ item, onOpen, onReplace, onRemove, onChanged, onError 
     }
   };
   const name = `${item.title || "Untitled"} — ${item.artist || "Unknown artist"}`;
+  const leftover = !item.current;
+  const [label, tone] = leftover ? [item.kind === "earlier" ? "Earlier version" : "Leftover", "is-quiet"] : PROBLEM_KINDS[item.kind] || PROBLEM_KINDS.missing;
   return (
-    <div className="lib-review-item lib-health-missing">
+    <div className={`lib-review-item lib-health-missing ${leftover ? "is-quiet" : ""}`}>
       <div className="lib-review-item__body">
         <div className="lib-review-item__title">
-          <span className={`lib-badge ${item.status === "missing" ? "is-missing" : "is-error"}`}>{item.status === "missing" ? "Missing" : "Unreadable"}</span>
+          <span className={`lib-badge ${tone}`}>{label}</span>
           {item.trackId && item.current ? (
             <button type="button" className="lib-review-item__open" onClick={() => onOpen(item.trackId)}>
               {name}
@@ -79,37 +92,33 @@ function MissingFileRow({ item, onOpen, onReplace, onRemove, onChanged, onError 
           {item.reason}
           {item.lastSeenAt ? ` Last seen ${formatDate(item.lastSeenAt)}.` : ""}
         </span>
-        {item.elsewhere.length > 0 && <span className="lib-review-item__text">A file with the same name exists: {item.elsewhere.map((entry) => entry.path).join("; ")}</span>}
-        {item.otherCopies.length > 0 && (
+        {!leftover && item.elsewhere.length > 0 && (
+          <span className="lib-review-item__text">A file with the same name exists: {item.elsewhere.map((entry) => entry.path).join("; ")}</span>
+        )}
+        {!leftover && item.otherCopies.length > 0 && (
           <span className="lib-review-item__text">
             The library has another copy of this song: {item.otherCopies.map((entry) => `${entry.title} (${entry.path})`).join("; ")}
           </span>
         )}
       </div>
       <div className="lib-review-item__actions">
-        {!item.backAtPath && (
-          <button type="button" className="btn btn--secondary btn--sm" disabled={busy} onClick={() => act(() => libraryApi.locateMissingFile({ fileId: item.fileId }))} title="Point WaveMint at the file where it is now">
+        {!leftover && !item.backAtPath && (
+          <button type="button" className="btn btn--secondary btn--sm" disabled={busy} onClick={() => act(() => libraryApi.locateMissingFile({ fileId: item.fileId }))} title={ACTION_HELP.locate}>
             <FolderOpenIcon size={13} /> Locate File…
           </button>
         )}
         {item.current && (
-          <button type="button" className="btn btn--ghost btn--sm" disabled={busy} onClick={() => onReplace(item.trackId)} title="Choose a different file for this song">
+          <button type="button" className="btn btn--ghost btn--sm" disabled={busy} onClick={() => onReplace(item.trackId)} title={ACTION_HELP.replace}>
             <UpgradeIcon size={13} /> Replace File…
           </button>
         )}
         {item.current && (
-          <button type="button" className="btn btn--ghost btn--sm" disabled={busy} onClick={() => onRemove(item)} title="Remove the song from your library (nothing on disk changes; undo from History)">
+          <button type="button" className="btn btn--ghost btn--sm" disabled={busy} onClick={() => onRemove(item)} title={ACTION_HELP.remove}>
             Remove from Library
           </button>
         )}
         {item.canForget && !item.backAtPath && (
-          <button
-            type="button"
-            className="btn btn--ghost btn--sm"
-            disabled={busy}
-            onClick={() => act(() => libraryApi.forgetMissingFile({ fileId: item.fileId }))}
-            title="Forget this leftover reference in WaveMint's database. Nothing on disk changes."
-          >
+          <button type="button" className="btn btn--ghost btn--sm" disabled={busy} onClick={() => act(() => libraryApi.forgetMissingFile({ fileId: item.fileId }))} title={ACTION_HELP.forget}>
             Forget Reference
           </button>
         )}
@@ -117,6 +126,8 @@ function MissingFileRow({ item, onOpen, onReplace, onRemove, onChanged, onError 
     </div>
   );
 }
+
+const percent = (share) => `${(share * 100).toFixed(share > 0 && share < 0.001 ? 2 : 1)}%`;
 
 /**
  * MP3 genres stored as ID3v1 numbers ("(145)") instead of text: iTunes shows
@@ -203,7 +214,7 @@ function GenreCodes({ onError }) {
 }
 
 /** The library by audio format, with the songs of a format one click away. */
-function FormatsPanel({ revision, onOpen, onError }) {
+export function FormatsPanel({ revision, onOpen, onError }) {
   const { data: stats, error } = useLoader(() => libraryApi.getFormatStats(), [revision]);
   const [codec, setCodec] = useState(null);
   const [limit, setLimit] = useState(PAGE);
@@ -357,140 +368,124 @@ function VersionsRow({ row, onOpen, onRestore, onError }) {
 }
 
 /**
- * File integrity and management: songs whose file is missing or unreadable
- * (repair or remove), songs with earlier versions kept after an upgrade or an
- * audio edit (restore one), and the backups that make changes undoable.
+ * Review → Diagnostics: songs whose file is missing, moved, unreadable or
+ * absent, each with the safe repairs, and (apart, collapsed) leftover
+ * references: files of removed or merged songs and earlier versions that
+ * are gone. Leftovers aren't problems; forgetting them only tidies the
+ * database. `onOpen` opens a song beside the list.
  */
-export function FileHealthView({ revision, browserProps, onNavigate, onRemove, onError, scanning }) {
-  const [section, setSection] = useState("missing");
-  const [openTrack, setOpenTrack] = useState(null);
-  const [limit, setLimit] = useState(PAGE);
-  const [changed, setChanged] = useState(0);
-  const filters = section === "missing" ? { missingFile: true } : { multipleVersions: true };
-  const { data, error } = useLoader(
-    () => (["backups", "formats"].includes(section) ? null : libraryApi.listTracks({ filters, sort: "artist", direction: "asc", limit })),
-    [section, limit, revision, changed],
-  );
-  const { data: missingFiles } = useLoader(() => (section === "missing" ? libraryApi.listMissingFiles() : null), [section, revision, changed]);
-  // Songs with no file at all (not even a missing one) aren't in the file list.
-  const noFile = (data?.rows || []).filter((row) => !row.file_id);
-  const { data: storage } = useLoader(() => (section === "backups" ? libraryApi.storageReport() : null), [section, revision]);
-  const { data: status } = useLoader(() => libraryApi.getStatus(), [revision]);
+export function DiagnosticsPanel({ revision, scanning, onOpen, onReplace, onRemove, onChanged, onError }) {
+  const [tick, setTick] = useState(0);
+  const [forgetting, setForgetting] = useState(false);
+  const { data: missingFiles, loading } = useLoader(() => libraryApi.listMissingFiles(), [revision, tick]);
+  const { data: noFileData } = useLoader(() => libraryApi.listTracks({ filters: { missingFile: true }, sort: "artist", direction: "asc", limit: 500 }), [revision, tick]);
+  const noFile = (noFileData?.rows || []).filter((row) => !row.file_id);
+  const changed = () => {
+    setTick((value) => value + 1);
+    onChanged?.();
+  };
 
+  const problems = (missingFiles || []).filter((item) => item.current);
+  const leftovers = (missingFiles || []).filter((item) => !item.current);
   const rescan = () => libraryApi.scanSources({}).catch((err) => onError(errorMessage(err, "The scan couldn't start.")));
-  const replace = (trackId) => browserProps.onUpgrade(trackId);
-  const category = (id) => storage?.categories.find((item) => item.id === id);
+  const forgetAll = async () => {
+    setForgetting(true);
+    try {
+      const result = await libraryApi.forgetLeftoverReferences({ fileIds: leftovers.filter((item) => item.canForget && !item.backAtPath).map((item) => item.fileId) });
+      if (result.skipped?.length) onError(`${pluralize(result.skipped.length, "reference")} couldn't be forgotten: ${result.skipped[0].reason}`);
+      changed();
+    } catch (error) {
+      onError(errorMessage(error));
+    } finally {
+      setForgetting(false);
+    }
+  };
+  const rowProps = { onOpen, onReplace, onRemove: (entry) => onRemove([entry.trackId], [{ id: entry.trackId, title: entry.title, artist: entry.artist }]), onChanged: changed, onError };
+
+  if (!missingFiles) return <div className="lib-loading">{loading ? "Checking your files…" : ""}</div>;
 
   return (
-    <WithSongPanel trackId={openTrack} onClose={() => setOpenTrack(null)} browserProps={browserProps}>
-      <div className="lib-review lib-health">
-        <div className="lib-chips lib-quality__views" role="tablist" aria-label="File health">
-          {SECTIONS.map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              role="tab"
-              aria-selected={section === key}
-              className={`lib-chip ${section === key ? "is-on" : ""}`}
-              onClick={() => {
-                setSection(key);
-                setLimit(PAGE);
-              }}
-            >
-              {label}
-              {key === "missing" && (missingFiles?.length ?? status?.fileProblems) > 0 && <span className="lib-tab-count">{formatNumber(missingFiles?.length ?? status.fileProblems)}</span>}
-            </button>
-          ))}
-        </div>
-
-        {error && <div className="alert alert--compact">{error}</div>}
-
-        {section === "missing" && (
-          <>
-            <div className="lib-toolbar">
-              <span className="settings-hint">A file is missing when it was moved, renamed or deleted outside WaveMint, or its drive isn&apos;t connected.</span>
-              <div className="lib-toolbar__actions">
-                <button type="button" className={`btn btn--ghost btn--sm ${scanning ? "is-loading" : ""}`} disabled={scanning} onClick={rescan}>
-                  <RefreshIcon size={14} /> Rescan Library Folders
-                </button>
-              </div>
-            </div>
-            <div className="lib-review__list">
-              {missingFiles?.map((item) => (
-                <MissingFileRow
-                  key={item.fileId}
-                  item={item}
-                  onOpen={setOpenTrack}
-                  onReplace={replace}
-                  onRemove={(entry) => onRemove([entry.trackId], [{ id: entry.trackId, title: entry.title, artist: entry.artist }])}
-                  onChanged={() => setChanged((value) => value + 1)}
-                  onError={onError}
-                />
-              ))}
-              {noFile.map((row) => (
-                <MissingRow key={row.id} row={row} onOpen={setOpenTrack} onReplace={replace} onRemove={(item) => onRemove([item.id], [item])} />
-              ))}
-              {missingFiles && !missingFiles.length && !noFile.length && <p className="lib-empty-note">Every file is where WaveMint expects it.</p>}
-            </div>
-          </>
-        )}
-
-        {section === "versions" && (
-          <>
-            <p className="settings-hint">
-              Earlier files of a song are kept after an upgrade or an audio edit, so the change can be taken back. Restoring one compares it with the
-              current file first and asks before anything changes.
-            </p>
-            <div className="lib-review__list">
-              {data?.rows.map((row) => (
-                <VersionsRow key={row.id} row={row} onOpen={setOpenTrack} onRestore={(trackId, start) => browserProps.onUpgrade(trackId, start)} onError={onError} />
-              ))}
-              {data && !data.rows.length && <p className="lib-empty-note">No song has earlier versions.</p>}
-            </div>
-          </>
-        )}
-
-        {section === "formats" && <FormatsPanel revision={revision} onOpen={setOpenTrack} onError={onError} />}
-
-        {section === "versions" && data && data.total > data.rows.length && (
-          <button type="button" className="btn btn--secondary lib-more" onClick={() => setLimit((value) => value + PAGE)}>
-            Show more ({formatNumber(data.total - data.rows.length)})
+    <div className="lib-diagnostics">
+      <div className="lib-toolbar">
+        <span className="settings-hint">
+          Songs that can&apos;t play because their file was moved, renamed or deleted outside WaveMint, can&apos;t be read, or is on a drive that isn&apos;t connected.
+        </span>
+        <div className="lib-toolbar__actions">
+          <button type="button" className={`btn btn--ghost btn--sm ${scanning ? "is-loading" : ""}`} disabled={scanning} onClick={rescan} title="Look for added, changed and missing files in your library folders">
+            <RefreshIcon size={14} /> Rescan Library Folders
           </button>
-        )}
-
-        {section === "backups" && (
-          <div className="lib-health__backups">
-            <p className="settings-hint">
-              Before WaveMint changes a file it keeps a way back: saving metadata keeps a verified copy of the original (one per song per day), and an
-              upgrade or audio edit keeps the previous file. They&apos;re kept for {storage?.retentionLabel || "a few days"}, then cleaned up
-              {storage?.autoCleanup === false ? " when you choose" : " automatically"}.
-            </p>
-            {storage && (
-              <dl className="lib-detail__facts">
-                <dt>Previous versions</dt>
-                <dd>{formatBytes(category("versions")?.bytes || 0)}</dd>
-                <dt>Metadata backups</dt>
-                <dd>{formatBytes(category("tagBackups")?.bytes || 0)}</dd>
-                <dt>Kept for</dt>
-                <dd>{storage.retentionLabel}</dd>
-              </dl>
-            )}
-            <div className="lib-toolbar__actions">
-              <button type="button" className="btn btn--secondary btn--sm" onClick={() => onNavigate("history")}>
-                <HistoryIcon size={14} /> Undo a Change in History
-              </button>
-              <button type="button" className="btn btn--ghost btn--sm" onClick={() => onNavigate("storage")}>
-                <StorageIcon size={14} /> Storage and Retention
-              </button>
-            </div>
-            {status?.unsavedWritable > 0 && (
-              <p className="lib-edit__note is-warn">
-                <WarningIcon size={13} /> {pluralize(status.unsavedWritable, "song")} {status.unsavedWritable === 1 ? "has" : "have"} changes that couldn&apos;t be saved to the file yet.
-              </p>
-            )}
-          </div>
-        )}
+        </div>
       </div>
-    </WithSongPanel>
+
+      {problems.length + noFile.length === 0 ? (
+        <div className="lib-review-empty">
+          <CheckIcon size={20} />
+          <div>
+            <strong>Every song&apos;s file is where WaveMint expects it.</strong>
+            <span>Nothing needs fixing.</span>
+          </div>
+        </div>
+      ) : (
+        <>
+          {problems.some((item) => item.kind === "moved") && (
+            <p className="settings-hint lib-diagnostics__tip">
+              <WarningIcon size={13} /> Locate a moved file before rescanning: a rescan would add it as a new song, without its history, playlists or iTunes entry.
+            </p>
+          )}
+          <div className="lib-review__list">
+            {problems.map((item) => (
+              <MissingFileRow key={item.fileId} item={item} {...rowProps} />
+            ))}
+            {noFile.map((row) => (
+              <NoFileRow key={row.id} row={row} onOpen={onOpen} onReplace={onReplace} onRemove={(entry) => onRemove([entry.id], [entry])} />
+            ))}
+          </div>
+        </>
+      )}
+
+      {leftovers.length > 0 && (
+        <Disclosure label="Leftover references" hint={`${formatNumber(leftovers.length)} · not a problem`} className="lib-diagnostics__leftovers">
+          <p className="settings-hint">
+            Files WaveMint once knew about that no longer belong to a song in your library: songs you removed or merged, and earlier versions whose files are gone. They
+            don&apos;t affect playback or iTunes. Forgetting them only tidies WaveMint&apos;s database; no file is deleted.
+          </p>
+          <div className="lib-edit__actions">
+            <button type="button" className={`btn btn--secondary btn--sm ${forgetting ? "is-loading" : ""}`} disabled={forgetting} onClick={forgetAll} title={ACTION_HELP.forget}>
+              Forget All ({formatNumber(leftovers.length)})
+            </button>
+          </div>
+          <div className="lib-review__list">
+            {leftovers.map((item) => (
+              <MissingFileRow key={item.fileId} item={item} {...rowProps} />
+            ))}
+          </div>
+        </Disclosure>
+      )}
+    </div>
+  );
+}
+
+/** Library Tools → Storage → Earlier versions: songs with files kept after an upgrade or edit. */
+export function EarlierVersionsPanel({ revision, onOpen, onRestore, onError }) {
+  const [limit, setLimit] = useState(PAGE);
+  const { data } = useLoader(() => libraryApi.listTracks({ filters: { multipleVersions: true }, sort: "artist", direction: "asc", limit }), [limit, revision]);
+  return (
+    <div className="lib-review">
+      <p className="settings-hint">
+        Earlier files of a song are kept after an upgrade or an audio edit, so the change can be taken back. Restoring one compares it with the current file first and
+        asks before anything changes. How long they&apos;re kept is set under Disk usage.
+      </p>
+      <div className="lib-review__list">
+        {data?.rows.map((row) => (
+          <VersionsRow key={row.id} row={row} onOpen={onOpen} onRestore={onRestore} onError={onError} />
+        ))}
+        {data && !data.rows.length && <p className="lib-empty-note">No song has earlier versions.</p>}
+      </div>
+      {data && data.total > data.rows.length && (
+        <button type="button" className="btn btn--secondary lib-more" onClick={() => setLimit((value) => value + PAGE)}>
+          Show more ({formatNumber(data.total - data.rows.length)})
+        </button>
+      )}
+    </div>
   );
 }

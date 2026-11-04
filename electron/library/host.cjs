@@ -40,7 +40,6 @@ const trackFilters = v.obj({
   codec: text(20),
   missingFile: v.bool(),
   reviewStatus: v.oneOf(["none", "needs_review", "reviewed"]),
-  qualityStatus: v.oneOf(["unknown", "review_suggested", "acceptable", "user_marked_poor", "upgrade_available", "upgraded", "keep_original"]),
   multipleVersions: v.bool(),
   favorite: v.bool(),
   ids: v.array(id(), { max: 5000 }),
@@ -153,7 +152,7 @@ const audioEdits = (options = {}) =>
     },
     options,
   );
-const reviewKinds = v.oneOf(["missing_album", "missing_artist", "missing_album_artist", "unclassified_genre", "missing_artwork", "track_numbering", "inconsistent_album", "similar_albums", "file_problem", "possible_duplicate", "uncertain_match", "incomplete_album"]);
+const reviewKinds = v.oneOf(["missing_title", "missing_artist", "missing_album", "missing_artwork", "placeholder", "duplicate", "possible_duplicate", "file_problem", "no_file"]);
 
 /** Renderer-callable worker methods and their parameter schemas. */
 const WORKER_METHODS = {
@@ -214,7 +213,7 @@ const WORKER_METHODS = {
   // Review queue.
   refreshReview: {},
   reviewSummary: {},
-  listReviewItems: { kind: reviewKinds, status: v.oneOf(["open", "needs_review", "suggested", "approved", "ignored", "resolved"]), offset: v.int({ min: 0, optional: true }), limit: v.int({ min: 1, max: 500, optional: true }) },
+  listReviewItems: { group: v.oneOf(["attention", "duplicates", "diagnostics"]), kind: reviewKinds, status: v.oneOf(["open", "needs_review", "suggested", "approved", "ignored", "resolved"]), offset: v.int({ min: 0, optional: true }), limit: v.int({ min: 1, max: 500, optional: true }) },
   setReviewStatus: { ids: v.array(id(), { max: 5000, optional: false }), status: v.oneOf(["needs_review", "ignored", "resolved"], { optional: false }) },
   approveSuggestions: { ids: v.array(id(), { max: 5000, optional: false }) },
 
@@ -231,6 +230,9 @@ const WORKER_METHODS = {
   setMergeGroupAction: { groupId: id(), action: v.oneOf(["keep_preferred", "merge_metadata", "keep_both", "skip", "keep", "review"], { optional: false }), preferredTrackId: id({ optional: true }) },
   acceptMergeSuggestions: { sessionId: id(), categories: v.array(mergeCategories, { max: 5 }) },
   applyMerge: { sessionId: id(), acceptedAlbums: v.array(id(), { max: 5000 }) },
+  // Duplicates inside the library (Review → Possible Duplicates).
+  mergeDuplicates: { keepTrackId: id(), trackIds: v.array(id(), { max: 50, optional: false }), fillMetadata: v.bool() },
+  keepDuplicatesSeparate: { trackIds: v.array(id(), { max: 50, optional: false }) },
 
   // Managed Library (its folder is chosen with chooseManagedRoot).
   getManagedLibrary: {},
@@ -242,6 +244,7 @@ const WORKER_METHODS = {
       {
         namingPattern: v.str({ max: 300, allowEmpty: false }),
         lowBitrateKbps: v.int({ min: 32, max: 512, optional: true }),
+        reviewMissingAlbum: v.bool(),
         musicBrainzEnabled: v.bool(),
         keepPreviousVersions: v.oneOf(["1d", "3d", "7d", "30d", "never"]),
         autoCleanup: v.bool(),
@@ -255,25 +258,7 @@ const WORKER_METHODS = {
     ),
   },
 
-  // Audio quality and upgrades (replacement files are chosen with chooseUpgradeFile).
-  qualitySummary: {},
-  listQualityQueue: {
-    view: v.oneOf(["attention", "review_suggested", "user_marked_poor", "upgrade_available", "keep_original", "upgraded", "acceptable", "unknown", "all"]),
-    search: text(200),
-    artist: text(300),
-    genre: text(200),
-    releaseId: id({ optional: true }),
-    maxBitrate: v.int({ min: 32, max: 512, optional: true }),
-    sort: v.oneOf(["severity", "bitrate", "artist", "album", "title"]),
-    offset: v.int({ min: 0, optional: true }),
-    limit: v.int({ min: 1, max: 500, optional: true }),
-  },
-  refreshQuality: {},
-  checkQuality: { trackIds: trackIdList(), force: v.bool() },
-  setQualityStatus: {
-    trackIds: trackIdList({ optional: false }),
-    status: v.oneOf(["auto", "user_marked_poor", "keep_original", "acceptable", "upgraded"], { optional: false }),
-  },
+  // Upgrade Track (replacement files are chosen with chooseUpgradeFile).
   prepareUpgrade: { trackId: id(), fileId: id() },
   compareUpgrade: { candidateId: id() },
   spectrogram: { fileId: id({ optional: true }), candidateId: id({ optional: true }) },
@@ -415,6 +400,7 @@ const WORKER_METHODS = {
   scanNumericGenres: {},
   storeGenresAsText: { trackIds: trackIdList({ optional: false }) },
   forgetMissingFile: { fileId: id() },
+  forgetLeftoverReferences: { fileIds: v.array(id(), { max: 5000, optional: false }) },
   cleanUpAppleLibrary: {
     pids: v.array(v.str({ max: 16, optional: false }), { max: 20000 }),
     includeSuperseded: v.bool(),

@@ -1,68 +1,44 @@
 import horizontalLogo from "./assets/Horizontal Logo.png";
-import {
-  AddMusicIcon,
-  AlbumIcon,
-  ArtistIcon,
-  FileHealthIcon,
-  FolderOpenIcon,
-  GenreIcon,
-  HeartIcon,
-  HistoryIcon,
-  MergeIcon,
-  OverviewIcon,
-  PhoneIcon,
-  PlaylistIcon,
-  QualityIcon,
-  ReviewIcon,
-  SearchIcon,
-  SettingsIcon,
-  SongsIcon,
-  SourceIcon,
-  StorageIcon,
-} from "./library/icons";
+import { AddMusicIcon, PhoneIcon, PlaylistIcon, ReviewIcon, SettingsIcon, SongsIcon, ToolsIcon } from "./library/icons";
 
-// The library is the main workspace (browsing your music); maintenance
-// (what needs attention: metadata, audio quality, file integrity) and
-// management tools sit below it. Add Music (YouTube extraction) has its own
-// entry at the top.
+// Everyday destinations only. Music holds the browsing tabs (Overview, Songs,
+// Albums, Artists, Genres, Favorites); Review holds metadata issues,
+// duplicates and file diagnostics; Library Tools (bottom) holds setup and
+// maintenance utilities (sources, organization, storage, history, library
+// merges, batch identification). `section` is the destination of a view.
 const NAV_GROUPS = [
   {
     label: "Library",
     items: [
-      { id: "overview", label: "Overview", Icon: OverviewIcon },
-      { id: "songs", label: "Songs", Icon: SongsIcon },
-      { id: "favorites", label: "Favorites", Icon: HeartIcon },
-      { id: "albums", label: "Albums", Icon: AlbumIcon },
-      { id: "artists", label: "Artists", Icon: ArtistIcon },
-      { id: "genres", label: "Genres", Icon: GenreIcon },
+      { id: "music", label: "Music", Icon: SongsIcon },
       { id: "playlists", label: "Playlists", Icon: PlaylistIcon },
+      { id: "review", label: "Review", Icon: ReviewIcon, badge: "reviewOpen", badgeTitle: "Open issues: missing details, likely duplicates, file problems" },
     ],
   },
   {
-    label: "Maintain",
-    items: [
-      { id: "review", label: "Review", Icon: ReviewIcon, badge: "reviewOpen" },
-      { id: "merge", label: "Merge & Duplicates", Icon: MergeIcon },
-      { id: "quality", label: "Quality & Upgrades", Icon: QualityIcon, badge: "qualityAttention" },
-      { id: "health", label: "File Health", Icon: FileHealthIcon, badge: "fileProblems" },
-      { id: "identify", label: "Identify", Icon: SearchIcon },
-    ],
-  },
-  {
-    label: "Manage",
-    items: [
-      { id: "sources", label: "Sources", Icon: SourceIcon },
-      { id: "managed", label: "WaveMint Library", Icon: FolderOpenIcon },
-      { id: "iphone", label: "Apple Library Sync", Icon: PhoneIcon },
-      { id: "history", label: "History", Icon: HistoryIcon },
-      { id: "storage", label: "Storage", Icon: StorageIcon },
-    ],
+    label: "Sync",
+    items: [{ id: "iphone", label: "Apple Library Sync", Icon: PhoneIcon }],
   },
 ];
 
+function NavItem({ item, active, count, onClick }) {
+  const NavIcon = item.Icon;
+  return (
+    <button type="button" className={`app-nav__item ${active ? "is-active" : ""}`} aria-current={active ? "page" : undefined} onClick={onClick}>
+      <NavIcon size={18} />
+      {item.label}
+      {count > 0 && (
+        <span className="app-nav__count" title={item.badgeTitle}>
+          {count}
+        </span>
+      )}
+    </button>
+  );
+}
+
 /**
- * App navigation: Add Music, the library sections, and Settings. `activeId`
- * is "add" for Add Music or a library section id.
+ * App navigation: Add Music, the everyday destinations, and (at the bottom)
+ * Library Tools and Settings. `activeId` is "add" for Add Music or a section id.
  */
 export function AppNav({ activeId, status, addActivity, onAddMusic, onNavigate, onOpenSettings, settingsIndicator, settingsTitle }) {
   return (
@@ -90,33 +66,21 @@ export function AppNav({ activeId, status, addActivity, onAddMusic, onNavigate, 
         {NAV_GROUPS.map((group) => (
           <div key={group.label} className="app-nav__group">
             <span className="app-nav__label">{group.label}</span>
-            {group.items.map((item) => {
-              const NavIcon = item.Icon;
-              const count = item.badge ? status?.[item.badge] : 0;
-              const isActive = activeId === item.id;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={`app-nav__item ${isActive ? "is-active" : ""}`}
-                  aria-current={isActive ? "page" : undefined}
-                  onClick={() => onNavigate(item.id)}
-                >
-                  <NavIcon size={18} />
-                  {item.label}
-                  {count > 0 && <span className="app-nav__count">{count}</span>}
-                </button>
-              );
-            })}
+            {group.items.map((item) => (
+              <NavItem key={item.id} item={item} active={activeId === item.id} count={item.badge ? status?.[item.badge] : 0} onClick={() => onNavigate(item.id)} />
+            ))}
           </div>
         ))}
       </div>
 
-      <button type="button" className="app-nav__item app-nav__settings" onClick={onOpenSettings} title={settingsTitle}>
-        <SettingsIcon size={18} />
-        Settings
-        {settingsIndicator && <span className={`header-settings__dot is-${settingsIndicator}`} aria-hidden="true" />}
-      </button>
+      <div className="app-nav__footer">
+        <NavItem item={{ id: "tools", label: "Library Tools", Icon: ToolsIcon }} active={activeId === "tools"} onClick={() => onNavigate("tools")} />
+        <button type="button" className="app-nav__item app-nav__settings" onClick={onOpenSettings} title={settingsTitle}>
+          <SettingsIcon size={18} />
+          Settings
+          {settingsIndicator && <span className={`header-settings__dot is-${settingsIndicator}`} aria-hidden="true" />}
+        </button>
+      </div>
     </nav>
   );
 }

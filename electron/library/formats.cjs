@@ -155,6 +155,16 @@ function listMissingFiles(db) {
     else if (row.status === "unreadable") reason = `The file can't be read${row.read_error ? `: ${row.read_error}` : ""}.`;
     else reason = "The file was moved, renamed or deleted outside WaveMint.";
 
+    // What kind of problem this is. Only a song's current file is a problem to
+    // solve; a leftover reference (a removed or merged song, an earlier version
+    // whose file was cleaned up) is just something WaveMint can forget.
+    let kind;
+    if (!current) kind = row.trackState === "active" ? "earlier" : "leftover";
+    else if (back) kind = "back";
+    else if (sinceScan) kind = "moved";
+    else if (!available) kind = "drive";
+    else kind = row.status === "unreadable" ? "unreadable" : "missing";
+
     let belongsTo;
     if (!row.trackId) belongsTo = "A file that no longer belongs to any song.";
     else if (current) belongsTo = "This song's current file.";
@@ -171,6 +181,7 @@ function listMissingFiles(db) {
     const copies = row.trackId && row.title_key ? sameSong.all(row.trackId, row.title_key, row.artist_key) : [];
     return {
       fileId: row.fileId,
+      kind,
       trackId: row.trackId,
       title: row.title,
       artist: row.artist,
@@ -207,6 +218,25 @@ function forgetMissingFile(db, { fileId }) {
     db.prepare("DELETE FROM files WHERE id = ?").run(row.id);
   });
   return { forgotten: true };
+}
+
+/**
+ * Forgets several leftover references at once (Review → Diagnostics, "Forget
+ * All"): only references that aren't a song's current file and whose file is
+ * still gone. Database only: nothing on disk is touched.
+ */
+function forgetLeftoverReferences(db, { fileIds }) {
+  let forgotten = 0;
+  const skipped = [];
+  for (const fileId of fileIds) {
+    try {
+      forgetMissingFile(db, { fileId });
+      forgotten += 1;
+    } catch (error) {
+      skipped.push({ fileId: Number(fileId), reason: error.message });
+    }
+  }
+  return { forgotten, skipped };
 }
 
 /**
@@ -321,4 +351,5 @@ async function numericGenreScan(db, { signal, progress } = {}) {
   };
 }
 
-module.exports = { FORMAT_LABELS, appleCompatibility, numericGenreScan, rawId3Genre, forgetMissingFile, formatLabel, formatStats, listMissingFiles, relinkMissingFile };
+module.exports = {
+  FORMAT_LABELS, appleCompatibility, numericGenreScan, rawId3Genre, forgetLeftoverReferences, forgetMissingFile, formatLabel, formatStats, listMissingFiles, relinkMissingFile };

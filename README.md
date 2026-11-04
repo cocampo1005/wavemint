@@ -4,9 +4,9 @@
 
 ### Your music library, your way.
 
-**A Windows desktop app for organizing, editing, upgrading, and listening to your personal music collection.**
+**A Windows desktop app for browsing, editing, organizing and listening to your personal music collection, and keeping it in sync with iTunes and your iPhone.**
 
-Browse existing music folders, curate metadata and artwork, manage playlists, prepare files for Apple Music, and process audio from supported sources—all in one place.
+Browse and play your music, curate metadata and artwork, build playlists, catch real library problems and duplicates, replace songs with better files, add new music from supported sources, and sync the result to iTunes. All in one place.
 
 </div>
 
@@ -15,41 +15,86 @@ Browse existing music folders, curate metadata and artwork, manage playlists, pr
 
 ## At a glance
 
-|                      |                                                                                       |
-| -------------------- | ------------------------------------------------------------------------------------- |
-| **Platform**         | Windows 10 and 11, 64-bit                                                             |
-| **Availability**     | No public installer has been released yet; [build from source](#building-from-source) |
-| **Storage**          | Local music library, metadata, playlists, and history                                 |
-| **Media processing** | Bundled yt-dlp, Deno, FFmpeg, and FFprobe                                             |
-| **Project**          | Independent, personally maintained; [source-use terms](#source-code-and-licensing)    |
+|                      |                                                                                                    |
+| -------------------- | -------------------------------------------------------------------------------------------------- |
+| **Platform**         | Windows 10 and 11, 64-bit                                                                          |
+| **Download**         | [Latest installer on GitHub Releases](https://github.com/cocampo1005/wavemint/releases/latest)     |
+| **Storage**          | Your music stays in your own folders; WaveMint keeps its library database, playlists and history locally |
+| **Apple devices**    | Syncs to classic iTunes for Windows, which plays WaveMint's files directly and syncs your iPhone  |
+| **Media processing** | Bundled yt-dlp, Deno, FFmpeg, and FFprobe                                                          |
+| **Project**          | Independent, personally maintained; [source-use terms](#public-source-code)                        |
 
 ## Features
 
-### Organize your library
+WaveMint is organized around what you do every day. The sidebar has just a few destinations:
 
-- **Browse your collection.** Explore songs, albums, artists, genres, favorites, and playlists. The Overview highlights recently added music, genres, and top artists.
-- **Bring your existing folders.** Add curated, legacy/iTunes, or other music folders. Scanning is read-only; a source must be marked writable before WaveMint can modify its files.
-- **Curate metadata and artwork.** Edit individual tracks, multiple selections, or entire albums; **Save Changes** writes supported tags straight into the audio file after a verified backup. **Find Artwork** looks up a missing cover from the title, artist, and album.
-- **Build an organized collection.** Consolidate copies into a dedicated **WaveMint Library** folder using a configurable naming pattern (default: `Album Artist/Album/Track Title`).
-- **Manage playlists.** Create manual and rule-based smart playlists; import and export M3U8 playlists.
-- **Review and recover changes.** History records file operations and supports undo where available. Backups and a journal help protect against interrupted operations; [see data safety](#file-safety-and-backups).
+| Destination | What it's for |
+| --- | --- |
+| **Add Music** | Add songs, albums and playlists from supported online sources |
+| **Music** | Browse and play your collection: Overview, Songs, Albums, Artists, Genres and Favorites |
+| **Playlists** | Manual and smart playlists |
+| **Review** | Songs missing important details, possible duplicates, and file problems |
+| **Apple Library Sync** | Keep iTunes (and through it, your iPhone) in step with your library |
+| **Library Tools** | Sources, library organization, storage, history, library imports and batch identification |
 
-### Listen and edit
+### Browse and listen
 
-- **Integrated player.** Queue tracks, use Play Next or Add to Queue, reorder playback, shuffle, repeat, and control playback with Windows media keys.
-- **Listen Mode.** Enjoy large artwork with a smooth, layered, audio-reactive visualizer that flows from the artwork's borders.
-- **Audio editor.** Trim recordings and add fades using a waveform preview, including while preparing new tracks.
-- **Track upgrades.** Replace an existing recording using a local audio file or a supported URL. Compare versions with quality information, A/B listening, and spectrograms; edit the prefilled metadata and artwork before generating the replacement. Previous versions are retained for supported undo operations.
+- **Music, one place.** Switch between **Overview**, **Songs**, **Albums**, **Artists**, **Genres** and **Favorites** with tabs. Search, filter (artist, album, genre, decade), sort and resize columns; your choices are remembered.
+- **Overview.** Recently added music with artwork, what your collection is made of, your top artists, and a short note when something needs your attention.
+- **Integrated player.** Play Now, Play Next or Add to Queue from any song; reorder the queue, shuffle, repeat, and control playback with Windows media keys.
+- **Listen Mode.** Large artwork with a smooth, audio-reactive visualizer that flows from the artwork's borders, in a window or full screen.
 
-### Add and maintain music
+### Edit songs where you find them
 
-- **Analyze media.** Review a YouTube video or playlist and edit suggested title, artist, album, genre, and artwork before processing. Available metadata may include official release information surfaced through YouTube Music.
-- **Process tracks and playlists.** Save native AAC audio as M4A without audio re-encoding, with metadata and embedded artwork. Sources without a native AAC stream are reported as unavailable. Review selected playlist tracks or import a playlist as an album.
-- **Choose your cover art.** Use the source thumbnail, **1000 × 1000** square artwork (bars around square covers are removed, and album-art videos supply their full-resolution picture), or a custom image. The preview is exactly what gets embedded. Songs without artwork display a consistent in-app placeholder.
-- **Find library issues.** **Merge & Duplicates** groups matching files, **Quality & Upgrades** flags potentially poor-quality audio, **Review** surfaces metadata problems, and **File Health** lists missing files, earlier versions, and backups.
-- **Identify music (optional).** Look up recording and album information through MusicBrainz and the Cover Art Archive when enabled.
-- **Manage storage.** Review disk usage and remove eligible old backups or versions according to your chosen retention settings.
-- **Prepare for Apple Music/iPhone.** Generate an export folder with compatible music files, playlists, and a change report. WaveMint does **not** directly sync an iPhone or modify the Apple Music/iTunes library database.
+Select any song to open its details beside the list. Everything about one song is right there:
+
+- **Edit metadata.** Title, artist, album and genre first (with suggestions from your library so spellings stay consistent), the rest under **Advanced metadata**. Edit several songs or a whole album at once.
+- **Artwork.** **Find Artwork** looks up a missing cover from the title, artist and album; **Choose Image…** uses your own. The new cover is previewed and saved with your other changes.
+- **Save Changes writes the file.** Tags and artwork are written into the audio file after a verified backup, so other apps (and iTunes) see the same details.
+- **Edit Audio…** Trim and fade with a waveform preview. The previous version is kept so the edit can be undone.
+- **Upgrade Track…** Replace a song with a better file: choose a local file or analyze a supported URL, compare the technical details, listen to both (A/B and spectrograms), choose which metadata and artwork to keep, then upgrade. The song keeps its identity, playlists, history and its iTunes entry; the earlier file is kept for undo.
+- **Identify Song…** Look the song up in MusicBrainz and review suggested details before anything changes (optional; off until you enable it).
+- **Sync to iTunes**, **Show in Explorer**, **Remove from Library** (keeps the file, undoable) and **Delete File…** (to the Recycle Bin) from the song menu.
+
+### Review: only what matters
+
+Review answers three questions, one tab each:
+
+1. **Needs Attention: which songs are missing important information?** Only the essentials are checked: title, artist, album and artwork, plus values a ripper filled in ("Unknown Artist", "Track 01"). Optional details such as year, track numbers or genre are never flagged. Each group explains why it was flagged and how to fix it, and you fix it right there: **Find Artwork** (for a song or a whole album), **Use as Single** for a song without an album, **Edit** to open the song beside the list, or **Keep As Is**. If your library is full of singles, you can stop flagging songs without an album.
+2. **Possible Duplicates: which songs might be the same recording?** WaveMint compares songs conservatively: identical files, the same artist, title and length, or nearly identical titles ("Blinding Lights" and "The Blinding Lights" by the same artist). Live, remixed, acoustic, instrumental, radio-edit and other versions are never paired. Compare the songs side by side, play them, then **Merge…** (one song stays, the other files are kept as earlier versions, playlists and favorites follow, undoable from History), **Keep Both** (never paired again) or **Dismiss** (until one of the files changes). Nothing is ever merged or removed automatically.
+3. **Diagnostics: is anything wrong with my files?** Songs whose file was moved, renamed, deleted or can't be read, each with what happened and the safe ways out: **Locate File…** (the song keeps its history, playlists and iTunes entry), **Replace File…**, or **Remove from Library**. Leftover references from songs you already removed or merged are listed apart and aren't treated as problems; **Forget Reference** only tidies WaveMint's database and never deletes a file.
+
+The Review count in the sidebar is the number of real, unresolved issues.
+
+### Apple Library Sync
+
+WaveMint owns the library and iTunes follows it:
+
+- **Direct reference.** iTunes plays your WaveMint Library files themselves: one copy of each song on your PC. Only files iTunes can't play (such as FLAC) get a converted Apple Lossless copy.
+- **Incremental and persistent.** Each song is linked to its iTunes entry, so metadata, artwork, renamed or moved files, upgraded audio and playlists update the same entry, keeping play counts and ratings. A sync with nothing to do changes nothing.
+- **Safe by design.** Sync never moves, deletes or writes your music files. Removing songs from iTunes, recreating entries and large batches ask first; a removal is guarded so iTunes can't delete the file. Pending decisions, failures and a **Verify iTunes** check are shown on the screen.
+- **Automatic or manual.** Sync everything, only selected songs (**Sync to iTunes** in the song menu), or turn on automatic sync. Then sync your iPhone in iTunes as usual.
+- **Portable copy.** For the Apple Music app for Windows or another device, WaveMint can keep a portable export folder of compatible files and playlists.
+
+See [`docs/APPLE_SYNC.md`](docs/APPLE_SYNC.md) for the first-sync guide and recovery steps.
+
+### Add music
+
+- **Analyze media.** Review a YouTube video or playlist and edit the suggested title, artist, album, genre and artwork before adding. Official release information surfaced through YouTube Music is used when available.
+- **Add songs, albums and playlists.** Native AAC audio is saved as M4A without re-encoding, with metadata and embedded artwork, straight into your WaveMint Library. Review selected playlist tracks or import a playlist as an album. Sources without a native AAC stream are reported as unavailable.
+- **Choose your cover art.** The source thumbnail, **1000 × 1000** square artwork (bars around square covers are removed, and album-art videos supply their full-resolution picture), or your own image. The preview is exactly what gets embedded.
+- **Edit audio before adding.** Trim or fade a new song before it joins the library.
+
+### Library Tools
+
+Setup and maintenance utilities, out of the way of everyday browsing:
+
+- **Sources.** Add curated, legacy (such as an old iTunes folder) or other music folders. Scanning is read-only; a folder must be marked writable before WaveMint changes its files.
+- **Library Organization.** Choose your WaveMint Library folder and its naming pattern (default `Album Artist/Album/Track Title`), preview the result, and copy songs into it. Moves and renames are followed by Apple Library Sync, so iTunes never loses a file.
+- **Storage.** Disk usage and cleanup of old backups and earlier versions (with your chosen retention), the library by **audio format** (files, storage and share per codec, whether iTunes can play them, and the songs of each format), a check for genres stored as ID3 numbers with a one-click fix, and the **earlier versions** kept after upgrades and edits (restore one).
+- **History.** Every change WaveMint makes, with undo where available. Recent changes can also be undone from the notice that appears after them.
+- **Import & Merge.** Bring a separate library (for example a legacy collection) into WaveMint: copies of the same recording are grouped and your curated copy is preferred. Only WaveMint's library changes; no music file is copied, moved or deleted.
+- **Identify Songs.** Batch lookups in MusicBrainz and the Cover Art Archive, with every suggestion reviewed before it's applied.
 
 ### Extraction engine
 
@@ -57,21 +102,17 @@ WaveMint bundles yt-dlp, Deno, FFmpeg, and FFprobe in packaged builds. The extra
 
 ## Download and installation
 
-**There is no published WaveMint release yet.** For now, use the [build-from-source instructions](#building-from-source).
-
-When an installer becomes available, find it on the [official GitHub Releases page](https://github.com/cocampo1005/wavemint/releases). The planned Windows asset is named `WaveMint-Setup-<version>.exe`, accompanied by a `SHA256SUMS.txt` file.
-
-1. Download the installer from the project's official release page.
-2. Verify the downloaded file's SHA-256 checksum against the release's published checksum:
+1. Download **`WaveMint-Setup-<version>.exe`** from the [latest GitHub Release](https://github.com/cocampo1005/wavemint/releases/latest).
+2. Optionally, verify the download against the release's `SHA256SUMS.txt`:
 
    ```powershell
    Get-FileHash .\WaveMint-Setup-<version>.exe -Algorithm SHA256
    ```
 
-3. Run the installer and open WaveMint from the Start menu. The described installer is per-user and should not require administrator rights.
+3. Run the installer and open WaveMint from the Start menu. The installer is per-user and doesn't need administrator rights. No other software is required: the media tools are bundled.
 
 > [!CAUTION]
-> **Unsigned installer:** Windows SmartScreen may warn about a build that has not been code-signed. Confirm the publisher/source and independently assess the risk before choosing to run it. A checksum comparison helps detect an altered or incomplete download, but a checksum hosted alongside the download does **not** independently prove who published it. Do not bypass a security warning if you cannot establish trust in the file.
+> **Unsigned installer:** the installer isn't code-signed yet, so Windows SmartScreen may show "Windows protected your PC". Choose **More info → Run anyway** only if you downloaded it from the official release page above. A checksum comparison helps detect an altered or incomplete download, but a checksum hosted next to the download doesn't independently prove who published it.
 
 ### System requirements
 
@@ -80,25 +121,26 @@ When an installer becomes available, find it on the [official GitHub Releases pa
 | Operating system           | Windows 10 or 11, x64                                                                                                                               |
 | App disk space             | Approximately 650 MB for the packaged app and tools, plus space for audio, cache, and backups                                                       |
 | Internet                   | Needed for online analysis/extraction, engine updates, and optional MusicBrainz lookups; library browsing, playback, and local editing work offline |
-| Additional media utilities | None for packaged builds; the required tools are bundled                                                                                            |
+| Apple Library Sync         | Classic iTunes for Windows (the version from Apple's website), installed on the same PC                                                             |
+| Additional media utilities | None; the required tools are bundled                                                                                                                |
 
 ### Uninstalling and preserving your data
 
 > [!WARNING]
-> **Current uninstall behavior removes `%APPDATA%\WaveMint`, including the library database.** This can delete your saved metadata edits, playlists, history, and application settings even though your actual music files and export folders remain on disk. **Back up your application data before uninstalling or reinstalling.** The uninstaller has not yet been independently validated as part of a full installer test.
+> **Uninstalling removes `%APPDATA%\WaveMint`, including the library database.** Your music files and export folders stay on disk, but saved metadata edits that live only in WaveMint, playlists, history and settings are removed. **Back up your application data before uninstalling or reinstalling.**
 
-To back up your app data, exit WaveMint and copy the entire `%APPDATA%\WaveMint` folder to another location. This is safer than copying only the `library` subfolder because configuration and engine-related state are stored elsewhere within it.
-
-Use **Windows Settings → Apps → Installed apps → WaveMint → Uninstall** when ready. The data-deletion behavior is a known issue to resolve before wider distribution.
+To back up your app data, exit WaveMint and copy the entire `%APPDATA%\WaveMint` folder to another location. Then use **Windows Settings → Apps → Installed apps → WaveMint → Uninstall**.
 
 ## Getting started
 
-### 1. Connect your music folders
+### 1. Bring in your music
 
-1. On **Overview**, choose **Add iTunes / Legacy Folder**; or open **Manage → Sources** and choose **Add Curated Folder**, **Add Legacy Folder**, or **Add Other…**.
-2. Choose the folders containing your music. A scan indexes them without modifying the files. Source roles help determine which version is preferred when duplicates exist.
-3. Open **Manage → WaveMint Library** to choose where WaveMint saves organized copies and newly added or upgraded songs.
-4. Browse **Songs**, **Albums**, **Artists**, and **Genres**. Double-click a track to play it.
+1. Open **Library Tools → Sources** and choose **Add Curated Folder**, **Add Legacy Folder**, or **Add Other…** (or use the buttons on the welcome screen of an empty library).
+2. Choose the folders that hold your music. A scan indexes them without modifying the files. Source roles decide which copy is preferred when the same recording exists in several places.
+3. In **Library Tools → Library Organization**, choose where your WaveMint Library lives. New, upgraded and organized songs are saved there.
+4. Open **Music** and browse **Songs**, **Albums**, **Artists** and **Genres**. Double-click a song to play it.
+
+To combine an older collection with your curated one, use **Library Tools → Import & Merge**.
 
 ### 2. Add music from a supported online source
 
@@ -108,35 +150,41 @@ Use **Windows Settings → Apps → Installed apps → WaveMint → Uninstall** 
 2. Paste the link and click **Analyze**.
 3. Review or correct the suggested metadata. For playlists, select the songs you want; **Apply to all songs** can simplify shared fields.
 4. Choose **Original**, **Square**, or **Custom** artwork and review the preview.
-5. Select **Add to Library** or **Add Selected to Library**. Use **Edit audio before adding** if you want to trim or fade a recording first.
+5. Select **Add to Library** or **Add Selected to Library**. Tick **Edit audio before adding** to trim or fade a recording first.
 
-Progress is shown in the interface, and individual operations can be canceled. Some sources may be unavailable because of permissions, access restrictions, removal, or third-party changes.
+Progress is shown as it happens, and each operation can be canceled. Some sources may be unavailable because of permissions, access restrictions, removal, or third-party changes.
 
 ### 3. Edit metadata and artwork
 
-Select a song to edit its details and click **Save Changes**. Title, artist, album, and genre are shown first; other tags are under **Advanced metadata**. You can also bulk-edit selected songs or update an album. Use **Change Artwork…** to select an image, or **Find Artwork** when a song has none; a new cover is previewed and saved with your other changes.
+Select a song to edit its details and click **Save Changes**. Title, artist, album, and genre come first; other tags are under **Advanced metadata**. Select several songs to edit them together, or edit a whole album from its page. **Change Artwork…** chooses an image, and **Find Artwork** looks one up when a song has none.
 
-Saving writes the changes into the audio file after a verified backup. Supported tag-writing formats include MP3, M4A/AAC, ALAC, and FLAC; WAV and AIFF are playable but do not support tag writing in WaveMint, and songs in read-only folders keep their edits in WaveMint.
+Saving writes the changes into the audio file after a verified backup. Tags can be written to MP3, M4A (AAC and ALAC) and FLAC files; WAV and AIFF play but keep their tags in WaveMint, as do songs in folders you haven't made writable.
 
-### 4. Trim or fade a recording
+### 4. Review your library
 
-Select a track and choose **Edit Audio…**. Set trim boundaries and fade lengths, listen to the preview, then save. WaveMint retains the previous version for supported recovery through **History**.
+Open **Review** now and then. **Needs Attention** lists songs missing a title, artist, album or artwork; **Possible Duplicates** lets you compare and merge or keep songs that may be the same recording; **Diagnostics** helps you locate files that were moved or renamed outside WaveMint. When everything is in order, each tab says so.
 
-### 5. Upgrade an existing track
+### 5. Upgrade or trim a song
 
-1. Select a song and choose **Upgrade Audio…** (under **Technical details**, or **Upgrade…** in **Quality & Upgrades**).
-2. Use **Choose File** for a local replacement, or **Analyze URL** to review an online source; its audio is extracted for the comparison automatically.
-3. Compare technical quality information and listen to both versions. Check that the proposed audio is the intended recording, not a live version, remix, or alternate take.
-4. Review the **prefilled but editable** metadata and choose **Current**, **Source**, **Custom**, or **None** for artwork. Detected metadata will not silently replace your curated fields; **Use Detected Metadata…** lets you select changes explicitly.
-5. Click **Upgrade Track** to generate and apply the new file using your finalized metadata and artwork. The prior version is retained for supported undo operations.
+Select a song and choose **Upgrade Track…** to replace its audio with a better file, or **Edit Audio…** to trim and fade it:
 
-### 6. Organize and prepare files
+1. For an upgrade, use **Choose File** for a local replacement, or **Analyze URL** for an online source.
+2. Compare the technical details and listen to both versions. Make sure the replacement is the same recording, not a live version, remix, or alternate take.
+3. Review the **prefilled but editable** metadata and choose **Current**, **Source**, **Custom**, or **None** for the artwork. Detected metadata never silently replaces your curated fields.
+4. Click **Upgrade Track**. The previous file is kept so the upgrade can be undone from **History**.
 
-Use **Review** to find metadata issues, **Merge & Duplicates** to reconcile repeated tracks, **Quality & Upgrades** to review suspect audio, **File Health** to repair missing files or restore an earlier version, and **Storage** to manage disk usage. Use **Prepare for iPhone** to export files for subsequent import into Apple Music or iTunes.
+### 6. Sync to iTunes and your iPhone
+
+1. In iTunes (**Edit → Preferences → Advanced**), turn off **Keep iTunes Media folder organized** and **Copy files to iTunes Media folder when adding to library**. Keep iTunes open.
+2. Open **Apple Library Sync** and choose **Check What's Changed**.
+3. Choose **Sync 5 Songs as a Test**, check the songs in iTunes, then **Sync Everything** and **Verify iTunes**.
+4. Turn on **Sync automatically** if you like, and sync your iPhone in iTunes.
 
 ## File safety and backups
 
-WaveMint is designed to avoid modifying original music folders without your permission. Supported file-changing operations use staged writes, verification, backups, and a journal to support recovery and undo. The scope of verification depends on the operation: for example, a metadata-only write can verify that audio was not changed, whereas a deliberate trim or audio upgrade necessarily changes it.
+WaveMint is designed never to modify your music folders without your permission. File-changing operations use staged writes, verification, backups and a journal to support recovery and undo. The scope of verification depends on the operation: a metadata-only write verifies that the audio didn't change, whereas a deliberate trim or upgrade changes it on purpose.
+
+Duplicate merges, library imports, Forget Reference and Remove from Library only change WaveMint's database; they never delete music files. Deleting a file always asks first and moves it to the Recycle Bin.
 
 These protections reduce risk; they are **not** a substitute for your own backups or a guarantee against hardware failure, software bugs, or interruption. Keep an independent backup of important music and the WaveMint application-data folder, especially before large imports, consolidations, deletions, or upgrades.
 
@@ -154,14 +202,14 @@ Under **Settings → YouTube Access → Advanced Authentication**, WaveMint offe
 | **Browser Cookies** | Asks yt-dlp to read a supported local browser profile (Chrome, Edge, Firefox, Brave, Opera, Vivaldi, Chromium, or Whale) |
 | **Cookies File**    | Uses a user-provided Netscape-format `cookies.txt` file                                                                  |
 
-**Test Authentication** performs a small request to assess whether cookies can be read and whether the platform recognizes the session; it does not download media. Browser security protections or locked profiles may prevent access. WaveMint does not attempt to defeat browser encryption protections.
+**Test Authentication** performs a small request to check whether cookies can be read and whether the platform recognizes the session; it does not download media. Browser security protections or locked profiles may prevent access. WaveMint does not attempt to defeat browser encryption protections.
 
 > [!WARNING]
 > **Protect your cookies.** A cookies file can provide access to an authenticated account and should be treated like a password. Never upload or share it in bug reports. Delete exported cookie files when they are no longer needed. WaveMint stores the selected cookie-file path rather than its values; yt-dlp may update the file during use.
 
 ### Engine updates and rate limits
 
-Use **Settings → Extraction Engine → Check for Updates** to check for a newer yt-dlp release. The application verifies downloaded updates, tests them, and retains the bundled engine as a fallback. Update checks can run at most once a day by default and can be turned off; updates are not installed automatically.
+Use **Settings → Extraction Engine → Check for Updates** to check for a newer yt-dlp release. WaveMint verifies downloaded updates, tests them, and keeps the bundled engine as a fallback. Update checks run at most once a day and can be turned off; updates are never installed automatically.
 
 Online services can restrict access, change behavior, or throttle requests. WaveMint reports detected rate limits and can pause processing temporarily. Neither an engine update nor signing in guarantees that extraction will work.
 
@@ -175,9 +223,16 @@ A required tool may be missing or blocked. Check antivirus or system security no
 </details>
 
 <details>
+<summary><strong>A song says its file is missing</strong></summary>
+
+Open **Review → Diagnostics**. If you moved or renamed the file outside WaveMint, choose **Locate File…** and point to its new location *before* rescanning: the song keeps its details, playlists, history and iTunes entry. If the drive isn't connected, connect it and rescan.
+
+</details>
+
+<details>
 <summary><strong>“Paste the web address of a video or playlist”</strong></summary>
 
-The input is not a supported online address (for example, it may be a local file path). Copy a valid source URL instead. For local audio, use the appropriate file-selection workflow.
+The input is not a supported online address (for example, it may be a local file path). Copy a valid source URL instead. For local audio, add its folder under **Library Tools → Sources**, or use **Upgrade Track…** to replace a song's file.
 
 </details>
 
@@ -203,10 +258,17 @@ Use **Settings → Extraction Engine → Check for Updates** to check for a veri
 </details>
 
 <details>
+<summary><strong>iTunes isn't found or a sync stops</strong></summary>
+
+Apple Library Sync needs classic iTunes for Windows, open on the same PC. If a sync stops because iTunes moved or copied a file, turn off **Keep iTunes Media folder organized** and **Copy files to iTunes Media folder** in iTunes' Advanced preferences, then sync again. Changes that need your decision (removals, entries edited in iTunes) wait on the Apple Library Sync screen. See [`docs/APPLE_SYNC.md`](docs/APPLE_SYNC.md#recovery).
+
+</details>
+
+<details>
 <summary><strong>A track cannot be tagged, edited, or upgraded</strong></summary>
 
 - WAV and AIFF can be played but are not supported for tag writing.
-- Read-only source folders are not modified; edits can instead be written into managed copies.
+- Folders you haven't made writable (Library Tools → Sources) are never modified; their songs keep edits in WaveMint.
 - For permission or file-in-use errors, close other programs using the file and check folder permissions.
 
 </details>
@@ -214,50 +276,46 @@ Use **Settings → Extraction Engine → Check for Updates** to check for a veri
 <details>
 <summary><strong>An edit or upgrade failed</strong></summary>
 
-WaveMint is designed to prepare and validate replacements before applying them and to recover incomplete journaled operations on startup. If the operation fails or was interrupted, inspect **History** and verify the current file; restore from your backup if necessary.
+WaveMint prepares and validates replacements before applying them and recovers incomplete journaled operations at startup. If an operation failed or was interrupted, check **Library Tools → History** and the current file; restore from your backup if necessary.
 
 </details>
 
 <details>
 <summary><strong>How do I report an issue?</strong></summary>
 
-Use **Details → Copy Error Details** where available. Review the copied report before sharing it: although WaveMint is designed to redact credentials, account data, signed media URLs, and sensitive local paths, you should check that no private information remains. Describe the steps to reproduce the issue.
+Use **Details → Copy Error Details** where available. Review the copied report before sharing it: WaveMint redacts credentials, account data, signed media URLs, and local user paths, but check that no private information remains. Describe the steps to reproduce the issue.
 
 </details>
 
-### Apple Music and iTunes limitations
-
-WaveMint does **not** directly edit Apple's library database or sync files to an iPhone. Apple Music/iTunes tracks metadata and file locations separately, so a file changed in WaveMint may need to be refreshed or re-imported in Apple's app. **Prepare for iPhone** generates an export folder with compatible files, playlists, and a change report to help you make those updates.
-
 ## Privacy and your data
 
-WaveMint does not currently provide user accounts, in-app analytics, telemetry, or crash-report uploading, according to the documented implementation. Music library management is local, but certain optional and requested features contact external services.
+WaveMint has no user accounts, in-app analytics, telemetry, or crash-report uploading. Library management happens on your PC; only the features listed under [Network activity](#network-activity) contact external services, and only when you use them.
 
 ### Local storage
 
 | Data                                                                  | Location                                                                  |
 | --------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Track details, library indexes, playlists, edits, and history         | `%APPDATA%\WaveMint\library\`                                             |
+| Song details, library indexes, playlists, edits, history, sync state  | `%APPDATA%\WaveMint\library\`                                             |
 | Artwork, caches, backups, previous versions                           | App library folder and your WaveMint Library's `.wavemint-archive` folder |
 | App settings and the selected cookie-file **path** (not its contents) | `%APPDATA%\WaveMint\settings.json`                                        |
 | Updated yt-dlp and its cache                                          | `%APPDATA%\WaveMint\engine\` and `%APPDATA%\WaveMint\yt-dlp-cache\`       |
 | Player preferences                                                    | App-local browser storage                                                 |
 
-The application keeps a limited number of sanitized error details in memory and uses console logging rather than persistent log files, as described in the current implementation.
+WaveMint keeps a limited number of sanitized error details in memory and logs to the console rather than to persistent log files.
 
 ### Network activity
 
 | Service                                     | When contacted                                                  | Data involved                                                  |
 | ------------------------------------------- | --------------------------------------------------------------- | -------------------------------------------------------------- |
 | YouTube/Google and media or thumbnail hosts | When you analyze/extract media or test authentication           | Source URL; authenticated cookies if you opted into that mode  |
-| GitHub                                      | Optional or periodic engine-update checks and explicit installs | Requests for release information and binary downloads          |
-| MusicBrainz / Cover Art Archive             | When **Identify** is enabled and used                           | Music metadata queries and the required application identifier |
+| GitHub                                      | Engine-update checks (at most daily, can be turned off) and installs you start | Requests for release information and binary downloads |
+| MusicBrainz / Cover Art Archive             | When identification is enabled and you use Identify or Find Artwork | Music metadata queries and the required application identifier |
 
-Those services may process request information under their own terms and privacy policies. Review their policies if you use the corresponding features.
+Apple Library Sync talks to iTunes on your own PC; it doesn't contact Apple's services. The services above may process request information under their own terms and privacy policies.
 
 ## Building from source
 
-**Prerequisites:** Windows 10/11 x64, [Node.js](https://nodejs.org/) 24 or later, npm, and Git. The Node version requirement comes from the current project configuration; packaged builds also depend on the version of Node bundled with Electron.
+**Prerequisites:** Windows 10/11 x64, [Node.js](https://nodejs.org/) 24 or later, npm, and Git.
 
 ```powershell
 git clone https://github.com/cocampo1005/wavemint.git
@@ -267,15 +325,17 @@ npm run binaries:fetch
 npm start
 ```
 
-`binaries:fetch` downloads and verifies pinned yt-dlp, Deno, FFmpeg, and FFprobe binaries for development. `npm start` runs Vite and Electron together with hot reload.
+`binaries:fetch` downloads and verifies the pinned yt-dlp, Deno, FFmpeg, and FFprobe binaries. `npm start` runs Vite and Electron together with hot reload.
 
 | Command                                              | Purpose                                                     |
 | ---------------------------------------------------- | ----------------------------------------------------------- |
-| `npm start`                                          | Launch Vite and Electron together                           |
+| `npm start`                                          | Launch Vite and Electron together (separate `WaveMint-Dev` profile) |
+| `npm run start:library`                              | Development run with the installed app's profile (your real library); refused while WaveMint is open |
 | `npm run dev` / `npm run electron`                   | Start the renderer or Electron separately                   |
 | `npm run build`                                      | Build the renderer into `dist/`                             |
 | `npm run lint`                                       | Run ESLint                                                  |
-| `npm test`                                           | Run automated tests                                         |
+| `npm test`                                           | Run the unit and integration tests                          |
+| `npm run test:e2e`                                   | Build, then drive the real app with a temporary profile and synthetic songs |
 | `npm run binaries:fetch` / `npm run binaries:verify` | Fetch or validate pinned media tools                        |
 | `npm run binaries:check-updates`                     | Check for upstream tool versions; `-- --write` updates pins |
 | `npm run check:release`                              | Validate release inputs                                     |
@@ -288,7 +348,7 @@ npm start
 - If bundled tools have not been fetched, development can use `yt-dlp`, `ffmpeg`, `ffprobe`, and `deno` from `PATH`. Set `WAVEMINT_USE_SYSTEM_BINARIES=1` to force system binaries.
 - Development data defaults to `%APPDATA%\WaveMint-Dev`; `--user-data-dir=<folder>` selects another profile for isolated tests.
 - Set `WAVEMINT_RENDERER=dist` to load a previously built renderer instead of the dev server.
-- If Electron unexpectedly runs in plain Node mode, check and remove an inherited `ELECTRON_RUN_AS_NODE` environment variable.
+- If Electron unexpectedly runs in plain Node mode, remove an inherited `ELECTRON_RUN_AS_NODE` environment variable.
 
 ## Architecture
 
@@ -303,32 +363,33 @@ Electron main process (electron/)
    ├── ipc/extractionHandlers.cjs Analysis, extraction, previews, cancellation
    │     ├── youtubeMetadata.cjs  Parse yt-dlp metadata
    │     └── songExtraction.cjs   Extraction and tagging workflow
-   ├── artwork.cjs               Artwork download and crop processing
+   ├── artwork.cjs                Artwork download and crop processing
    ├── ipc/engineHandlers.cjs     Engine updates and verification
    ├── ipc/authHandlers.cjs       Optional authentication settings
-   └── library/host.cjs           Validated library requests
+   └── library/host.cjs           Validated library requests, dialogs, media protocol
              │
              ▼
-       library/worker.cjs         SQLite and domain operations
+       library/worker.cjs         SQLite and the library services
+             ├── review.cjs + duplicates.cjs   Review: essentials, duplicates, diagnostics
+             ├── applesync.cjs + itunes.cjs    Apple Library Sync (iTunes over COM)
+             └── fileops, upgrade, merge, organize, storage, …
 ```
 
 **Design principles**
 
 - **Restricted renderer access:** privileged operations are exposed through a defined preload API; IPC senders and payloads are validated.
-- **Recoverable file operations:** changes use staging, operation-specific verification, backups, and journaling where supported.
+- **Recoverable file operations:** changes use staging, operation-specific verification, backups, and journaling.
 - **Shared extraction pipeline:** analysis, single tracks, playlists, and upgrades share extraction infrastructure and request-scoped cancellation.
 - **Responsive library operations:** scanning and database work run off the renderer's main thread.
 - **Pinned media tools:** packaged utilities are tied to verified upstream downloads and checked during release preparation.
 
-See [`docs/ENGINEERING.md`](docs/ENGINEERING.md), [`docs/LIBRARY.md`](docs/LIBRARY.md), and [`CLAUDE.md`](CLAUDE.md) for more detail. These repository documents and links should be checked during release preparation.
+See [`docs/ENGINEERING.md`](docs/ENGINEERING.md), [`docs/LIBRARY.md`](docs/LIBRARY.md), [`docs/APPLE_SYNC.md`](docs/APPLE_SYNC.md), and [`CLAUDE.md`](CLAUDE.md) for more detail.
 
 ## Testing and release builds
 
-`npm test` uses Node's built-in test runner. The reported test suite covers metadata processing, artwork behavior, extraction parameters and retries, IPC validation, cancellation isolation, file tagging, upgrade recovery, playlists, storage, the player queue, and visualizer logic. Tests use temporary synthetic libraries and mock external services rather than downloading live media.
+`npm test` uses Node's built-in test runner. It covers metadata processing, artwork, extraction parameters and retries, IPC validation, cancellation, tag writing, upgrades and their recovery, the review rules and duplicate matching, merges, playlists, storage, Apple Library Sync (against an in-memory iTunes stand-in), the player queue and the visualizer. `npm run test:e2e` drives the real app: navigation, Review, metadata pickers, toasts, Apple Library Sync screens and file diagnostics. Tests use temporary synthetic libraries and never touch a real music library, profile or iTunes.
 
-For release preparation, run the applicable lint, test, build, and packaged-application checks, and test the **actual installer and uninstaller** on an isolated Windows profile. At present, the previous audit reported that the installer itself and the repository-contained end-to-end test workflow had not been fully validated.
-
-The repository describes a version-tag-based release workflow in [`.github/workflows/release.yml`](.github/workflows/release.yml) that creates a **draft** GitHub Release with installer artifacts, checksums, and associated third-party source materials. Review [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md) before publishing. Release executables are not currently code-signed.
+Releases are built by [`.github/workflows/release.yml`](.github/workflows/release.yml): pushing a version tag (`v1.2.3`) builds the installer on Windows, runs lint and tests, and creates a **draft** GitHub Release with the installer, `SHA256SUMS.txt` and the FFmpeg source archive. The draft is published after the checks in [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md). Release executables are not code-signed yet.
 
 ---
 
@@ -347,7 +408,7 @@ This section describes intended use; it is not a legal opinion or a guarantee th
 
 WaveMint uses independent third-party software and services, including [Electron](https://www.electronjs.org/), [React](https://react.dev/), [Vite](https://vite.dev/), [yt-dlp](https://github.com/yt-dlp/yt-dlp), [Deno](https://deno.com/), [FFmpeg](https://ffmpeg.org/), [node-taglib-sharp](https://github.com/benrr101/node-taglib-sharp), and the [Poppins](https://github.com/itfoundry/Poppins) typeface. Optional metadata lookups use [MusicBrainz](https://musicbrainz.org/) and the [Cover Art Archive](https://coverartarchive.org/).
 
-These projects have their **own** licenses and terms. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md); the packaged release also contains third-party license materials under `resources\licenses\` and `resources\bin\licenses\` as documented by the project. Distribution requirements must be checked against the actual shipped binaries and dependencies.
+These projects have their **own** licenses and terms. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md); the packaged release also contains third-party license materials under `resources\licenses\` and `resources\bin\licenses\`.
 
 WaveMint is an independent project and is not affiliated with, sponsored by, or endorsed by YouTube, Google, Apple, MusicBrainz, or the other third-party projects and services mentioned here. Their names and trademarks belong to their respective owners. External interfaces, terms, and availability can change.
 

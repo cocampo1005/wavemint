@@ -47,7 +47,8 @@ async function type(input, text) {
 }
 
 async function openSong(page, title) {
-  await page.locator(".app-nav__item", { hasText: /^Songs/ }).first().click();
+  await page.locator(".app-nav__item", { hasText: /^Music/ }).first().click();
+  await page.locator(".lib-tabs__tab", { hasText: /^Songs$/ }).click();
   const row = page.locator(".lib-row[role=row]", { hasText: title }).first();
   await row.waitFor();
   await row.click();
@@ -59,11 +60,24 @@ const coveredControls = (page) =>
   page.evaluate(() => {
     const toasts = [...document.querySelectorAll(".wm-toast")].map((toast) => toast.getBoundingClientRect());
     const overlaps = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+    // The part of a control that can be seen: scrolled-away parts of a scrolling panel are clipped.
+    const visibleRect = (element) => {
+      let { left, top, right, bottom } = element.getBoundingClientRect();
+      for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+        if (window.getComputedStyle(parent).overflow === "visible") continue;
+        const clip = parent.getBoundingClientRect();
+        left = Math.max(left, clip.left);
+        top = Math.max(top, clip.top);
+        right = Math.min(right, clip.right);
+        bottom = Math.min(bottom, clip.bottom);
+      }
+      return { left, top, right, bottom };
+    };
     return [...document.querySelectorAll("button, input, select, [role=combobox], a[href]")]
       .filter((element) => !element.closest(".wm-toasts, .lib-row, [hidden]"))
       .filter((element) => {
-        const rect = element.getBoundingClientRect();
-        return rect.width && rect.height && toasts.some((toast) => overlaps(rect, toast));
+        const rect = visibleRect(element);
+        return rect.right > rect.left && rect.bottom > rect.top && toasts.some((toast) => overlaps(rect, toast));
       })
       .map((element) => element.getAttribute("aria-label") || element.textContent.trim() || element.className);
   });

@@ -18,7 +18,7 @@ WaveMint Library (e.g. D:\Music)  →  iTunes (references those files)  →  iPh
 | Compatibility cache (only for files iTunes can't play) | `exporter.cjs` with the cache as its root | `export_state` |
 | Classic iTunes adapter (COM in an out-of-process STA PowerShell) | `itunes.cjs` | — |
 | Guided migration of an iTunes library that already has songs; verification | `applemigrate.cjs` | same tables |
-| Formats and missing files (Maintain → File Health) | `formats.cjs`, `FileHealthView.jsx` | — |
+| Formats (Library Tools → Storage) and missing files (Review → Diagnostics) | `formats.cjs`, `LibraryFiles.jsx` | — |
 
 - **Identity** is WaveMint's song ID; an iTunes entry is its 16-digit persistent ID,
   per iTunes library. Paths and titles are never the identity, so two files with the
@@ -65,7 +65,7 @@ WaveMint Library (e.g. D:\Music)  →  iTunes (references those files)  →  iPh
 - iTunes' edits are never copied into WaveMint; edits made in iTunes are shown as
   "edited in iTunes" for you to resolve.
 
-## Formats and missing files (Maintain → File Health)
+## Formats (Library Tools → Storage) and missing files (Review → Diagnostics)
 
 - **Audio formats**: every song's current file grouped by codec (with the extensions
   seen), files, storage and share, a bar per format, totals, and "Ready for iTunes"
@@ -78,13 +78,15 @@ WaveMint Library (e.g. D:\Music)  →  iTunes (references those files)  →  iPh
   same-name files and other copies in the library, and safe actions: **Locate File…**
   (relink to a file inside a library folder, same type, not tracked elsewhere), **Replace
   File…**, **Remove from Library**, **Forget Reference** (database only, never the current
-  file of a song). Nothing on disk is deleted. The Sources screen's "N missing" links here.
+  file of a song). Nothing on disk is deleted. Leftover references (removed or merged songs,
+  earlier versions whose file is gone) are listed apart, aren't counted as problems, and can
+  be forgotten all at once. The Sources tab's "N missing" links here.
 
 ## Before the first sync
 
-- Maintain → File Health → **Audio formats**: check that the library is "Ready for iTunes".
+- Library Tools → Storage → **Audio formats**: check that the library is "Ready for iTunes".
   A library of MP3 and AAC only needs no conversion at all (no compatibility cache).
-- Maintain → File Health → **Missing or unreadable files**: resolve or forget what's listed.
+- Review → **Diagnostics**: resolve what's listed.
 - Audio formats → **Check Genre Tags**: MP3s written by older tools (and WaveMint before this
   fix) may store genres as ID3v1 numbers ("(145)", or a bare "7"). iTunes shows codes above
   125 as numbers; **Store Genres as Text** rewrites only the genre (verified backups, audio
@@ -101,8 +103,8 @@ WaveMint Library (e.g. D:\Music)  →  iTunes (references those files)  →  iPh
 
 1. In iTunes: Edit → Preferences → Advanced, both "Keep iTunes Media folder organized"
    and "Copy files to iTunes Media folder when adding to library" **off**. Keep iTunes open.
-2. Optional: resolve File Health findings (see above).
-3. Library → **Apple Library Sync**: check "Both settings are off in iTunes", then
+2. Optional: resolve Review → Diagnostics findings (see above).
+3. **Apple Library Sync**: check "Both settings are off in iTunes", then
    **Check What's Changed** (it should say iTunes is empty and how many songs it will add).
 4. **Sync 5 Songs as a Test.** It verifies automatically. In iTunes, check the 5 songs:
    they play, show artwork, and Get Info → File shows the WaveMint Library folder. Make sure
@@ -116,7 +118,7 @@ WaveMint Library (e.g. D:\Music)  →  iTunes (references those files)  →  iPh
 - iTunes closed/unreachable: changes stay pending; open iTunes and sync (or let
   automatic sync resume). Stuck on a dialog: answer it, retry.
 - "iTunes moved a file": turn off "Keep organized", move the file back or rescan the
-  library (Sources), then sync.
+  library (Library Tools → Sources), then sync.
 - "iTunes deleted a file": the file was put back from its guard name; removals stay
   paused. Report it before re-enabling anything.
 - Failed songs: listed with the reason → Retry Failed Songs.
@@ -149,7 +151,7 @@ test song, each step read back from iTunes, files hashed before/after):**
 | Metadata change (genre) saved into the file, same entry refreshed (`UpdateInfoFromFile`), restored | pass (after fix: iTunes re-reads changed files itself; that is not treated as an edit made in iTunes anymore) |
 | Artwork change and Undo, picture compared byte for byte with iTunes' own export | pass (after fix: a cover stored as picture type "Other" is replaced, not kept beside the new one) |
 | Title change and restore | pass |
-| File moved: File Health finds it before a rescan, Locate File, same entry re-pointed (`Location` set), moved back | pass (after fix: entries whose file iTunes can't find have an empty location and were hidden, which would have added the song twice) |
+| File moved: the missing-files view finds it before a rescan, Locate File, same entry re-pointed (`Location` set), moved back | pass (after fix: entries whose file iTunes can't find have an empty location and were hidden, which would have added the song twice) |
 | Audio replacement (Upgrade Track, MP3 128 → 320) keeps the entry and its iTunes rating | pass |
 | Playlist create, reorder, rename, delete (with confirmation); songs untouched | pass |
 | Repeated sync of unchanged songs changes nothing | pass |
@@ -162,7 +164,7 @@ Real iTunes' `Delete` removed only the library entry: the guard never had to res
 **Not yet verified:** the iPhone sync.
 
 **Known WaveMint limitation (not Apple sync):** a file moved or renamed outside WaveMint becomes
-a new, duplicate song if the library is rescanned before the move is located in File Health.
+a new, duplicate song if the library is rescanned before the move is located in Review → Diagnostics.
 
 ## Manual checklist after the full sync (real iTunes)
 
@@ -170,7 +172,7 @@ a new, duplicate song if the library is rescanned before the move is located in 
    first to see it survive).
 2. Change artwork: iTunes shows it.
 3. Upgrade a song (Upgrade Track): same entry, new file path in Get Info.
-4. Rename/reorganize (WaveMint Library naming): entries follow.
+4. Rename/reorganize (Library Tools → Library Organization): entries follow.
 5. Create, reorder, rename and delete a WaveMint playlist: iTunes follows (delete asks).
 6. Remove a song from WaveMint (with confirmation): its entry leaves iTunes and the file is
    still in the WaveMint Library folder.

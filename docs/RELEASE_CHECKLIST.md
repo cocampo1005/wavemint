@@ -24,8 +24,10 @@ Record the WaveMint version, Windows version (10 or 11) and date.
 ## Core features (no sign-in)
 
 - [ ] No "components could not be started" banner appears after launch.
-- [ ] WaveMint opens on the library (Songs); an empty library shows the
-      welcome with **Add Music** and the folder buttons.
+- [ ] WaveMint opens on **Music → Overview**; an empty library shows the
+      welcome with **Add Music** and the folder buttons. The sidebar shows Add
+      Music, Music, Playlists, Review, Apple Library Sync, Library Tools and
+      Settings.
 - [ ] **+ Add Music** opens Add Music; the first time it asks for the WaveMint
       Library folder.
 - [ ] Single public video: Analyze → metadata filled → Square preview shown.
@@ -67,8 +69,18 @@ Record the WaveMint version, Windows version (10 or 11) and date.
       the waveform while playing and the playhead keeps moving.
 - [ ] Listen Mode: the frame around the artwork moves with the music and
       stops when paused; a very long title doesn't move the controls.
-- [ ] Manage → Storage shows sizes; Clean Up frees what's listed; your
-      songs and music folders are untouched.
+- [ ] Library Tools → Storage shows sizes; Clean Up frees what's listed; your
+      songs and music folders are untouched. Audio formats lists the library
+      by codec; Earlier versions lists upgraded songs.
+- [ ] Review → Needs Attention lists only missing title/artist/album/artwork
+      (no genre, year or quality items); Find Artwork and Use as Single fix a
+      song in place and it leaves the list.
+- [ ] Review → Possible Duplicates: two copies of one song appear side by side;
+      Keep Both removes the warning for good; Merge keeps one song (the other
+      file stays on disk) and History undoes it.
+- [ ] Review → Diagnostics: rename a song's file in Explorer, rescan nothing,
+      Locate File points the song at it again.
+- [ ] A song's details show **Upgrade Track…** and **Identify Song…**.
 - [ ] Delete File on a song in the WaveMint Library folder: confirmation lists
       the file; it lands in the Recycle Bin; a song from a read-only folder
       is refused.

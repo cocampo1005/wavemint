@@ -186,11 +186,10 @@ is exercised by real code.
   names kept as aliases), unrecognized labels with suggestions, near-duplicate
   names, and rules (album > artist > alias mapping; a genre you set by hand
   always wins and rule results never count as manual).
-- Review queue (`review.cjs`): missing album/artist/album artist, unclassified
-  genres, missing artwork, suspicious track numbers, inconsistent album
-  details and similar album names (with suggested fixes), missing or
-  unreadable files, possible duplicates. Ignored stays ignored, fixed issues
-  resolve themselves, returning issues reopen.
+- Review queue (`review.cjs`): ignored stays ignored, fixed issues resolve
+  themselves, returning issues reopen. (Its checks were narrowed to essential
+  metadata, duplicates and file problems in 2.4; see "Everyday library
+  manager" below.)
 - History: every change with details and Undo (metadata changes field by
   field, conflicts with later edits reported instead of overwritten).
 - Verified in the real app on synthetic libraries: legacy folder byte-identical
@@ -238,6 +237,10 @@ is exercised by real code.
   source folders byte-identical throughout.
 
 ### Phase 4 — Audio quality and Upgrade Track: done
+
+(In 2.4 the library-wide quality statuses, the Quality & Upgrades view and the
+quality check job were retired; Upgrade Track and its comparison signals stay.
+See "Everyday library manager" below.)
 
 - Migration 4: `quality_checks` (per file version; stale when size or mtime
   change), `tracks.quality_set_by` (auto / user / upgrade) and
@@ -482,8 +485,8 @@ Evaluated, not implemented:
   under different titles. It needs the `fpcalc` binary (see the AcoustID
   evaluation); recommended as the next step if mismatched titles turn out to
   be common in the merged library.
-- **Library health score.** The Overview, Review and Quality views already
-  show concrete counts; a single score would hide what to fix.
+- **Library health score.** The Overview and Review already show concrete
+  counts; a single score would hide what to fix.
 - **More metadata providers.** Discogs (token, strict limits), Last.fm (API
   key) and the iTunes Search API (no key; good artwork, restrictive terms)
   were considered. None is needed for the core workflow; none is added.
@@ -731,24 +734,69 @@ Evaluated, not implemented:
   rarely needed (the real library has none) but is harmless and
   interoperable, so it stays, under Advanced metadata.
 
+### Everyday library manager: navigation, Review and duplicates (2.4)
+
+With the collection curated, the app is organized around everyday use.
+
+- **Navigation** (`src/AppNav.jsx`, `src/library/sections.js`): Add Music,
+  then **Music** (tabs: Overview, Songs, Albums, Artists, Genres, Favorites),
+  **Playlists**, **Review**, **Apple Library Sync**, and at the bottom
+  **Library Tools** (tabs: Sources, Library Organization, Storage, History,
+  Import & Merge, Identify Songs) and Settings. Views keep their ids, so every
+  link in the app still works; `resolveRoute` maps routes of earlier versions
+  (`health` → Review → Diagnostics, `quality` → Songs) and each tabbed
+  section returns to its last tab. The tabs sit in the page header.
+- **Review** (`review.cjs`, `ReviewView.jsx`) has three groups/tabs:
+  - *Needs Attention*: missing title (suggests the file name), artist, album
+    (suggests the title, as a single; the `reviewMissingAlbum` setting turns
+    the check off), artwork (grouped by album; Find Artwork for the album),
+    and ripper placeholders ("Unknown Artist", "Track 07", a file name as a
+    title). Genre, year, numbering, album artist and album consistency are no
+    longer checked; their stale items are deleted at the next refresh.
+  - *Possible Duplicates* (`duplicates.cjs`, pure): identical content
+    (SHA-256, audio hash, or size + first/last 64 KB), "likely" (the merge
+    matcher's "same": artist, title with version markers, length within 2 s),
+    and "possible" (the matcher's "uncertain", or nearly identical titles by
+    the same artist with the same versions and length). Versions are never
+    paired; a "different" match decision (Keep Both) is final. One item per
+    group; a dismissed group returns only when its files change (`filesSig`).
+    Merge (`merge.mergeDuplicates`) links the other songs' files as alternate
+    versions of the kept song, fills its empty fields if asked, keeps favorites,
+    and playlists follow `merged_into`; one undoable "merge" operation.
+  - *Diagnostics*: songs whose current file is missing/unreadable or that have
+    no file. `listMissingFiles` gives each reference a `kind` (missing,
+    moved, drive, unreadable, back; leftover and earlier for references that
+    aren't a song's current file). Leftovers are listed apart, never counted,
+    and Forget All (`forgetLeftoverReferences`) only deletes database rows.
+  The badge (`openCount`) counts open items except "possible" duplicates.
+- **Quality**: `quality.cjs` keeps only `describeFile`, `fileSignals` and
+  `technicalTier` for Upgrade Track and imports. No song is rated, nothing
+  is recomputed in the background, and the quality status columns are no
+  longer written except "upgraded" by Upgrade Track (left in the schema).
+- **Song panel**: Upgrade Track… and Identify Song… are visible actions; a
+  missing file shows Locate File… in place.
+- **Storage** (Library Tools): disk usage and cleanup, Audio formats (with the
+  genre tag check) and Earlier versions, from `LibraryFiles.jsx` (one
+  implementation each).
+
 ## Importing your two libraries (step by step)
 
 Nothing in these steps changes your iTunes or curated folders.
 
-1. **Library → Overview → Add iTunes / Legacy Folder**: choose the `iTunes
+1. **Library Tools → Sources → Add Legacy Folder**: choose the `iTunes
    Media` folder (or its `Music` subfolder). WaveMint scans it read-only. It
    doesn't read the `.itl` database; ratings and play counts stored only there
    aren't imported.
 2. **Add Curated Folder**: choose your newer collection. Curated sources have
    a higher priority, so their copies win when the same song is in both.
-3. **Merge & Duplicates → Analyze Libraries**. Check "Needs a decision"
+3. **Library Tools → Import & Merge → Analyze Libraries**. Check "Needs a decision"
    (remasters, different lengths), choose Merge / Keep separate per group,
    then **Accept Suggestions** and **Apply Merge…**. Only WaveMint's database
    changes; undo from History.
-4. Optional cleanup: **Review** (missing details, albums missing songs),
-   **Genres**, **Identify** (MusicBrainz, opt-in), **Quality & Upgrades**
-   ("Check Unchecked Songs" takes about half a second per song).
-5. **WaveMint Library → Choose Folder…** (an empty folder on a drive with
+4. Optional cleanup: **Review** (missing details, duplicates, file
+   problems), **Music → Genres → Manage**, **Library Tools → Identify Songs**
+   (MusicBrainz, opt-in).
+5. **Library Tools → Library Organization → Choose Folder…** (an empty folder on a drive with
    enough space), check the naming preview, then **Copy N Songs…**. Each song
    is copied once from its best source, verified, and gets your edited tags.
    Your original folders stay as a backup.
@@ -757,4 +805,4 @@ Nothing in these steps changes your iTunes or curated folders.
    WaveMint keeps classic iTunes in step and you sync the iPhone in iTunes.
    (With the Apple Music app for Windows only the folder is kept up to date.)
 
-Rescan sources any time from **Sources**; songs you edited keep your edits.
+Rescan sources any time from **Library Tools → Sources**; songs you edited keep your edits.

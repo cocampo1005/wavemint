@@ -206,17 +206,14 @@ export function OverviewView({ revision, onNavigate, onAddMusic, onAddSource, on
   }
 
   if (!data) return <div className="lib-loading">{loading ? "Loading your library…" : ""}</div>;
-  const { totals, issues, duplicates, genres, recent, topArtists } = data;
+  const { totals, review, genres, recent, topArtists } = data;
   if (!totals.tracks) return <EmptyLibrary onAddMusic={onAddMusic} onAddSource={onAddSource} />;
 
-  // Each opens the maintenance section that can fix it.
+  // Each opens the Review tab that can fix it.
   const attention = [
-    ["Songs without a genre", issues.missing_genre, () => onNavigate("review", { kind: "unclassified_genre" })],
-    ["Songs without artwork", issues.missing_artwork, () => onNavigate("review", { kind: "missing_artwork" })],
-    ["Songs without an album", issues.missing_album, () => onNavigate("review", { kind: "missing_album" })],
-    ["Possible duplicates", duplicates.tracks, () => onNavigate("review", { kind: "possible_duplicate" }), "info"],
-    ["Low-bitrate files", issues.low_bitrate, () => onNavigate("quality", { maxBitrate: data.lowBitrateKbps }), "info"],
-    ["Missing or unreadable files", issues.missing_files, () => onNavigate("health"), "error"],
+    ["Songs missing important details", review?.attention, () => onNavigate("review", { tab: "attention" })],
+    ["Possible duplicates", review?.duplicates, () => onNavigate("review", { tab: "duplicates" }), "info"],
+    ["Songs whose file is missing", review?.diagnostics, () => onNavigate("review", { tab: "diagnostics" }), "error"],
   ].filter(([, count]) => count > 0);
 
   return (
@@ -244,7 +241,7 @@ export function OverviewView({ revision, onNavigate, onAddMusic, onAddSource, on
         <GenreBars
           genres={genres}
           total={totals.tracks}
-          onOpenGenre={(name) => (name ? onNavigate("genres", { genre: name }) : onNavigate("review", { kind: "unclassified_genre" }))}
+          onOpenGenre={(name) => onNavigate("genres", { genre: name })}
           onAllGenres={() => onNavigate("genres")}
         />
         <div className="lib-overview__side">

@@ -81,9 +81,11 @@ export const MergeIcon = (props) => (
   </Icon>
 );
 
-export const QualityIcon = (props) => (
+/** Library Tools: a wrench. */
+export const ToolsIcon = (props) => (
   <Icon {...props}>
-    <path d="M4 14v-4M8 17V7M12 20V4M16 16V8M20 13v-2" />
+    <path d="M14.7 6.3a4 4 0 0 0 5 5l-8.6 8.6a2.1 2.1 0 0 1-3-3z" />
+    <path d="M14.7 6.3a4 4 0 0 1 5-2.6l-2.6 2.6.5 2.1 2.1.5 2.6-2.6a4 4 0 0 1-2.6 5" />
   </Icon>
 );
 

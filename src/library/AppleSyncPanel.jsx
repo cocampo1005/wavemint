@@ -201,7 +201,7 @@ export function AppleSyncPanel({ revision, running, onChanged, onError, onNaviga
           {status.organizeDetected && (
             <p className="lib-upgrade__warning is-strong">
               <WarningIcon size={14} /> iTunes moved a file out of your WaveMint Library. Turn off &ldquo;Keep iTunes Media folder organized&rdquo; in iTunes, then rescan the
-              library (Sources) before syncing again.
+              library (Library Tools → Sources) before syncing again.
             </p>
           )}
           {status.deleteRemovesFiles && (

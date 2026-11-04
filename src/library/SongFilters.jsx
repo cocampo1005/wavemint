@@ -5,8 +5,7 @@ import { EMPTY_FILTERS, activeFilterCount } from "./filterState";
 import { libraryApi, useCachedLoader, useDebounced, useLoader } from "./useLibrary";
 
 // The Filter menu and chips for song lists: what music to show, never what
-// needs fixing (missing artwork, low bitrates… live in Review, Quality &
-// Upgrades and File Health). Each facet allows several values; facets combine.
+// needs fixing (missing details, duplicates and file problems live in Review). Each facet allows several values; facets combine.
 
 const FACETS = [
   { key: "artists", label: "Artist" },

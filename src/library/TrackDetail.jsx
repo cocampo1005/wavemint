@@ -7,16 +7,6 @@ import { CloseIcon, FolderOpenIcon, HeartIcon, PauseIcon, PlayIcon, SearchIcon, 
 import { MusicBrainzConsent } from "./IdentifyDialog";
 import { errorMessage, libraryApi, useLoader } from "./useLibrary";
 
-const QUALITY_LABELS = {
-  unknown: "Quality not checked",
-  review_suggested: "Quality review suggested",
-  acceptable: "No quality concerns found",
-  user_marked_poor: "Marked poor quality",
-  upgrade_available: "Upgrade candidate available",
-  upgraded: "Upgraded",
-  keep_original: "Kept in original form",
-};
-
 const fileName = (file) => file.rel_path.split(/[\\/]/).pop();
 
 function describeRate(file) {
@@ -118,27 +108,33 @@ function ArtworkPanel({ track, artwork, fileArtwork, pending, onPending, onChang
 }
 
 /** The song's current file: the essentials, then the technical details on request. */
-function FileDetails({ track, file, onUpgrade, onChanged, onError }) {
-  let reasons = [];
-  try {
-    reasons = JSON.parse(track.quality_reasons || "{}").reasons || [];
-  } catch {
-    reasons = [];
-  }
-  const setQuality = (status) =>
-    libraryApi
-      .setQualityStatus({ trackIds: [track.id], status })
-      .then(onChanged)
-      .catch((error) => onError?.(errorMessage(error)));
+function FileDetails({ file, onChanged, onError }) {
   const show = () => libraryApi.showFileInFolder({ fileId: file.id }).catch((error) => onError?.(errorMessage(error)));
+  const locate = async () => {
+    try {
+      if (await libraryApi.locateMissingFile({ fileId: file.id })) onChanged?.();
+    } catch (error) {
+      onError?.(errorMessage(error));
+    }
+  };
 
   return (
     <section className="lib-detail__file" aria-label="File">
       <span className="section-label">File</span>
       {file.status !== "ok" && (
-        <p className="lib-edit__note is-error">
-          <WarningIcon size={13} /> {file.status === "missing" ? "The file is missing. Rescan its folder from Sources, or check File Health." : file.read_error || "The file can't be read."}
-        </p>
+        <div className="lib-edit__note is-error lib-detail__file-problem">
+          <WarningIcon size={13} />
+          <span>
+            {file.status === "missing"
+              ? "The file isn't where WaveMint expects it: it was moved, renamed or deleted, or its drive isn't connected. Locate it to keep this song's history, playlists and iTunes entry."
+              : file.read_error || "The file can't be read."}
+          </span>
+          {file.status === "missing" && (
+            <button type="button" className="btn btn--secondary btn--sm" onClick={locate}>
+              <FolderOpenIcon size={13} /> Locate File…
+            </button>
+          )}
+        </div>
       )}
       <div className="lib-detail__file-summary">
         <span>{formatQuality(file)}</span>
@@ -169,30 +165,7 @@ function FileDetails({ track, file, onUpgrade, onChanged, onError }) {
             {file.source_name}
             {file.source_read_only ? " (read-only)" : ""}
           </dd>
-          <dt>Quality</dt>
-          <dd>{QUALITY_LABELS[track.quality_status] || track.quality_status}</dd>
         </dl>
-        {reasons.length > 0 && (
-          <ul className="lib-detail__reasons">
-            {reasons.map((item) => (
-              <li key={item.code}>{item.text}</li>
-            ))}
-          </ul>
-        )}
-        <div className="lib-detail__quality-head">
-          {onUpgrade && (
-            <button type="button" className="btn btn--secondary btn--sm" onClick={() => onUpgrade(track.id)}>
-              <UpgradeIcon size={14} /> Upgrade Audio…
-            </button>
-          )}
-          <select className="field lib-quality-row__status" aria-label="Quality decision" value="" onChange={(event) => event.target.value && setQuality(event.target.value)}>
-            <option value="">Quality decision…</option>
-            <option value="user_marked_poor">Mark poor quality</option>
-            <option value="keep_original">Keep in original form</option>
-            <option value="acceptable">Acceptable</option>
-            {track.quality_set_by !== "auto" && <option value="auto">Let WaveMint decide</option>}
-          </select>
-        </div>
       </Disclosure>
     </section>
   );
@@ -326,12 +299,7 @@ export function TrackDetail({ trackId, revision, playing, onPlayFile, onClose, o
 
           <div className="lib-detail__meta">
             {formatDuration(track.duration_ms)} · added {formatDate(track.created_at)}
-            {track.mb_recording_id && " · identified"}
-            {onIdentify && (
-              <button type="button" className="btn btn--link lib-detail__identify" onClick={() => onIdentify(track.id)}>
-                {track.mb_recording_id ? "Identify again…" : "Identify…"}
-              </button>
-            )}
+            {track.mb_recording_id && " · identified with MusicBrainz"}
           </div>
           {activeFile && activeFile.status === "ok" && (
             <div className="lib-detail__actions">
@@ -357,9 +325,24 @@ export function TrackDetail({ trackId, revision, playing, onPlayFile, onClose, o
             </div>
           )}
 
+          {(onUpgrade || onIdentify) && (
+            <div className="lib-detail__actions lib-detail__tools">
+              {onUpgrade && (
+                <button type="button" className="btn btn--ghost btn--sm" onClick={() => onUpgrade(track.id)} title="Replace this song's audio with a better file. Its details, playlists and iTunes entry stay.">
+                  <UpgradeIcon size={14} /> Upgrade Track…
+                </button>
+              )}
+              {onIdentify && (
+                <button type="button" className="btn btn--ghost btn--sm" onClick={() => onIdentify(track.id)} title="Look this song up in MusicBrainz and review suggested details">
+                  <SearchIcon size={14} /> {track.mb_recording_id ? "Identify Again…" : "Identify Song…"}
+                </button>
+              )}
+            </div>
+          )}
+
           <TrackEditor track={track} pendingArtwork={pendingArtwork} onPendingArtworkChange={setPendingArtwork} onChanged={onChanged} />
 
-          {activeFile && <FileDetails track={track} file={activeFile} onUpgrade={onUpgrade} onChanged={onChanged} onError={onError} />}
+          {activeFile && <FileDetails file={activeFile} onChanged={onChanged} onError={onError} />}
           <VersionHistory track={track} playing={playing} onPlayFile={(file) => onPlayFile(track, file)} onRestore={onUpgrade} onError={onError} />
         </div>
       )}

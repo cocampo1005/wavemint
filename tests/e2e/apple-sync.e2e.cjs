@@ -1,6 +1,6 @@
 /* global window -- used inside page.evaluate callbacks, which run in the app window */
-// End-to-end: Apple Library Sync (direct reference), the Audio formats view
-// and missing files in File Health, in the real app with a temporary profile
+// End-to-end: Apple Library Sync (direct reference), Audio formats (Library
+// Tools → Storage) and missing files (Review → Diagnostics), in the real app with a temporary profile
 // and synthetic songs. It never asks the app to talk to iTunes (no preview,
 // sync or migration), so a real iTunes on the machine is not touched.
 // Run with `npm run test:e2e` (see app.cjs for the prerequisites).
@@ -58,8 +58,9 @@ test("Apple Library Sync, audio formats and missing files", { skip: SKIP_REASON,
   await page.locator("text=Choose Export Folder").waitFor();
   if (process.env.WAVEMINT_E2E_SCREENSHOT) await page.screenshot({ path: process.env.WAVEMINT_E2E_SCREENSHOT.replace(/\.png$/, "-sync.png"), fullPage: true });
 
-  // --- File Health → Audio formats.
-  await page.locator(".app-nav__item", { hasText: "File Health" }).click();
+  // --- Library Tools → Storage → Audio formats.
+  await page.locator(".app-nav__item", { hasText: "Library Tools" }).click();
+  await page.locator(".lib-tabs__tab", { hasText: "Storage" }).click();
   await page.locator(".lib-chip", { hasText: "Audio formats" }).click();
   await page.locator(".lib-formats__table").waitFor();
   const rows = await page.locator(".lib-formats__table tbody tr").allTextContents();
@@ -72,12 +73,14 @@ test("Apple Library Sync, audio formats and missing files", { skip: SKIP_REASON,
   await page.locator(".lib-review-item__open", { hasText: "Gamma" }).waitFor();
   if (process.env.WAVEMINT_E2E_SCREENSHOT) await page.screenshot({ path: process.env.WAVEMINT_E2E_SCREENSHOT.replace(/\.png$/, "-formats.png"), fullPage: true });
 
-  // --- A missing file: Sources links to File Health, which says which file and why.
+  // --- A missing file: Sources links to Review → Diagnostics, which says which file and why.
   fs.renameSync(path.join(music, "A", "One", "02.mp3"), path.join(root, "02 moved.mp3"));
   await page.evaluate(() => window.waveMintAPI.library.scanSources({}));
   await until(async () => (await page.evaluate(() => window.waveMintAPI.library.listMissingFiles())).length === 1, 30000);
-  await page.locator(".app-nav__item", { hasText: "Sources" }).click();
+  await page.locator(".app-nav__item", { hasText: "Library Tools" }).click();
+  await page.locator(".lib-tabs__tab", { hasText: "Sources" }).click();
   await page.locator("button", { hasText: "1 missing" }).click();
+  await page.locator(".lib-tabs__tab.is-active", { hasText: "Diagnostics" }).waitFor();
   await page.locator(".lib-health-missing").waitFor();
   const text = await page.locator(".lib-health-missing").textContent();
   assert.match(text, /Beta/);

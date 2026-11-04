@@ -852,7 +852,7 @@ export function UpgradeDialog({ trackId, start = null, candidateId: initialCandi
               {plan.mode === "switch" && <span>The other version becomes this song&apos;s active version. No files are copied or changed.</span>}
               {blocked && (
                 <span className="is-warn">
-                  Upgrades are saved in your WaveMint Library, and it doesn&apos;t have a folder yet. Choose one under Manage → WaveMint Library.
+                  Upgrades are saved in your WaveMint Library, and it doesn&apos;t have a folder yet. Choose one under Library Tools → Library Organization.
                 </span>
               )}
             </div>

@@ -69,7 +69,7 @@ function createRemoval({ db }) {
         blocked.push({
           trackId: track.id,
           title: track.title,
-          reason: `Its file is in "${active.source_name}", which WaveMint only reads. Use Remove from Library, or allow changes to that folder in Sources.`,
+          reason: `Its file is in "${active.source_name}", which WaveMint only reads. Use Remove from Library, or allow changes to that folder in Library Tools → Sources.`,
         });
         continue;
       }

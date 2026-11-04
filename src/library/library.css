@@ -1670,50 +1670,6 @@ button.lib-stat:hover {
 
 /* ---------- Review queue ---------- */
 
-.lib-review__layout {
-  display: grid;
-  grid-template-columns: 230px minmax(0, 1fr);
-  gap: var(--wm-space-5);
-}
-
-.lib-review__kinds {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.lib-kind {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--wm-space-2);
-  min-height: 34px;
-  padding: 0 var(--wm-space-3);
-  border: 0;
-  border-radius: var(--wm-radius-md);
-  background: transparent;
-  color: var(--wm-text-muted);
-  font-size: var(--wm-text-sm);
-  text-align: left;
-  cursor: pointer;
-}
-
-.lib-kind:hover {
-  background: var(--wm-surface-hover);
-  color: var(--wm-text);
-}
-
-.lib-kind.is-active {
-  background: var(--wm-accent-soft);
-  color: var(--wm-text);
-}
-
-.lib-kind__count {
-  color: var(--wm-text-subtle);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
-
 .lib-review__list {
   display: flex;
   flex-direction: column;
@@ -1842,17 +1798,6 @@ button.lib-stat:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-@media (max-width: 1100px) {
-  .lib-review__layout {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .lib-review__kinds {
-    flex-direction: row;
-    flex-wrap: wrap;
-  }
 }
 
 /* --- Merge & Duplicates ---------------------------------------------------- */
@@ -2103,7 +2048,7 @@ button.lib-stat:hover {
   flex-wrap: wrap;
 }
 
-/* --- Quality & Upgrades ------------------------------------------------------ */
+/* --- Identify Songs (Library Tools) and shared queue rows -------------------- */
 
 .lib-quality {
   display: flex;
@@ -2206,24 +2151,6 @@ button.lib-stat:hover {
   flex-direction: column;
   gap: var(--wm-space-2);
   margin: var(--wm-space-3) 0;
-}
-
-.lib-detail__quality-head {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--wm-space-2);
-}
-
-.lib-detail__quality-head .lib-quality-row__status {
-  width: auto;
-}
-
-.lib-detail__reasons {
-  margin: 0;
-  padding-left: var(--wm-space-5);
-  color: var(--wm-text-muted);
-  font-size: var(--wm-text-xs);
 }
 
 /* --- Upgrade dialog ------------------------------------------------------------ */
@@ -2687,11 +2614,6 @@ button.lib-stat:hover {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--wm-space-1) var(--wm-space-3);
-}
-
-.lib-detail__identify {
-  margin-left: var(--wm-space-2);
-  font-size: inherit;
 }
 
 /* --- Playlist import (Extract view) ---------------------------------------- */
@@ -4039,18 +3961,6 @@ button.lib-stat:hover {
   border-color: rgba(74, 141, 255, 0.5);
 }
 
-/* Review with the song panel open: one column, issue types in a dropdown. */
-.lib-review__layout.is-narrow {
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--wm-space-3);
-}
-
-.lib-review__kind-select {
-  max-width: 320px;
-  height: var(--wm-control-h-sm);
-  font-size: var(--wm-text-sm);
-}
-
 /* Narrow lists (a panel beside them): actions move under the text. */
 .lib-with-panel.has-detail .lib-review-item {
   flex-wrap: wrap;
@@ -4289,5 +4199,414 @@ button.lib-stat:hover {
 @media (max-width: 760px) {
   .lib-formats__pct {
     display: none;
+  }
+}
+
+/* ---------- Section tabs (Music, Review, Library Tools) ---------- */
+
+.lib-tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--wm-space-1);
+  border-bottom: 1px solid var(--wm-border-subtle);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+/* In the page header, beside the title: browsing tabs take no extra row. */
+.lib-section-tabs {
+  flex: 0 1 auto;
+  min-width: 0;
+  border-bottom: 0;
+}
+
+.lib-section-tabs .lib-tabs__tab.is-active::after {
+  bottom: 2px;
+}
+
+.lib-tabs__tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 var(--wm-space-3);
+  border: 0;
+  background: transparent;
+  color: var(--wm-text-muted);
+  font-size: var(--wm-text-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--wm-dur) var(--wm-ease);
+}
+
+.lib-tabs__tab:hover {
+  color: var(--wm-text);
+}
+
+.lib-tabs__tab.is-active {
+  color: var(--wm-text);
+}
+
+.lib-tabs__tab.is-active::after {
+  content: "";
+  position: absolute;
+  left: var(--wm-space-2);
+  right: var(--wm-space-2);
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--wm-cyan);
+}
+
+.lib-tabs__tab:focus-visible {
+  outline: none;
+  box-shadow: var(--wm-focus-ring);
+  border-radius: var(--wm-radius-sm);
+}
+
+.lib-tabs__count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--wm-surface-hover);
+  color: var(--wm-text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+  text-align: center;
+}
+
+.lib-tabs__count.is-error {
+  background: var(--wm-danger-bg);
+  color: var(--wm-danger);
+}
+
+.lib-tabs__end {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* Library Tools and Settings sit at the bottom of the navigation. */
+.app-nav__footer {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+  padding-top: var(--wm-space-2);
+  border-top: 1px solid var(--wm-border-subtle);
+}
+
+.app-nav__footer .app-nav__settings {
+  border-top: 0;
+  border-radius: var(--wm-radius-md);
+  padding-top: 0;
+}
+
+/* ---------- Review ---------- */
+
+.lib-review__tabs {
+  margin-bottom: var(--wm-space-4);
+}
+
+.lib-review-empty {
+  display: flex;
+  align-items: center;
+  gap: var(--wm-space-3);
+  margin: var(--wm-space-4) 0;
+  padding: var(--wm-space-5);
+  border: 1px solid var(--wm-success-border);
+  border-radius: var(--wm-radius-lg);
+  background: var(--wm-success-bg);
+  color: var(--wm-success);
+}
+
+.lib-review-empty > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lib-review-empty strong {
+  color: var(--wm-text);
+  font-weight: 600;
+}
+
+.lib-review-empty span {
+  color: var(--wm-text-muted);
+  font-size: var(--wm-text-sm);
+}
+
+.lib-issue-group {
+  margin-bottom: var(--wm-space-6);
+}
+
+.lib-issue-group__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--wm-space-4);
+  margin-bottom: var(--wm-space-3);
+}
+
+.lib-issue-group__title {
+  margin: 0 0 4px;
+  color: var(--wm-text);
+  font-size: var(--wm-text-md);
+  font-weight: 600;
+}
+
+.lib-issue-group__why,
+.lib-issue-group__fix {
+  margin: 0;
+  max-width: 72ch;
+  color: var(--wm-text-muted);
+  font-size: var(--wm-text-sm);
+  line-height: 1.5;
+}
+
+.lib-issue-group__fix {
+  color: var(--wm-text-subtle);
+}
+
+.lib-issue-group__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--wm-space-2);
+  flex-shrink: 0;
+}
+
+.lib-attention__note {
+  margin-top: var(--wm-space-2);
+}
+
+.lib-review-item.is-quiet {
+  background: transparent;
+}
+
+.lib-diagnostics__tip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--wm-warning);
+}
+
+.lib-diagnostics__leftovers {
+  margin-top: var(--wm-space-6);
+}
+
+.lib-diagnostics__leftovers .lib-review__list {
+  margin-top: var(--wm-space-3);
+}
+
+/* Possible duplicates: the songs side by side. */
+.lib-dups__intro {
+  margin: 0 0 var(--wm-space-4);
+  max-width: 80ch;
+}
+
+.lib-dups__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wm-space-4);
+}
+
+.lib-dup {
+  padding: var(--wm-space-4);
+  border: 1px solid var(--wm-border-subtle);
+  border-radius: var(--wm-radius-lg);
+  background: rgba(10, 18, 48, 0.55);
+}
+
+.lib-dup.is-identical {
+  border-color: var(--wm-success-border);
+}
+
+.lib-dup__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--wm-space-2);
+  margin-bottom: var(--wm-space-3);
+}
+
+.lib-dup__reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.lib-dup__reasons .lib-badge {
+  text-transform: none;
+  font-weight: 500;
+}
+
+.lib-dup__members {
+  display: grid;
+  grid-template-columns: repeat(var(--lib-dup-columns, 2), minmax(0, 1fr));
+  gap: var(--wm-space-3);
+}
+
+.lib-dup-member {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wm-space-2);
+  min-width: 0;
+  padding: var(--wm-space-3);
+  border: 1px solid var(--wm-border-subtle);
+  border-radius: var(--wm-radius-md);
+  background: rgba(8, 13, 36, 0.4);
+  transition: border-color var(--wm-dur) var(--wm-ease);
+}
+
+.lib-dup-member.is-kept {
+  border-color: rgba(74, 141, 255, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(74, 141, 255, 0.2);
+}
+
+.lib-dup-member__head {
+  display: flex;
+  align-items: center;
+  gap: var(--wm-space-3);
+  min-width: 0;
+}
+
+.lib-dup-member__art {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.lib-dup-member .lib-play {
+  flex: none;
+  opacity: 1;
+  border: 1px solid var(--wm-border-subtle);
+  color: var(--wm-text);
+}
+
+.lib-dup-member .lib-play:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.lib-dup-member__name {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.lib-dup-member__name span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--wm-text-muted);
+  font-size: var(--wm-text-sm);
+}
+
+.lib-dup-member__fav {
+  color: var(--wm-violet);
+}
+
+.lib-dup-member__facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px var(--wm-space-3);
+  margin: 0;
+  font-size: var(--wm-text-xs);
+}
+
+.lib-dup-member__facts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--wm-space-2);
+  min-width: 0;
+}
+
+.lib-dup-member__facts dt {
+  color: var(--wm-text-subtle);
+}
+
+.lib-dup-member__facts dd {
+  margin: 0;
+  overflow: hidden;
+  color: var(--wm-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lib-dup-member__path {
+  overflow: hidden;
+  color: var(--wm-text-subtle);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lib-dup-member__keep {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--wm-text-muted);
+  font-size: var(--wm-text-sm);
+  cursor: pointer;
+}
+
+.lib-dup__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--wm-space-2);
+  margin-top: var(--wm-space-3);
+}
+
+.lib-dup__plan {
+  margin: var(--wm-space-3) 0;
+  padding-left: 1.2em;
+  color: var(--wm-text-muted);
+  font-size: var(--wm-text-sm);
+  line-height: 1.6;
+}
+
+.lib-with-panel.has-detail .lib-dup__members {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* Song details: Upgrade Track and Identify Song; a missing file's Locate File. */
+.lib-detail__tools {
+  gap: var(--wm-space-1);
+  margin-top: calc(-1 * var(--wm-space-2));
+}
+
+.lib-detail__tools .btn {
+  padding: 0 var(--wm-space-2);
+}
+
+.lib-detail__file-problem {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--wm-space-2);
+}
+
+.lib-detail__file-problem > span {
+  flex: 1;
+  min-width: 200px;
+}
+
+@media (max-width: 900px) {
+  .lib-dup__members {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lib-issue-group__head {
+    flex-direction: column;
+  }
+
+  .lib-issue-group__actions {
+    justify-content: flex-start;
   }
 }

@@ -2,7 +2,7 @@ import { usePlayer } from "../player/usePlayer";
 import { TrackDetail } from "./TrackDetail";
 
 /**
- * A maintenance list (Review, Quality & Upgrades, File Health) with the song
+ * A list (Review, Library Tools → Storage) with the song
  * panel beside it, so a song can be fixed where its issue is listed instead
  * of in Songs. `browserProps` are LibraryView's shared song actions.
  */

@@ -27,12 +27,13 @@ import {
   TrashIcon,
   WaveformIcon,
 } from "./icons";
+import { EarlierVersionsPanel, FormatsPanel } from "./LibraryFiles";
 import { ManagedView } from "./ManagedView";
 import { MergeView } from "./MergeView";
-import { FileHealthView } from "./FileHealthView";
 import { EmptyLibrary, OverviewView } from "./OverviewView";
-import { QualityView } from "./QualityView";
 import { ReviewView } from "./ReviewView";
+import { SECTIONS, sectionOf } from "./sections";
+import { WithSongPanel } from "./SongPanel";
 import { SongBrowser } from "./SongBrowser";
 import { StorageView } from "./StorageView";
 import { TrackMenu } from "./TrackMenu";
@@ -41,33 +42,56 @@ import { ScanProgress, SourcesView } from "./SourcesView";
 import { errorMessage, libraryApi, useJobRunner } from "./useLibrary";
 import "./library.css";
 
-const TITLES = {
-  overview: "Overview",
-  songs: "Songs",
-  favorites: "Favorites",
-  albums: "Albums",
-  artists: "Artists",
-  genres: "Genres",
-  review: "Review",
-  health: "File Health",
-  merge: "Merge & Duplicates",
-  quality: "Quality & Upgrades",
-  identify: "Identify",
-  managed: "WaveMint Library",
-  playlists: "Playlists",
-  iphone: "Apple Library Sync",
-  sources: "Library sources",
-  history: "History",
-  storage: "Storage",
-  album: "Album",
-};
+const STORAGE_PARTS = [
+  ["usage", "Disk usage & cleanup"],
+  ["formats", "Audio formats"],
+  ["versions", "Earlier versions"],
+];
+
+/**
+ * Library Tools → Storage: what WaveMint keeps on disk (and cleanup), the
+ * library by audio format (with the genre tag check), and the earlier
+ * versions kept after upgrades and edits. Songs open beside the list.
+ */
+function StorageSection({ revision, part, onPart, browserProps, onError }) {
+  const [openTrack, setOpenTrack] = useState(null);
+  return (
+    <WithSongPanel trackId={openTrack} onClose={() => setOpenTrack(null)} browserProps={browserProps}>
+      <div className="lib-chips" role="tablist" aria-label="Storage">
+        {STORAGE_PARTS.map(([id, label]) => (
+          <button key={id} type="button" role="tab" aria-selected={part === id} className={`lib-chip ${part === id ? "is-on" : ""}`} onClick={() => onPart(id)}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {part === "usage" && <StorageView revision={revision} onError={onError} />}
+      {part === "formats" && <FormatsPanel revision={revision} onOpen={setOpenTrack} onError={onError} />}
+      {part === "versions" && (
+        <EarlierVersionsPanel revision={revision} onOpen={setOpenTrack} onRestore={(trackId, start) => browserProps.onUpgrade(trackId, start)} onError={onError} />
+      )}
+    </WithSongPanel>
+  );
+}
+
+/** The tabs of a section with several views (Music, Library Tools). */
+function SectionTabs({ section, view, onSelect }) {
+  if (!section.tabs) return null;
+  return (
+    <div className="lib-tabs lib-section-tabs" role="tablist" aria-label={section.label}>
+      {section.tabs.map(([id, label]) => (
+        <button key={id} type="button" role="tab" aria-selected={view === id} className={`lib-tabs__tab ${view === id ? "is-active" : ""}`} onClick={() => onSelect(id)}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 const JOB_LABELS = {
   scan: "scan",
   "write-tags": "write-tags",
   "merge-analysis": "merge-analysis",
   consolidate: "consolidate",
-  "quality-check": "quality-check",
   upgrade: "upgrade",
   identify: "identify",
   import: "import",
@@ -273,6 +297,7 @@ export function LibraryView({ route, onNavigate: navigate, jobsState, status, on
     [player],
   );
   const { view, scope } = route;
+  const section = SECTIONS[sectionOf(view)];
 
   // Artists, Albums and Genres keep their own place: opening an album or an
   // artist from inside one of them stays in that tab (Genres › Rock › Album).
@@ -421,12 +446,23 @@ export function LibraryView({ route, onNavigate: navigate, jobsState, status, on
           revision={revision}
           onOpenGenre={openGenre}
           onManage={() => navigate("genres", { manage: true })}
-          onReviewUnclassified={() => navigate("review", { kind: "unclassified_genre" })}
+          onReviewUnclassified={() => openGenre("")}
         />
       );
     }
   } else if (view === "review") {
-    content = <ReviewView key={scope.kind || "all"} initialKind={scope.kind || ""} revision={revision} browserProps={browserProps} onChanged={bump} onOpenAlbum={openAlbum} onNavigate={navigate} onError={setError} />;
+    content = (
+      <ReviewView
+        key={scope.tab || "attention"}
+        initialTab={scope.tab || "attention"}
+        revision={revision}
+        browserProps={browserProps}
+        scanning={!!scanJob}
+        onChanged={bump}
+        onRemove={removeFromLibrary}
+        onError={setError}
+      />
+    );
   } else if (view === "merge") {
     content = (
       <>
@@ -440,33 +476,6 @@ export function LibraryView({ route, onNavigate: navigate, jobsState, status, on
           onError={setError}
         />
       </>
-    );
-  } else if (view === "quality") {
-    content = (
-      <QualityView
-        key={scope.maxBitrate || "all"}
-        revision={revision}
-        initialView={scope.maxBitrate ? "all" : undefined}
-        initialMaxBitrate={scope.maxBitrate ? String(scope.maxBitrate) : ""}
-        checking={running.some((job) => job.kind === "quality-check")}
-        playing={playing}
-        browserProps={browserProps}
-        onPlay={(row) => player.playTrack(row)}
-        onUpgrade={(trackId) => setUpgrade({ trackId, start: null })}
-        onChanged={bump}
-        onError={setError}
-      />
-    );
-  } else if (view === "health") {
-    content = (
-      <FileHealthView
-        revision={revision}
-        browserProps={browserProps}
-        scanning={!!scanJob}
-        onNavigate={navigate}
-        onRemove={removeFromLibrary}
-        onError={setError}
-      />
     );
   } else if (view === "identify") {
     content = (
@@ -487,7 +496,7 @@ export function LibraryView({ route, onNavigate: navigate, jobsState, status, on
   } else if (view === "history") {
     content = <HistoryView revision={revision} onChanged={bump} onError={setError} />;
   } else if (view === "storage") {
-    content = <StorageView revision={revision} onError={setError} />;
+    content = <StorageSection revision={revision} part={scope.part || "usage"} onPart={(part) => navigate("storage", { part })} browserProps={browserProps} onError={setError} />;
   } else if (view === "sources") {
     content = <SourcesView revision={revision} busy={busy} scanJob={scanJob} onCancelJob={cancelJob} onAddSource={addSource} onError={setError} onNavigate={navigate} />;
   }
@@ -497,7 +506,8 @@ export function LibraryView({ route, onNavigate: navigate, jobsState, status, on
 
       <div className="lib-content">
         <div className="lib-content__head">
-          <h1 className="heading-md">{TITLES[view]}</h1>
+          <h1 className="heading-md">{section.label}</h1>
+          <SectionTabs section={section} view={view} onSelect={(id) => navigate(id)} />
           {scanJob && view !== "sources" && <ScanProgress job={scanJob} onCancel={() => cancelJob(scanJob.id)} />}
           {otherJob && (
             <div className="lib-job" role="status">

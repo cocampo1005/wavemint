@@ -369,7 +369,84 @@ function createMerge({ db, contentHash, logger = console }) {
     return { operationId: undoId, tracks: touched.size };
   }
 
-  return { acceptSuggestions, analyze, apply, currentSession, listGroups, setGroupAction, summarize, undoMerge };
+  /**
+   * Merges duplicates found inside the library (Review → Possible Duplicates):
+   * the other songs' files become alternate versions of the kept song, which
+   * keeps its own metadata (with `fillMetadata`, only empty fields are filled
+   * from the others) and becomes a favorite if any of them was. Playlists
+   * follow a merged song to the one it joined. Database only: no file is
+   * copied, moved, renamed or deleted. One undoable operation (History).
+   */
+  function mergeDuplicates({ keepTrackId, trackIds, fillMetadata = false }) {
+    const keepId = Number(keepTrackId);
+    const others = [...new Set(trackIds.map(Number))].filter((id) => id !== keepId);
+    const keep = db.prepare("SELECT * FROM tracks WHERE id = ? AND state = 'active'").get(keepId);
+    if (!keep) throw new Error("The song to keep is no longer in your library.");
+    const rows = others.map((id) => db.prepare("SELECT * FROM tracks WHERE id = ? AND state = 'active'").get(id)).filter(Boolean);
+    if (!rows.length) throw new Error("The other songs are no longer in your library.");
+
+    let operationId = null;
+    transaction(db, () => {
+      operationId = startOperation(db, {
+        kind: "merge",
+        label: `Merge duplicates of "${keep.title || "Untitled"}"`,
+      });
+      for (const other of rows) {
+        if (fillMetadata) {
+          for (const field of FILL_FIELDS) {
+            const current = db.prepare(`SELECT ${field} AS value FROM tracks WHERE id = ?`).get(keepId).value;
+            if ((current === null || current === "" || current === 0) && other[field] !== null && other[field] !== "" && other[field] !== 0) {
+              db.prepare(`UPDATE tracks SET ${field} = ? WHERE id = ?`).run(other[field], keepId);
+              logChange(db, operationId, { entityId: keepId, field, oldValue: current, newValue: other[field] });
+            }
+          }
+        }
+        const favorite = db.prepare("SELECT favorite FROM tracks WHERE id = ?").get(keepId).favorite;
+        if (other.favorite && !favorite) {
+          db.prepare("UPDATE tracks SET favorite = 1 WHERE id = ?").run(keepId);
+          logChange(db, operationId, { entityId: keepId, field: "favorite", oldValue: favorite, newValue: 1 });
+        }
+        for (const file of db.prepare("SELECT id, role FROM files WHERE track_id = ?").all(other.id)) {
+          db.prepare("UPDATE files SET track_id = ?, role = 'alternate' WHERE id = ?").run(keepId, file.id);
+          logChange(db, operationId, { entityType: "file", entityId: file.id, field: "track_id", oldValue: other.id, newValue: keepId });
+          logChange(db, operationId, { entityType: "file", entityId: file.id, field: "role", oldValue: file.role, newValue: "alternate" });
+        }
+        db.prepare("UPDATE tracks SET state = 'merged', merged_into = ?, updated_at = ? WHERE id = ?").run(keepId, nowIso(), other.id);
+        logChange(db, operationId, { entityId: other.id, field: "state", oldValue: "active", newValue: "merged" });
+        logChange(db, operationId, { entityId: other.id, field: "merged_into", oldValue: other.merged_into, newValue: keepId });
+        logDecision(db, operationId, keepId, other.id, "same");
+      }
+      finishOperation(db, operationId, "completed", { linked: rows.length, decisions: rows.length });
+    });
+    refreshTrackSearch(db, [keepId, ...rows.map((row) => row.id)]);
+    return { operationId, merged: rows.length, keptTrackId: keepId };
+  }
+
+  /**
+   * "Keep Both": the songs are different recordings. Recorded as decisions,
+   * so neither the duplicate review nor a library merge pairs them again
+   * (undoable from History).
+   */
+  function keepSeparate({ trackIds }) {
+    const ids = [...new Set(trackIds.map(Number))].sort((a, b) => a - b);
+    if (ids.length < 2) throw new Error("Choose at least two songs.");
+    const titles = ids.map((id) => db.prepare("SELECT title FROM tracks WHERE id = ?").get(id)?.title).filter(Boolean);
+    let operationId = null;
+    let decisions = 0;
+    transaction(db, () => {
+      operationId = startOperation(db, { kind: "merge", label: `Keep separate: "${titles[0] || "Untitled"}"${ids.length > 2 ? ` and ${ids.length - 1} others` : ""}` });
+      for (let i = 0; i < ids.length; i += 1) {
+        for (let j = i + 1; j < ids.length; j += 1) {
+          logDecision(db, operationId, ids[i], ids[j], "different");
+          decisions += 1;
+        }
+      }
+      finishOperation(db, operationId, "completed", { decisions });
+    });
+    return { operationId, decisions };
+  }
+
+  return { acceptSuggestions, analyze, apply, currentSession, keepSeparate, listGroups, mergeDuplicates, setGroupAction, summarize, undoMerge };
 }
 
 module.exports = { ACTIONS, createMerge, recordDecision };

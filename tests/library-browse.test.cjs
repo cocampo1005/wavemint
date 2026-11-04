@@ -65,7 +65,7 @@ test("Songs filters combine artists, albums, genres and decades", needsAudio, as
   );
 });
 
-test("file problems are counted for File Health, not Review", needsAudio, async (t) => {
+test("a missing file is a Review diagnostic, counted once", needsAudio, async (t) => {
   const { db, music } = await browseLibrary(t);
   const file = db.prepare("SELECT f.path FROM files f JOIN tracks t ON t.active_file_id = f.id WHERE t.title = 'Yellow'").get().path;
   fs.rmSync(file);
@@ -75,10 +75,13 @@ test("file problems are counted for File Health, not Review", needsAudio, async 
   const status = queries.getStatus(db);
   assert.equal(status.fileProblems, 1);
   const summary = review.reviewSummary(db);
-  assert.equal("file_problem" in summary.kinds, false);
-  assert.equal(review.listReviewItems(db).rows.some((item) => item.kind === "file_problem"), false);
-  assert.equal(review.listReviewItems(db, { kind: "file_problem" }).total, 1, "still detected (resolves and reopens as usual)");
-  assert.equal(status.reviewOpen, summary.open);
+  assert.equal(summary.groups.diagnostics, 1);
+  assert.equal(review.listReviewItems(db).rows.some((item) => item.kind === "file_problem"), false, "Needs Attention lists metadata only");
+  const diagnostics = review.listReviewItems(db, { group: "diagnostics" });
+  assert.equal(diagnostics.total, 1);
+  assert.equal(diagnostics.rows[0].file_track_title, "Yellow");
+  assert.equal(review.openCount(db), summary.open);
+  assert.ok(summary.open >= 1);
   assert.equal(queries.listTracks(db, { filters: { missingFile: true } }).total, 1);
   assert.ok(music);
 });

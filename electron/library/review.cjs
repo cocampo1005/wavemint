@@ -1,234 +1,149 @@
-// The metadata review queue. Issues are found with deterministic checks;
-// each becomes a review item whose status (needs review, suggested,
-// approved, ignored, resolved) persists across sessions and rescans:
+// The review queue: meaningful, actionable library problems only. Issues are
+// found with deterministic checks; each becomes a review item whose status
+// (needs review, suggested, approved, ignored, resolved) persists across
+// sessions and rescans:
 //
 // - a new issue is added as "needs_review" (or "suggested" with a fix);
-// - an ignored item stays ignored while the issue exists;
+// - an ignored item stays ignored while the issue exists (a dismissed
+//   duplicate comes back only when the files involved change);
 // - an item whose issue disappeared becomes "resolved";
 // - a resolved item reopens if the issue comes back.
+//
+// Three groups, matching Review's tabs:
+//   attention   - essential metadata: title, artist, album (unless turned
+//                 off: singles and standalone songs often have none), artwork,
+//                 and values that look like a ripper's placeholder;
+//   duplicates  - songs that may be the same recording (duplicates.cjs);
+//   diagnostics - songs whose current file is missing or unreadable, or that
+//                 have no file at all.
+// Optional fields (year, track/disc numbers, genre, composer…) are never
+// flagged, and nothing here judges audio quality.
 
+const path = require("path");
 const { nowIso, parseJson, transaction } = require("./db.cjs");
 const { applyEdits } = require("./edits.cjs");
-const { similar } = require("./genres.cjs");
-const { normalizeKey } = require("./normalize.cjs");
+const { filesSignature, findDuplicates } = require("./duplicates.cjs");
+const { pairKey } = require("./match.cjs");
 
 const KINDS = {
-  missing_album: { label: "Missing album", entity: "track" },
-  missing_artist: { label: "Missing artist", entity: "track" },
-  missing_album_artist: { label: "Missing album artist", entity: "release" },
-  unclassified_genre: { label: "Unclassified genre", entity: "track" },
-  missing_artwork: { label: "Missing artwork", entity: "track" },
-  track_numbering: { label: "Suspicious track numbers", entity: "release" },
-  inconsistent_album: { label: "Inconsistent album details", entity: "release" },
-  similar_albums: { label: "Similar album names", entity: "release" },
-  file_problem: { label: "File missing or unreadable", entity: "file" },
-  possible_duplicate: { label: "Possible duplicate", entity: "track" },
-  uncertain_match: { label: "Uncertain MusicBrainz match", entity: "track" },
-  incomplete_album: { label: "Album missing songs", entity: "release" },
+  missing_title: { label: "Missing title", group: "attention", entity: "track" },
+  missing_artist: { label: "Missing artist", group: "attention", entity: "track" },
+  missing_album: { label: "Missing album", group: "attention", entity: "track" },
+  missing_artwork: { label: "Missing artwork", group: "attention", entity: "track" },
+  placeholder: { label: "Placeholder details", group: "attention", entity: "track" },
+  duplicate: { label: "Duplicate", group: "duplicates", entity: "track" },
+  possible_duplicate: { label: "Possible duplicate", group: "duplicates", entity: "track" },
+  file_problem: { label: "File missing or unreadable", group: "diagnostics", entity: "file" },
+  no_file: { label: "No audio file", group: "diagnostics", entity: "track" },
 };
+const GROUPS = ["attention", "duplicates", "diagnostics"];
+const kindsOf = (group) => Object.keys(KINDS).filter((kind) => KINDS[kind].group === group);
+// Counted in the navigation badge: everything open except "possible" duplicates (suggestions).
+const COUNTED_KINDS = Object.keys(KINDS).filter((kind) => kind !== "possible_duplicate");
 
-function majority(values) {
-  const counts = new Map();
-  for (const value of values) counts.set(value, (counts.get(value) || 0) + 1);
-  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0] || [null, 0];
+// Values that taggers and rippers fill in when they know nothing. Compared
+// after trimming and lowercasing. Real titles such as "Untitled" are left alone.
+const PLACEHOLDER_ARTISTS = new Set(["unknown", "unknown artist", "<unknown>", "[unknown]", "unknown_artist", "no artist"]);
+const PLACEHOLDER_ALBUMS = new Set(["unknown", "unknown album", "<unknown>", "[unknown]", "unknown_album", "no album"]);
+const PLACEHOLDER_TITLE = /^(?:(?:audio\s*)?track|piste|titel|pista|faixa)\s*[-_#.]?\s*\d{1,3}$/i;
+const FILE_NAME_TITLE = /\.(?:mp3|m4a|m4b|aac|flac|wav|aiff?|ogg|opus|wma)$/i;
+
+function placeholderFields(track) {
+  const found = [];
+  const artist = String(track.artist || "").trim().toLowerCase();
+  const album = String(track.album || "").trim().toLowerCase();
+  const title = String(track.title || "").trim();
+  if (artist && PLACEHOLDER_ARTISTS.has(artist)) found.push({ field: "artist", value: track.artist });
+  if (album && PLACEHOLDER_ALBUMS.has(album)) found.push({ field: "album", value: track.album });
+  if (title && (PLACEHOLDER_TITLE.test(title) || FILE_NAME_TITLE.test(title))) found.push({ field: "title", value: track.title });
+  return found;
 }
 
-/** Runs every check; returns Map("kind:entity:id" -> issue). */
-function detectIssues(db) {
+function loadTracks(db) {
+  return db
+    .prepare(
+      `SELECT t.id, t.title, t.artist, t.album, t.release_id, t.duration_ms, t.track_no, t.disc_no, t.mb_recording_id,
+              t.artwork_hash AS chosen_art, t.active_file_id,
+              f.id AS file_id, f.status AS file_status, f.read_error, f.artwork_hash AS file_art, f.size, f.quick_sig,
+              f.content_hash, f.audio_hash, f.path
+       FROM tracks t LEFT JOIN files f ON f.id = t.active_file_id WHERE t.state = 'active'`,
+    )
+    .all();
+}
+
+/**
+ * Runs every check; returns Map("kind:entity:id" -> issue). Options:
+ * `flagMissingAlbum` (default true) reports songs without an album.
+ */
+function detectIssues(db, { flagMissingAlbum = true } = {}) {
   const issues = new Map();
   const add = (kind, entityId, details, suggestion = null) => {
     issues.set(`${kind}:${KINDS[kind].entity}:${entityId}`, { kind, entityType: KINDS[kind].entity, entityId, details, suggestion });
   };
 
-  const tracks = db
-    .prepare(
-      `SELECT t.id, t.title, t.artist, t.album, t.album_artist, t.genre, t.release_id, t.track_no, t.track_total,
-              t.disc_no, t.year, t.compilation, t.artist_key, t.title_key, t.artwork_hash AS chosen_art,
-              f.artwork_hash AS file_art
-       FROM tracks t LEFT JOIN files f ON f.id = t.active_file_id WHERE t.state = 'active'`,
-    )
-    .all();
-
-  const taxonomy = new Set(db.prepare("SELECT name FROM genres").all().map((row) => row.name.toLowerCase()));
-  const aliases = new Map(
-    db.prepare("SELECT a.alias_key, g.name FROM genre_aliases a JOIN genres g ON g.id = a.genre_id").all().map((row) => [row.alias_key, row.name]),
-  );
-
+  const tracks = loadTracks(db);
   for (const track of tracks) {
-    if (!track.album) add("missing_album", track.id, {});
-    if (!track.artist) add("missing_artist", track.id, {});
-    if (!track.chosen_art && !track.file_art) add("missing_artwork", track.id, {});
-
-    if (!track.genre) {
-      add("unclassified_genre", track.id, { label: "" });
-    } else if (taxonomy.size && !taxonomy.has(track.genre.toLowerCase())) {
-      const mapped = aliases.get(normalizeKey(track.genre));
+    if (!String(track.title || "").trim()) {
+      const name = track.path ? path.basename(track.path, path.extname(track.path)) : "";
       add(
-        "unclassified_genre",
+        "missing_title",
         track.id,
-        { label: track.genre },
-        mapped ? { type: "edit", label: `Change genre to "${mapped}"`, edits: [{ trackId: track.id, fields: { genre: mapped } }] } : null,
+        { fileName: name || null },
+        name ? { type: "edit", label: `Use the file name "${name}" as the title`, edits: [{ trackId: track.id, fields: { title: name } }] } : null,
       );
     }
-  }
-
-  // Album-level checks.
-  const byRelease = new Map();
-  for (const track of tracks) {
-    if (!track.release_id) continue;
-    if (!byRelease.has(track.release_id)) byRelease.set(track.release_id, []);
-    byRelease.get(track.release_id).push(track);
-  }
-  const releases = new Map(db.prepare("SELECT * FROM releases").all().map((release) => [release.id, release]));
-
-  for (const [releaseId, members] of byRelease) {
-    const release = releases.get(releaseId);
-    if (!release) continue;
-
-    const missingArtist = members.filter((track) => !track.album_artist && !track.compilation);
-    const artists = [...new Set(members.map((track) => track.artist).filter(Boolean))];
-    if (missingArtist.length && members.length > 1) {
-      const suggestion =
-        artists.length === 1
-          ? {
-              type: "edit",
-              label: `Set album artist to "${artists[0]}"`,
-              edits: missingArtist.map((track) => ({ trackId: track.id, fields: { albumArtist: artists[0] } })),
-            }
-          : null;
-      add("missing_album_artist", releaseId, { album: release.title, tracks: missingArtist.length }, suggestion);
+    if (!String(track.artist || "").trim()) add("missing_artist", track.id, {});
+    if (flagMissingAlbum && !String(track.album || "").trim()) {
+      add(
+        "missing_album",
+        track.id,
+        {},
+        track.title ? { type: "edit", label: `Use "${track.title}" as the album (a single)`, edits: [{ trackId: track.id, fields: { album: track.title } }] } : null,
+      );
     }
+    if (!track.chosen_art && !track.file_art) add("missing_artwork", track.id, { releaseId: track.release_id || null, album: track.album || "" });
+    const placeholders = placeholderFields(track);
+    if (placeholders.length) add("placeholder", track.id, { fields: placeholders });
 
-    // Duplicate positions or numbers beyond the stated total.
-    const positions = new Map();
-    const problems = [];
-    for (const track of members) {
-      if (!track.track_no) continue;
-      const key = `${track.disc_no || 1}-${track.track_no}`;
-      if (positions.has(key)) problems.push(`Track ${track.track_no}${track.disc_no ? ` (disc ${track.disc_no})` : ""} appears more than once`);
-      positions.set(key, track.id);
-      if (track.track_total && track.track_no > track.track_total) problems.push(`Track ${track.track_no} is beyond the total of ${track.track_total}`);
-    }
-    if (problems.length) add("track_numbering", releaseId, { album: release.title, problems: [...new Set(problems)].slice(0, 10) });
-
-    // Album artist / year disagreements inside one album.
-    const albumArtists = members.map((track) => track.album_artist).filter(Boolean);
-    const years = members.map((track) => track.year).filter(Boolean);
-    const differences = [];
-    const edits = [];
-    if (new Set(albumArtists).size > 1) {
-      const [value] = majority(albumArtists);
-      differences.push(`Album artist: ${[...new Set(albumArtists)].join(" / ")}`);
-      for (const track of members) if (track.album_artist && track.album_artist !== value) edits.push({ trackId: track.id, fields: { albumArtist: value } });
-    }
-    if (new Set(years).size > 1) {
-      const [value] = majority(years);
-      differences.push(`Year: ${[...new Set(years)].join(" / ")}`);
-      for (const track of members) if (track.year && track.year !== value) edits.push({ trackId: track.id, fields: { year: value } });
-    }
-    if (differences.length) {
-      add("inconsistent_album", releaseId, { album: release.title, differences }, edits.length
-        ? { type: "edit", label: "Use the most common values for the whole album", edits }
-        : null);
-    }
+    if (!track.file_id) add("no_file", track.id, {});
+    else if (track.file_status !== "ok") add("file_problem", track.file_id, { status: track.file_status, error: track.read_error, trackId: track.id });
   }
 
-  // The same artist's albums with near-identical names (e.g. different
-  // spellings of one album). Suggest the name used by more songs.
-  const releaseList = [...byRelease.keys()].map((id) => ({ ...releases.get(id), count: byRelease.get(id).length })).filter((r) => r.id);
-  const byArtist = new Map();
-  for (const release of releaseList) {
-    if (!byArtist.has(release.artist_key)) byArtist.set(release.artist_key, []);
-    byArtist.get(release.artist_key).push(release);
-  }
-  for (const group of byArtist.values()) {
-    for (let i = 0; i < group.length; i += 1) {
-      for (let j = i + 1; j < group.length; j += 1) {
-        const [a, b] = [group[i], group[j]];
-        if (a.edition !== b.edition || !similar(a.title, b.title)) continue;
-        const [keep, other] = a.count >= b.count ? [a, b] : [b, a];
-        add(
-          "similar_albums",
-          other.id,
-          { album: other.title, similarTo: keep.title, similarReleaseId: keep.id },
-          {
-            type: "edit",
-            label: `Rename to "${keep.title}"`,
-            edits: byRelease.get(other.id).map((track) => ({ trackId: track.id, fields: { album: keep.title } })),
-          },
-        );
-      }
+  // Duplicates: one item per group, keyed by its lowest song id.
+  const decisions = new Map(db.prepare("SELECT track_a, track_b, decision FROM match_decisions").all().map((row) => [pairKey(row.track_a, row.track_b), row.decision]));
+  const candidates = tracks.filter((track) => track.file_id && track.file_status === "ok");
+  const byId = new Map(candidates.map((track) => [track.id, track]));
+  const { strong, possible } = findDuplicates(candidates, { decisions });
+  for (const [kind, groups] of [["duplicate", strong], ["possible_duplicate", possible]]) {
+    for (const group of groups) {
+      add(kind, group.trackIds[0], {
+        trackIds: group.trackIds,
+        tier: group.tier,
+        confidence: group.confidence,
+        reasons: group.reasons,
+        filesSig: filesSignature(group.trackIds.map((id) => byId.get(id))),
+      });
     }
-  }
-
-  // Files that are missing or can't be read.
-  for (const file of db.prepare("SELECT id, status, read_error FROM files WHERE status != 'ok'").all()) {
-    add("file_problem", file.id, { status: file.status, error: file.read_error });
-  }
-
-  // Same artist + title (incl. version markers): one item per group.
-  const groups = new Map();
-  for (const track of tracks) {
-    if (!track.title_key || !track.artist_key) continue;
-    const key = `${track.artist_key}|${track.title_key}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(track.id);
-  }
-  for (const ids of groups.values()) {
-    if (ids.length > 1) add("possible_duplicate", Math.min(...ids), { trackIds: ids });
-  }
-
-  // Albums missing songs: per disc, the numbers below the disc's track
-  // total that no song has. Only when the totals are known and agree.
-  for (const [releaseId, members] of byRelease) {
-    const release = releases.get(releaseId);
-    if (!release) continue;
-    const discs = new Map();
-    for (const track of members) {
-      const disc = track.disc_no || 1;
-      if (!discs.has(disc)) discs.set(disc, []);
-      discs.get(disc).push(track);
-    }
-    const missing = [];
-    let have = 0;
-    let total = 0;
-    for (const [disc, songs] of discs) {
-      const totals = new Set(songs.map((song) => song.track_total).filter(Boolean));
-      if (totals.size !== 1) continue;
-      const discTotal = [...totals][0];
-      const numbers = new Set(songs.map((song) => song.track_no).filter(Boolean));
-      if (discTotal > 99 || numbers.size === 0) continue;
-      have += [...numbers].filter((number) => number <= discTotal).length;
-      total += discTotal;
-      for (let number = 1; number <= discTotal; number += 1) {
-        if (!numbers.has(number)) missing.push(discs.size > 1 ? `${disc}-${number}` : String(number));
-      }
-    }
-    if (missing.length && total) add("incomplete_album", releaseId, { album: release.title, have, total, missing: missing.slice(0, 40) });
-  }
-
-  // Identifications that need a human decision.
-  for (const row of db
-    .prepare("SELECT i.track_id, i.confidence, i.suggestion FROM identifications i JOIN tracks t ON t.id = i.track_id AND t.state = 'active' WHERE i.status = 'uncertain'")
-    .all()) {
-    const fields = parseJson(row.suggestion, {}).fields || {};
-    add("uncertain_match", row.track_id, { confidence: row.confidence, album: fields.album || null, year: fields.year || null });
   }
 
   return issues;
 }
 
-/** Updates the queue from the current library state. */
-function refreshReview(db) {
-  const issues = detectIssues(db);
+/** Updates the queue from the current library state (options as detectIssues). */
+function refreshReview(db, options = {}) {
+  const issues = detectIssues(db, options);
   const now = nowIso();
-  const existing = db.prepare("SELECT * FROM review_items").all();
-  const existingByKey = new Map(existing.map((item) => [`${item.kind}:${item.entity_type}:${item.entity_id}`, item]));
   let added = 0;
   let reopened = 0;
   let resolved = 0;
 
   transaction(db, () => {
+    // Checks that are no longer part of Review leave no stale items behind.
+    const known = Object.keys(KINDS);
+    db.prepare(`DELETE FROM review_items WHERE kind NOT IN (${known.map(() => "?").join(",")})`).run(...known);
+
+    const existing = db.prepare("SELECT * FROM review_items").all();
+    const existingByKey = new Map(existing.map((item) => [`${item.kind}:${item.entity_type}:${item.entity_id}`, item]));
     const insert = db.prepare(
       `INSERT INTO review_items (kind, entity_type, entity_id, status, details, suggestion, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -248,7 +163,12 @@ function refreshReview(db) {
         update.run(openStatus, details, suggestion, now, item.id);
         reopened += 1;
       } else if (item.status === "ignored") {
-        if (item.details !== details || item.suggestion !== suggestion) update.run("ignored", details, suggestion, now, item.id);
+        // A dismissed duplicate returns only when its files changed.
+        const before = parseJson(item.details, {});
+        if (issue.details?.filesSig && before.filesSig && before.filesSig !== issue.details.filesSig) {
+          update.run(openStatus, details, suggestion, now, item.id);
+          reopened += 1;
+        } else if (item.details !== details || item.suggestion !== suggestion) update.run("ignored", details, suggestion, now, item.id);
       } else if (item.details !== details || item.suggestion !== suggestion || item.status !== openStatus) {
         update.run(openStatus, details, suggestion, now, item.id);
       }
@@ -263,70 +183,90 @@ function refreshReview(db) {
     }
   });
 
-  return { open: [...issues.values()].length, added, reopened, resolved };
+  return { open: issues.size, added, reopened, resolved };
 }
 
-// Review is about metadata and organization. Missing or unreadable files are
-// still detected here (so they resolve and reopen like other issues), but
-// they're shown and fixed in File Health.
-const FILE_KINDS = ["file_problem"];
-const METADATA_KINDS = Object.keys(KINDS).filter((kind) => !FILE_KINDS.includes(kind));
+const OPEN = "status IN ('needs_review', 'suggested')";
 
+/** Open counts per kind and group; `open` is what the navigation badge shows. */
 function reviewSummary(db) {
   const rows = db.prepare("SELECT kind, status, COUNT(*) AS count FROM review_items GROUP BY kind, status").all();
   const kinds = {};
-  for (const kind of METADATA_KINDS) kinds[kind] = { label: KINDS[kind].label, open: 0, ignored: 0, resolved: 0 };
+  for (const kind of Object.keys(KINDS)) kinds[kind] = { label: KINDS[kind].label, group: KINDS[kind].group, open: 0, ignored: 0, resolved: 0 };
   for (const row of rows) {
     if (!kinds[row.kind]) continue;
     if (row.status === "needs_review" || row.status === "suggested") kinds[row.kind].open += row.count;
     else if (row.status === "ignored") kinds[row.kind].ignored += row.count;
     else kinds[row.kind].resolved += row.count;
   }
-  const open = Object.values(kinds).reduce((sum, kind) => sum + kind.open, 0);
-  return { open, kinds };
+  const groups = Object.fromEntries(GROUPS.map((group) => [group, kindsOf(group).reduce((sum, kind) => sum + kinds[kind].open, 0)]));
+  const open = COUNTED_KINDS.reduce((sum, kind) => sum + kinds[kind].open, 0);
+  return { open, groups, kinds };
 }
 
-function listReviewItems(db, { kind, status = "open", offset = 0, limit = 100 } = {}) {
+/** The badge count alone (cheap; used by the app status). */
+function openCount(db) {
+  return db.prepare(`SELECT COUNT(*) AS n FROM review_items WHERE ${OPEN} AND kind IN (${COUNTED_KINDS.map(() => "?").join(",")})`).get(...COUNTED_KINDS).n;
+}
+
+const MEMBER_SQL = `SELECT t.id, t.title, t.artist, t.album, t.album_artist, t.year, t.genre, t.duration_ms, t.track_no, t.release_id, t.favorite,
+         t.created_at, COALESCE(t.artwork_hash, f.artwork_hash) AS artwork_hash,
+         f.id AS file_id, f.codec, f.bitrate, f.lossless, f.sample_rate, f.bit_depth, f.size, f.path, f.rel_path, f.status AS file_status,
+         s.name AS source_name,
+         (SELECT COUNT(*) FROM playlist_tracks p WHERE p.track_id = t.id) AS playlist_count
+  FROM tracks t LEFT JOIN files f ON f.id = t.active_file_id LEFT JOIN sources s ON s.id = f.source_id
+  WHERE t.id = ? AND t.state = 'active'`;
+
+function listReviewItems(db, { group, kind, status = "open", offset = 0, limit = 100 } = {}) {
   const where = [];
   const params = [];
   if (kind) {
     where.push("r.kind = ?");
     params.push(kind);
   } else {
-    where.push(`r.kind NOT IN (${FILE_KINDS.map(() => "?").join(",")})`);
-    params.push(...FILE_KINDS);
+    const kinds = group ? kindsOf(group) : kindsOf("attention");
+    where.push(`r.kind IN (${kinds.map(() => "?").join(",")})`);
+    params.push(...kinds);
   }
-  if (status === "open") where.push("r.status IN ('needs_review', 'suggested')");
+  if (status === "open") where.push(`r.${OPEN}`);
   else if (status) {
     where.push("r.status = ?");
     params.push(status);
   }
-  const clause = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const clause = `WHERE ${where.join(" AND ")}`;
 
   const total = db.prepare(`SELECT COUNT(*) AS n FROM review_items r ${clause}`).get(...params).n;
+  const memberQuery = db.prepare(MEMBER_SQL);
   const rows = db
     .prepare(
       `SELECT r.*,
-              t.title AS track_title, t.artist AS track_artist, t.album AS track_album,
+              t.title AS track_title, t.artist AS track_artist, t.album AS track_album, t.release_id AS track_release_id,
               COALESCE(t.artwork_hash, tf.artwork_hash) AS track_artwork,
-              rel.title AS release_title, rel.album_artist AS release_artist,
-              f.path AS file_path, f.track_id AS file_track_id
+              f.path AS file_path, f.track_id AS file_track_id,
+              ft.title AS file_track_title, ft.artist AS file_track_artist, COALESCE(ft.artwork_hash, f.artwork_hash) AS file_track_artwork
        FROM review_items r
        LEFT JOIN tracks t ON r.entity_type = 'track' AND t.id = r.entity_id
        LEFT JOIN files tf ON tf.id = t.active_file_id
-       LEFT JOIN releases rel ON r.entity_type = 'release' AND rel.id = r.entity_id
        LEFT JOIN files f ON r.entity_type = 'file' AND f.id = r.entity_id
+       LEFT JOIN tracks ft ON ft.id = f.track_id
        ${clause}
-       ORDER BY r.status = 'suggested' DESC, r.kind, r.id
+       ORDER BY CASE r.kind WHEN 'duplicate' THEN 0 WHEN 'missing_title' THEN 1 WHEN 'missing_artist' THEN 2 WHEN 'placeholder' THEN 3
+                WHEN 'missing_album' THEN 4 WHEN 'missing_artwork' THEN 5 ELSE 6 END,
+                t.artist COLLATE NOCASE, t.album COLLATE NOCASE, t.track_no, r.id
        LIMIT ? OFFSET ?`,
     )
     .all(...params, Math.min(500, Number(limit) || 100), Math.max(0, Number(offset) || 0))
-    .map((row) => ({
-      ...row,
-      label: KINDS[row.kind]?.label || row.kind,
-      details: parseJson(row.details, {}),
-      suggestion: parseJson(row.suggestion, null),
-    }));
+    .map((row) => {
+      const details = parseJson(row.details, {});
+      return {
+        ...row,
+        label: KINDS[row.kind]?.label || row.kind,
+        group: KINDS[row.kind]?.group || "attention",
+        details,
+        suggestion: parseJson(row.suggestion, null),
+        members: Array.isArray(details.trackIds) ? details.trackIds.map((id) => memberQuery.get(id)).filter(Boolean) : undefined,
+      };
+    });
 
   return { total, rows };
 }
@@ -354,4 +294,4 @@ function approveSuggestions(db, { ids }) {
   return { applied: results.length, results };
 }
 
-module.exports = { FILE_KINDS, KINDS, approveSuggestions, detectIssues, listReviewItems, refreshReview, reviewSummary, setReviewStatus };
+module.exports = { GROUPS, KINDS, approveSuggestions, detectIssues, listReviewItems, openCount, placeholderFields, refreshReview, reviewSummary, setReviewStatus };

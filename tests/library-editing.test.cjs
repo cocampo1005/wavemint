@@ -177,15 +177,18 @@ test("the genre report finds unknown labels and near-duplicates", needsAudio, as
   assert.equal(genres.similar("Pop", "Rock"), false);
 });
 
-test("the review queue persists decisions and resolves fixed issues", needsAudio, async (t) => {
+test("the review queue flags only essential metadata, keeps decisions and resolves fixed issues", needsAudio, async (t) => {
   const { db, id } = await sampleLibrary(t);
+  // Leftovers of checks that are no longer part of Review disappear.
+  db.prepare("INSERT INTO review_items (kind, entity_type, entity_id, status, created_at, updated_at) VALUES ('unclassified_genre', 'track', ?, 'needs_review', '', '')").run(id("Sparks"));
   review.refreshReview(db);
 
   const all = review.listReviewItems(db, { status: "open", limit: 200 }).rows;
   const kinds = new Set(all.map((item) => item.kind));
-  for (const kind of ["missing_album", "missing_artwork", "missing_album_artist", "track_numbering", "inconsistent_album", "similar_albums", "unclassified_genre"]) {
-    assert.ok(kinds.has(kind), kind);
-  }
+  assert.deepEqual([...kinds].sort(), ["missing_album", "missing_artwork"]);
+  // Sparks has no genre, year or album artist, and its album differs from its neighbors': only its artwork is flagged.
+  assert.deepEqual(all.filter((item) => item.entity_id === id("Sparks")).map((item) => item.kind), ["missing_artwork"]);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM review_items WHERE kind = 'unclassified_genre'").get().n, 0);
 
   // Ignore one, then refresh: still ignored.
   const artworkItem = all.find((item) => item.kind === "missing_artwork");
@@ -193,20 +196,35 @@ test("the review queue persists decisions and resolves fixed issues", needsAudio
   review.refreshReview(db);
   assert.equal(db.prepare("SELECT status FROM review_items WHERE id = ?").get(artworkItem.id).status, "ignored");
 
-  // Approving the suggestion fixes the album; the item resolves.
-  const similarItem = all.find((item) => item.kind === "similar_albums");
-  assert.equal(similarItem.status, "suggested");
-  review.approveSuggestions(db, { ids: [similarItem.id] });
-  assert.equal(db.prepare("SELECT album FROM tracks WHERE id = ?").get(id("Sparks")).album, "Parachutes");
+  // A song without an album is offered "use the title as the album" (a single).
+  const albumItem = all.find((item) => item.kind === "missing_album" && item.entity_id === id("Untitled"));
+  assert.equal(albumItem.status, "suggested");
+  review.approveSuggestions(db, { ids: [albumItem.id] });
+  assert.equal(db.prepare("SELECT album FROM tracks WHERE id = ?").get(id("Untitled")).album, "Untitled");
   review.refreshReview(db);
-  assert.notEqual(db.prepare("SELECT status FROM review_items WHERE id = ?").get(similarItem.id).status, "suggested");
+  assert.equal(db.prepare("SELECT status FROM review_items WHERE id = ?").get(albumItem.id).status, "resolved");
+
+  // Libraries of singles can turn the album check off.
+  edits.applyEdits(db, [{ trackId: id("Untitled"), fields: { album: "" } }]);
+  review.refreshReview(db, { flagMissingAlbum: false });
+  assert.equal(review.listReviewItems(db, { kind: "missing_album" }).total, 0);
+
+  // Placeholder values are flagged as such; real values are left alone.
+  edits.applyEdits(db, [{ trackId: id("Spies"), fields: { artist: "Unknown Artist" } }]);
+  review.refreshReview(db);
+  const placeholder = review.listReviewItems(db, { kind: "placeholder" }).rows[0];
+  assert.deepEqual(placeholder.details.fields, [{ field: "artist", value: "Unknown Artist" }]);
+  assert.deepEqual(review.placeholderFields({ title: "Untitled", artist: "Various Artists", album: "Greatest Hits" }), []);
+  assert.deepEqual(review.placeholderFields({ title: "Track 07", artist: "A", album: "B" }).map((item) => item.field), ["title"]);
 
   // Fixing a missing album resolves it; breaking it again reopens the item.
-  const missing = all.find((item) => item.kind === "missing_album" && item.entity_id === id("Untitled"));
-  edits.applyEdits(db, [{ trackId: id("Untitled"), fields: { album: "Samples" } }]);
+  edits.applyEdits(db, [{ trackId: id("Untitled"), fields: { artist: "" } }]);
+  review.refreshReview(db);
+  const missing = review.listReviewItems(db, { kind: "missing_artist" }).rows.find((item) => item.entity_id === id("Untitled"));
+  edits.applyEdits(db, [{ trackId: id("Untitled"), fields: { artist: "Samples" } }]);
   review.refreshReview(db);
   assert.equal(db.prepare("SELECT status FROM review_items WHERE id = ?").get(missing.id).status, "resolved");
-  edits.applyEdits(db, [{ trackId: id("Untitled"), fields: { album: "" } }]);
+  edits.applyEdits(db, [{ trackId: id("Untitled"), fields: { artist: "" } }]);
   review.refreshReview(db);
   assert.equal(db.prepare("SELECT status FROM review_items WHERE id = ?").get(missing.id).status, "needs_review");
 });

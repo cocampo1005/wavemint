@@ -18,7 +18,6 @@ const edits = require("./edits.cjs");
 const { createFileOps } = require("./fileops.cjs");
 const genres = require("./genres.cjs");
 const operations = require("./operations.cjs");
-const quality = require("./quality.cjs");
 const review = require("./review.cjs");
 const { createUpgrader } = require("./upgrade.cjs");
 const { createIdentifier } = require("./identify.cjs");
@@ -40,6 +39,8 @@ const SETTINGS_DEFAULTS = {
   namingPattern: DEFAULT_PATTERN,
   preferOriginalReleases: true,
   lowBitrateKbps: queries.LOW_BITRATE_KBPS,
+  // Review → Needs Attention flags songs without an album (off for libraries of singles).
+  reviewMissingAlbum: true,
   exportRoot: "",
   convertWavAiff: true,
   appleAutoAddFolder: "",
@@ -83,7 +84,7 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
   // Online lookups only happen after the user turned them on.
   function requireOnline() {
     if (!getSettings().musicBrainzEnabled) {
-      const error = new Error("Turn on MusicBrainz lookups first (Library → Identify).");
+      const error = new Error("Turn on MusicBrainz lookups first (Library Tools → Identify Songs).");
       error.code = "musicbrainz-off";
       throw error;
     }
@@ -120,7 +121,7 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
     return { ...SETTINGS_DEFAULTS, ...getSetting(db, "library", {}) };
   }
 
-  const refreshQuality = (trackIds = null) => quality.refreshQuality(db, { trackIds, lowBitrateKbps: getSettings().lowBitrateKbps });
+  const refreshReview = () => review.refreshReview(db, { flagMissingAlbum: getSettings().reviewMissingAlbum !== false });
 
   // --- Saving edits into the files ---------------------------------------------
   // An edit is saved in the database and then written through into the song's
@@ -301,6 +302,7 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
     if (!ids.length) return result;
     const operationId = result?.operationId || null;
     const files = await writeThrough(ids, { partOf: operationId });
+    scheduleReview();
     return result && typeof result === "object" && !Array.isArray(result) ? { ...result, files } : result;
   }
 
@@ -337,6 +339,7 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
       throw new Error(`Your changes weren't saved: ${files.failed[0].error}`);
     }
     if (fields.genre !== undefined) registerGenres([fields.genre], result.operationId);
+    scheduleReview();
     return { ...result, files };
   }
 
@@ -350,16 +353,16 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
       throw new Error(expired ? `This change can no longer be undone: ${expired.reason}` : "This change can't be undone.");
     }
     if (operation.kind === "tag-write") return fileOps.undoTagWrite(id);
-    if (operation.kind === "merge") return merge.undoMerge(id);
-    if (operation.kind === "consolidate") {
-      const result = consolidator.undoConsolidation(id);
-      refreshQuality();
+    if (operation.kind === "merge") {
+      const result = merge.undoMerge(id);
+      refreshReview();
       return result;
     }
+    if (operation.kind === "consolidate") return consolidator.undoConsolidation(id);
     if (operation.kind === "upgrade") return upgrader.undoUpgrade(id);
     if (operation.kind === "import") {
       const result = importer.undoImport(id);
-      review.refreshReview(db);
+      refreshReview();
       return result;
     }
     if (operation.kind === "remove") {
@@ -368,11 +371,8 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
       scheduleReview();
       return result;
     }
-    if (operation.kind === "quality") {
-      const result = edits.undoMetadataOperation(db, id);
-      refreshQuality();
-      return result;
-    }
+    // Quality decisions recorded by earlier versions of WaveMint.
+    if (operation.kind === "quality") return edits.undoMetadataOperation(db, id);
     // Undoing an edit puts the old values back into the files as well.
     return editAndSave(() => edits.undoMetadataOperation(db, id));
   }
@@ -413,7 +413,6 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
   // things settle, not after every song of a playlist.
   let reviewTimer = null;
   function songsAdded(trackIds) {
-    refreshQuality(trackIds);
     emit("library-changed", { added: trackIds });
     scheduleReview();
   }
@@ -426,7 +425,7 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
     clearTimeout(reviewTimer);
     reviewTimer = setTimeout(() => {
       try {
-        review.refreshReview(db);
+        refreshReview();
         emit("library-changed", { review: true });
       } catch (error) {
         logger.warn(`[library] Review refresh failed: ${error.message}`);
@@ -437,8 +436,8 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
 
   const methods = {
     // --- overview and browsing -------------------------------------------
-    getOverview: () => queries.getDashboard(db),
-    getStatus: () => queries.getStatus(db),
+    getOverview: () => ({ ...queries.getDashboard(db), review: review.reviewSummary(db).groups }),
+    getStatus: () => ({ ...queries.getStatus(db), reviewOpen: review.openCount(db) }),
     listTracks: (params) => queries.listTracks(db, params),
     listTrackIds: (params) => queries.listTrackIds(db, params),
     listAlbums: (params) => queries.listAlbums(db, params),
@@ -473,9 +472,8 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
           });
           results.push({ sourceId: id, ...result });
         }
-        // Fresh findings for the review queue and quality statuses.
-        const reviewResult = review.refreshReview(db);
-        refreshQuality();
+        // Fresh findings for the review queue.
+        const reviewResult = refreshReview();
         return { results, review: reviewResult };
       });
     },
@@ -546,10 +544,24 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
       requireIdle();
       return editAndSave(() => {
         const result = merge.apply(params);
-        review.refreshReview(db);
-        refreshQuality();
+        refreshReview();
         return result;
       });
+    },
+    // Duplicates inside the library: database only, undoable from History.
+    mergeDuplicates: (params) => {
+      requireIdle();
+      return editAndSave(() => {
+        const result = merge.mergeDuplicates(params);
+        refreshReview();
+        emit("library-changed", { merged: params.trackIds });
+        return result;
+      });
+    },
+    keepDuplicatesSeparate: (params) => {
+      const result = merge.keepSeparate(params);
+      refreshReview();
+      return result;
     },
 
     // --- Managed Library -------------------------------------------------------
@@ -582,28 +594,11 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
       const root = managedRoot();
       const pattern = getSettings().namingPattern;
       return jobs.start("consolidate", "Copying into the WaveMint Library", async ({ signal, progress }) => {
-        const result = await consolidator.consolidateJob({ root, pattern, trackIds: trackIds?.length ? trackIds : null, signal, progress });
-        refreshQuality();
-        return result;
+        return consolidator.consolidateJob({ root, pattern, trackIds: trackIds?.length ? trackIds : null, signal, progress });
       });
     },
 
-    // --- audio quality and upgrades -------------------------------------------
-    qualitySummary: () => quality.qualitySummary(db),
-    listQualityQueue: (params) => quality.listQueue(db, params),
-    refreshQuality: () => ({ updated: refreshQuality() }),
-    checkQuality: ({ trackIds, force }) =>
-      jobs.start("quality-check", "Checking audio quality", ({ signal, progress }) =>
-        quality.checkJob(db, media, {
-          trackIds: trackIds?.length ? trackIds : null,
-          force: !!force,
-          lowBitrateKbps: getSettings().lowBitrateKbps,
-          signal,
-          progress,
-          logger,
-        }),
-      ),
-    setQualityStatus: ({ trackIds, status }) => quality.setQualityStatus(db, { trackIds, status, lowBitrateKbps: getSettings().lowBitrateKbps }),
+    // --- Upgrade Track ----------------------------------------------------------
     // filePath only from the host (a main-process dialog); the renderer can pick versions.
     prepareUpgrade: ({ trackId, fileId, filePath }) => {
       requireIdle();
@@ -672,14 +667,14 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
     identifySong: async ({ trackId }) => {
       requireOnline();
       const result = await identifier.identifyTrack(trackId);
-      review.refreshReview(db);
+      refreshReview();
       return result;
     },
     identifySongs: ({ trackIds, onlyNew }) => {
       requireOnline();
       return jobs.start("identify", "Identifying songs with MusicBrainz", async ({ signal, progress }) => {
         const report = await identifier.identifyJob({ trackIds: trackIds?.length ? trackIds : null, onlyNew: onlyNew !== false, signal, progress });
-        review.refreshReview(db);
+        refreshReview();
         return report;
       });
     },
@@ -700,19 +695,19 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
       if (coverHash) pinFileArtwork(Number(trackId));
       return editAndSave(() => {
         const result = identifier.apply({ trackId, fields, coverHash: coverHash || null });
-        review.refreshReview(db);
+        refreshReview();
         return result;
       });
     },
     dismissIdentifications: (params) => {
       const result = identifier.dismiss(params);
-      review.refreshReview(db);
+      refreshReview();
       return result;
     },
     applyConfidentIdentifications: ({ minConfidence }) =>
       editAndSave(() => {
         const result = identifier.applyConfident({ minConfidence: minConfidence || 0.9 });
-        review.refreshReview(db);
+        refreshReview();
         return result;
       }),
     listIdentifications: (params) => identifier.list(params),
@@ -729,7 +724,7 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
       requireOnline();
       return editAndSave(async () => {
         const result = await identifier.applyAlbum({ ...params, exclude: params.exclude || [] });
-        review.refreshReview(db);
+        refreshReview();
         return result;
       });
     },
@@ -749,8 +744,7 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
             .map((row) => row.genre),
           report.operationId,
         );
-        review.refreshReview(db);
-        refreshQuality();
+        refreshReview();
         return report;
       }),
     discardImport: (params) => importer.discard(params),
@@ -774,9 +768,7 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
       // Fail fast (before the job starts) on edits that can't be saved.
       audioEditor.editSource({ trackId });
       return jobs.start("audio-edit", "Saving audio edits", async ({ signal, progress }) => {
-        const result = await audioEditor.editTrackJob({ trackId, edits, signal, progress });
-        refreshQuality([trackId]);
-        return result;
+        return audioEditor.editTrackJob({ trackId, edits, signal, progress });
       });
     },
     // Host only: the main process saves extractions into staging.
@@ -900,7 +892,7 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
       const wanted = Math.min(Math.max(Number(count) || 5, 1), 25);
       const aac = pick("aac", Math.floor(wanted / 2));
       const ids = [...aac, ...pick("mp3", wanted - aac.length)];
-      if (!ids.length) throw new Error("No song in the library has its file on disk to test with. Check File Health.");
+      if (!ids.length) throw new Error("No song in the library has its file on disk to test with. Check Review → Diagnostics.");
       return appleJob("apple-sync", `Testing iTunes sync with ${ids.length} songs`, ({ signal, progress }) =>
         appleSync.run({ mode: "manual", confirm: { baseline: true }, only: ids, signal, progress }).then((report) => ({ ...report, testTrackIds: ids })),
       );
@@ -933,7 +925,17 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
       jobs.start("write-tags", "Storing genres as text", ({ signal, progress }) => fileOps.writeTagsJob({ trackIds, signal, progress, forceFields: ["genre"] })),
     // Read-only: MP3s whose genre is stored as a number.
     scanNumericGenres: () => jobs.start("genre-scan", "Checking how genres are stored", ({ signal, progress }) => formats.numericGenreScan(db, { signal, progress }), { exclusive: false }),
-    forgetMissingFile: ({ fileId }) => formats.forgetMissingFile(db, { fileId }),
+    forgetMissingFile: ({ fileId }) => {
+      const result = formats.forgetMissingFile(db, { fileId });
+      refreshReview();
+      return result;
+    },
+    // Leftover references (removed or merged songs, earlier versions) only; database only.
+    forgetLeftoverReferences: ({ fileIds }) => {
+      const result = formats.forgetLeftoverReferences(db, { fileIds });
+      refreshReview();
+      return result;
+    },
     // Host only: the file comes from a main-process dialog.
     relinkMissingFile: ({ fileId, filePath }) => {
       requireIdle();
@@ -959,7 +961,7 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
     applyGenreRules: (params) => editAndSave(() => genres.applyRules(db, params)),
 
     // --- review queue ----------------------------------------------------------
-    refreshReview: () => review.refreshReview(db),
+    refreshReview: () => refreshReview(),
     reviewSummary: () => review.reviewSummary(db),
     listReviewItems: (params) => review.listReviewItems(db, params),
     setReviewStatus: (params) => review.setReviewStatus(db, params),
@@ -976,7 +978,7 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
       const before = getSettings();
       const next = { ...before, ...patch };
       setSetting(db, "library", next);
-      if (next.lowBitrateKbps !== before.lowBitrateKbps) refreshQuality();
+      if (next.reviewMissingAlbum !== before.reviewMissingAlbum) refreshReview();
       return next;
     },
 
@@ -1014,11 +1016,11 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
 
   // Every change to the collection tells the Apple sync that there may be work.
   const APPLE_TOUCH_METHODS = [
-    "saveTrack", "applyEdits", "editAlbum", "setArtworkFromPath", "copyArtwork", "clearArtwork", "undoOperation", "applyMerge",
+    "saveTrack", "applyEdits", "editAlbum", "setArtworkFromPath", "copyArtwork", "clearArtwork", "undoOperation", "applyMerge", "mergeDuplicates", "keepDuplicatesSeparate",
     "applyIdentification", "applyConfidentIdentifications", "applyAlbumIdentification", "commitStagedExtraction", "removeFromLibrary",
     "finishFileDeletion", "createPlaylist", "updatePlaylist", "deletePlaylist", "addToPlaylist", "removeFromPlaylist", "movePlaylistTrack",
-    "importPlaylistM3U", "renameGenre", "mergeGenres", "applyGenreRules", "approveSuggestions", "setQualityStatus",
-    "forgetMissingFile", "relinkMissingFile",
+    "importPlaylistM3U", "renameGenre", "mergeGenres", "applyGenreRules", "approveSuggestions",
+    "forgetMissingFile", "forgetLeftoverReferences", "relinkMissingFile",
   ];
   for (const name of APPLE_TOUCH_METHODS) {
     const original = methods[name];

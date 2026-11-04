@@ -11,8 +11,10 @@ const FIELDS = {
   artist: { label: "Artist", ops: [["is", "is"], ["contains", "contains"]], input: "text" },
   album: { label: "Album", ops: [["is", "is"], ["contains", "contains"]], input: "text" },
   year: { label: "Year", ops: [["is", "is"], ["gte", "is at least"], ["lte", "is at most"]], input: "number" },
+  // Only shown on smart playlists made by earlier versions (WaveMint no longer rates audio quality).
   quality: {
-    label: "Quality status",
+    legacy: true,
+    label: "Quality status (old)",
     ops: [["is", "is"]],
     input: "select",
     options: [
@@ -66,11 +68,13 @@ function SmartRulesEditor({ rules, onChange }) {
               value={condition.field}
               onChange={(event) => setCondition(index, { field: event.target.value, op: FIELDS[event.target.value].ops[0][0], value: FIELDS[event.target.value].options?.[0]?.[0] ?? "" })}
             >
-              {Object.entries(FIELDS).map(([key, item]) => (
-                <option key={key} value={key}>
-                  {item.label}
-                </option>
-              ))}
+              {Object.entries(FIELDS)
+                .filter(([key, item]) => !item.legacy || key === condition.field)
+                .map(([key, item]) => (
+                  <option key={key} value={key}>
+                    {item.label}
+                  </option>
+                ))}
             </select>
             <select className="field" aria-label="Condition" value={condition.op} onChange={(event) => setCondition(index, { op: event.target.value })}>
               {field.ops.map(([value, label]) => (

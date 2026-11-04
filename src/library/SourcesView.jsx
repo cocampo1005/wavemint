@@ -88,7 +88,7 @@ function SourceCard({ source, busy, onChanged, onError, onNavigate }) {
         <span>{formatNumber(source.file_count)} files</span>
         <span>{formatBytes(source.total_size)}</span>
         {(source.missing_count > 0 || source.unreadable_count > 0) && (
-          <button type="button" className="btn btn--link is-warn" onClick={() => onNavigate?.("health")} title="Show which files and why, in File Health">
+          <button type="button" className="btn btn--link is-warn" onClick={() => onNavigate?.("review", { tab: "diagnostics" })} title="Show which files and why, in Review → Diagnostics">
             {[source.missing_count > 0 && `${formatNumber(source.missing_count)} missing`, source.unreadable_count > 0 && `${formatNumber(source.unreadable_count)} unreadable`].filter(Boolean).join(", ")}
           </button>
         )}

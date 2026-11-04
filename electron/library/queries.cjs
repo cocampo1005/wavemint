@@ -5,8 +5,8 @@
 const { parseJson } = require("./db.cjs");
 const { toFtsQuery } = require("./search.cjs");
 
-// A lossy file under this bitrate is a "quality review suggested" signal,
-// never a verdict (see docs/LIBRARY.md, Audio quality).
+// Below this bitrate Upgrade Track mentions that a lossy replacement candidate
+// is low-bitrate (a hint while comparing, never a verdict on a song).
 const LOW_BITRATE_KBPS = 160;
 
 const TRACK_SORTS = {
@@ -73,8 +73,8 @@ function trackFilterSql(filters = {}, search = "") {
     where.push("f.codec = ?");
     params.push(filters.codec);
   }
-  // File Health. (Missing artwork, albums, genres, duplicates and low
-  // bitrates are listed by Review and Quality & Upgrades, not as song filters.)
+  // Review → Diagnostics. (Missing details, duplicates and other review
+  // issues are listed by Review, not as song filters.)
   if (filters.missingFile) where.push("(f.id IS NULL OR f.status != 'ok')");
   if (filters.favorite) where.push("t.favorite = 1");
   if (typeof filters.reviewStatus === "string") {
@@ -340,17 +340,14 @@ function getStatus(db) {
          AND f.ext IN ('.mp3', '.m4a', '.m4b', '.flac')`,
     )
     .get().n;
-  // File problems are counted for File Health, not Review.
-  const review = db.prepare("SELECT COUNT(*) AS n FROM review_items WHERE status IN ('needs_review', 'suggested') AND kind != 'file_problem'").get().n;
+  // Songs whose current file is missing or unreadable (Review → Diagnostics).
   const fileProblems = db
     .prepare("SELECT COUNT(*) AS n FROM tracks t LEFT JOIN files f ON f.id = t.active_file_id WHERE t.state = 'active' AND (f.id IS NULL OR f.status != 'ok')")
     .get().n;
   const sources = db.prepare("SELECT COUNT(*) AS n FROM sources").get().n;
-  const qualityAttention = db
-    .prepare("SELECT COUNT(*) AS n FROM tracks WHERE state = 'active' AND quality_status IN ('user_marked_poor', 'upgrade_available')")
-    .get().n;
   const tracks = db.prepare("SELECT COUNT(*) AS n FROM tracks WHERE state = 'active'").get().n;
-  return { unsavedWritable: unsaved, reviewOpen: review, fileProblems, qualityAttention, sources, tracks };
+  // reviewOpen (the Review badge) is added by the service from review.cjs.
+  return { unsavedWritable: unsaved, fileProblems, sources, tracks };
 }
 
 function getDashboard(db) {
@@ -386,28 +383,11 @@ function getDashboard(db) {
 
   const issues = one(`
     SELECT
-      SUM(CASE WHEN t.album = '' THEN 1 ELSE 0 END) AS missing_album,
-      SUM(CASE WHEN t.artist = '' THEN 1 ELSE 0 END) AS missing_artist,
-      SUM(CASE WHEN t.genre = '' THEN 1 ELSE 0 END) AS missing_genre,
-      SUM(CASE WHEN t.album != '' AND t.album_artist = '' AND t.compilation = 0 THEN 1 ELSE 0 END) AS missing_album_artist,
-      SUM(CASE WHEN t.artwork_hash IS NULL AND f.artwork_hash IS NULL THEN 1 ELSE 0 END) AS missing_artwork,
-      SUM(CASE WHEN f.id IS NULL OR f.status != 'ok' THEN 1 ELSE 0 END) AS missing_files,
-      SUM(CASE WHEN f.lossless = 0 AND f.bitrate > 0 AND f.bitrate < ${LOW_BITRATE_KBPS} THEN 1 ELSE 0 END) AS low_bitrate,
-      SUM(CASE WHEN t.review_status = 'needs_review' THEN 1 ELSE 0 END) AS needs_review,
-      SUM(CASE WHEN t.quality_status IN ('user_marked_poor', 'upgrade_available') THEN 1 ELSE 0 END) AS upgrade_queue,
       SUM(CASE WHEN t.tags_dirty = 1 THEN 1 ELSE 0 END) AS unsaved_tags,
       SUM(CASE WHEN t.tags_dirty = 1 AND s.read_only = 0 AND f.status = 'ok'
                AND f.ext IN ('.mp3', '.m4a', '.m4b', '.flac') THEN 1 ELSE 0 END) AS unsaved_writable
     FROM tracks t LEFT JOIN files f ON f.id = t.active_file_id LEFT JOIN sources s ON s.id = f.source_id
     WHERE t.state = 'active'`);
-
-  // Same artist + title (including version markers) more than once. These
-  // are candidates only; matching decides what is really the same recording.
-  const duplicates = one(`
-    SELECT COUNT(*) AS groups, COALESCE(SUM(n), 0) AS tracks FROM (
-      SELECT COUNT(*) AS n FROM tracks
-      WHERE state = 'active' AND title_key != '' AND artist_key != ''
-      GROUP BY artist_key, title_key HAVING COUNT(*) > 1)`);
 
   return {
     totals: { ...totals, favorites },
@@ -415,9 +395,7 @@ function getDashboard(db) {
     recent,
     topArtists,
     issues: Object.fromEntries(Object.entries(issues).map(([key, value]) => [key, value || 0])),
-    duplicates,
     sourceCount: one("SELECT COUNT(*) AS n FROM sources").n,
-    lowBitrateKbps: LOW_BITRATE_KBPS,
   };
 }
 

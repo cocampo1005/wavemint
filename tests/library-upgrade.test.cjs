@@ -27,9 +27,9 @@ const {
 
 const needsAudio = { skip: SKIP_REASON };
 
-// --- Signals and statuses (no audio needed) ---------------------------------------
+// --- Comparison facts for Upgrade Track (no audio needed) ---------------------------
 
-test("quality signals are hints, and statuses follow them", () => {
+test("comparison signals describe files without judging songs", () => {
   const mp3 = { codec: "mp3", lossless: 0, bitrate: 128, sample_rate: 44100, duration_ms: 1000, status: "ok" };
   const flac = { codec: "flac", lossless: 1, bitrate: 900, sample_rate: 44100, bit_depth: 16, duration_ms: 1000, status: "ok" };
   assert.deepEqual(quality.fileSignals(mp3, null, { lowBitrateKbps: 160 }).map((item) => item.code), ["low_bitrate"]);
@@ -45,11 +45,8 @@ test("quality signals are hints, and statuses follow them", () => {
   assert.deepEqual(quality.fileSignals(flac, { ...clean, peak_db: 0, peak_count: 5000 }).map((item) => item.code), ["clipping"]);
   assert.deepEqual(quality.fileSignals(flac, { ...cutoff, band_mid_db: -95 }).map((item) => item.code), [], "silence says nothing");
 
-  assert.equal(quality.computedStatus({ reasons: [], checked: false }), "unknown");
-  assert.equal(quality.computedStatus({ reasons: [], checked: true }), "acceptable");
-  assert.equal(quality.computedStatus({ reasons: [{ level: 1 }], checked: true }), "acceptable", "minor hints alone don't ask for review");
-  assert.equal(quality.computedStatus({ reasons: [{ level: 2 }], checked: true }), "review_suggested");
-  assert.equal(quality.computedStatus({ reasons: [], checked: true, betterVersion: true }), "upgrade_available");
+  // Only comparison helpers remain: nothing rates or queues songs in the library.
+  assert.deepEqual(Object.keys(quality).sort(), ["describeFile", "fileSignals", "technicalTier"]);
 
   assert.ok(quality.technicalTier(flac) > quality.technicalTier({ ...mp3, bitrate: 320 }));
   assert.ok(quality.technicalTier({ ...mp3, codec: "aac", bitrate: 256 }) > quality.technicalTier({ ...mp3, bitrate: 192 }));
@@ -76,80 +73,6 @@ async function qualityLibrary(t) {
   const id = (title) => lib.db.prepare("SELECT id FROM tracks WHERE title = ?").get(title).id;
   return { ...lib, root, legacy, sourceId, id, media: mediaForTests() };
 }
-
-test("quality checks flag low-bitrate, transcoded and damaged files without touching them", needsAudio, async (t) => {
-  const lib = await qualityLibrary(t);
-  const before = snapshotFolder(lib.legacy);
-  quality.refreshQuality(lib.db);
-  const status = (title) => lib.db.prepare("SELECT quality_status, quality_reasons FROM tracks WHERE title = ?").get(title);
-  assert.equal(status("Low").quality_status, "review_suggested", "low bitrate is known before any check");
-  assert.equal(status("Lossless").quality_status, "unknown");
-
-  const report = await quality.checkJob(lib.db, lib.media, { logger: quietLogger });
-  assert.equal(report.checked, 5);
-  assert.deepEqual(snapshotFolder(lib.legacy), before, "checks only read");
-
-  const codes = (title) => JSON.parse(status(title).quality_reasons).reasons.map((item) => item.code);
-  assert.deepEqual(codes("Low"), ["low_bitrate", "cutoff"]);
-  assert.equal(status("Lossless").quality_status, "acceptable");
-  assert.deepEqual(codes("Transcoded"), ["hidden_cutoff"]);
-  assert.equal(status("Transcoded").quality_status, "review_suggested");
-  assert.equal(status("Good").quality_status, "acceptable");
-  assert.ok(codes("Damaged").includes("decode_errors"));
-
-  // Unchanged files aren't checked twice.
-  assert.equal((await quality.checkJob(lib.db, lib.media, { logger: quietLogger })).total, 0);
-  const summary = quality.qualitySummary(lib.db);
-  assert.equal(summary.checked, 5);
-  assert.equal(summary.counts.acceptable, 2);
-
-  const queue = quality.listQueue(lib.db, { view: "attention", sort: "bitrate" });
-  assert.deepEqual(queue.rows.map((row) => row.title), ["Low", "Transcoded", "Damaged"]);
-  assert.equal(quality.listQueue(lib.db, { view: "all", maxBitrate: 128 }).total, 1);
-});
-
-test("the user's quality decisions stick, and can be reset or undone", needsAudio, async (t) => {
-  const lib = await qualityLibrary(t);
-  quality.refreshQuality(lib.db);
-  const low = lib.id("Low");
-  const good = lib.id("Good");
-
-  const keep = quality.setQualityStatus(lib.db, { trackIds: [low], status: "keep_original" });
-  quality.setQualityStatus(lib.db, { trackIds: [good], status: "user_marked_poor" });
-  quality.refreshQuality(lib.db);
-  const read = (id) => lib.db.prepare("SELECT quality_status, quality_set_by FROM tracks WHERE id = ?").get(id);
-  assert.deepEqual({ ...read(low) }, { quality_status: "keep_original", quality_set_by: "user" });
-  assert.equal(read(good).quality_status, "user_marked_poor");
-  assert.equal(quality.listQueue(lib.db, { view: "keep_original" }).total, 1);
-
-  edits.undoMetadataOperation(lib.db, keep.operationId);
-  quality.refreshQuality(lib.db);
-  assert.deepEqual({ ...read(low) }, { quality_status: "review_suggested", quality_set_by: "auto" });
-
-  quality.setQualityStatus(lib.db, { trackIds: [good], status: "auto" });
-  assert.equal(read(good).quality_set_by, "auto");
-  assert.equal(read(good).quality_status, "unknown");
-});
-
-test("a lossless version elsewhere in the library is offered as an upgrade candidate", needsAudio, async (t) => {
-  const lib = await createTestLibrary(t);
-  const root = makeTempDir(t, "wavemint-music-");
-  makeTrack(path.join(root, "Curated"), "B/Song.mp3", { base: "noise_128", tags: { title: "Song", artist: "B", album: "X" } });
-  makeTrack(path.join(root, "Legacy"), "B/Song.flac", { base: "noise_flac", tags: { title: "Song", artist: "B", album: "X" } });
-  await addAndScan(lib.db, lib.scanner, path.join(root, "Curated"), { role: "curated" });
-  await addAndScan(lib.db, lib.scanner, path.join(root, "Legacy"), { role: "legacy" });
-
-  const merge = createMerge({ db: lib.db, contentHash, logger: quietLogger });
-  const { sessionId } = await merge.analyze();
-  merge.acceptSuggestions({ sessionId, categories: ["already_curated"] });
-  merge.apply({ sessionId });
-  quality.refreshQuality(lib.db);
-
-  const track = lib.db.prepare("SELECT * FROM tracks WHERE state = 'active'").get();
-  assert.equal(track.quality_status, "upgrade_available");
-  const reasons = JSON.parse(track.quality_reasons).reasons;
-  assert.match(reasons.find((item) => item.code === "better_version").text, /FLAC/);
-});
 
 // --- Upgrade Track ------------------------------------------------------------------
 
@@ -219,7 +142,6 @@ test("Upgrade Track compares, copies into the library, keeps curated metadata, a
   const restored = queries.getTrack(lib.db, low);
   assert.equal(restored.files.find((file) => file.id === restored.active_file_id).source_role, "legacy");
   assert.equal(restored.year, null);
-  assert.equal(restored.quality_status, "review_suggested");
   assert.equal(fs.existsSync(path.join(lib.managedRoot, "A", "Album", "01 Low.flac")), false, "the copy left the library's folders");
   const parked = Object.keys(snapshotFolder(lib.managedRoot));
   assert.equal(parked.length, 1);

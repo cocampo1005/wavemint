@@ -33,7 +33,7 @@ const { compareTracks } = require("./match.cjs");
 const { pathKey } = require("./normalize.cjs");
 const { addStep, finishOperation, logChange, startOperation, updateStep } = require("./operations.cjs");
 const { DEFAULT_PATTERN, planPaths } = require("./organize.cjs");
-const { describeFile, fileSignals, refreshQuality, technicalTier } = require("./quality.cjs");
+const { describeFile, fileSignals, technicalTier } = require("./quality.cjs");
 const { guessFromPath } = require("./scanner.cjs");
 const { refreshTrackSearch } = require("./search.cjs");
 const { retentionLabel } = require("./storage.cjs");
@@ -674,7 +674,6 @@ function createUpgrader({ db, media, artStore, managedSource, getSettings, logge
       finishOperation(db, undoId, "completed", { trackId });
     });
     refreshTrackSearch(db, [trackId]);
-    refreshQuality(db, { trackIds: [trackId], lowBitrateKbps: getSettings().lowBitrateKbps });
     return { operationId: undoId, tracks: 1 };
   }
 
