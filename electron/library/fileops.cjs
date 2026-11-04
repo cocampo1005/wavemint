@@ -85,6 +85,8 @@ function siblingPath(filePath, marker) {
 function comparable(field, value) {
   if (value === null || value === undefined || value === "") return null;
   if (field === "compilation") return value ? 1 : 0;
+  // Tags can't hold 0 for these: a file reads back "no value" (see readTags).
+  if (["year", "trackNo", "trackTotal", "discNo", "discTotal"].includes(field) && Number(value) === 0) return null;
   if (typeof value === "string") return value.replace(/\s+/g, " ").trim();
   return value;
 }
@@ -125,7 +127,7 @@ function createFileOps({ db, media, artStore, backupsRoot, logger = console }) {
    * What writing tags would do. Returns { writable, blocked } where each
    * writable item lists its field changes and blocked items say why.
    */
-  function previewTagWrite(trackIds = null) {
+  function previewTagWrite(trackIds = null, { forceFields = [] } = {}) {
     const writable = [];
     const blocked = [];
 
@@ -133,7 +135,8 @@ function createFileOps({ db, media, artStore, backupsRoot, logger = console }) {
       const snapshot = parseJson(row.tag_snapshot, {});
       const changes = tagDifferences(row, snapshot);
       const base = { trackId: row.id, title: row.title, artist: row.artist, fileId: row.file_id, path: row.path, source: row.source_name };
-      if (!changes.length) continue;
+      // A forced field (see writeOne) counts as a change for the songs asked for.
+      if (!changes.length && !(forceFields.length && trackIds)) continue;
 
       let reason = "";
       if (!row.file_id) reason = "No file";
@@ -168,7 +171,7 @@ function createFileOps({ db, media, artStore, backupsRoot, logger = console }) {
     return rows.find((row) => row.backup_path && fs.existsSync(row.backup_path))?.backup_path || null;
   }
 
-  async function writeOne(operationId, item, backupDir, { reuseBackupMs = 0 } = {}) {
+  async function writeOne(operationId, item, backupDir, { reuseBackupMs = 0, forceFields = [] } = {}) {
     const file = db
       .prepare("SELECT f.*, s.read_only FROM files f JOIN sources s ON s.id = f.source_id WHERE f.id = ?")
       .get(item.fileId);
@@ -214,7 +217,9 @@ function createFileOps({ db, media, artStore, backupsRoot, logger = console }) {
       // exactly as it was.
       fs.rmSync(staged, { force: true });
       fs.copyFileSync(target, staged);
-      const differences = new Set(tagDifferences(track, parseJson(file.tag_snapshot, {})).map((change) => change.field));
+      // `forceFields` are rewritten even when they read back the same (e.g. a
+      // genre stored as a number "(145)" reads as "Anime" but needs storing as text).
+      const differences = new Set([...tagDifferences(track, parseJson(file.tag_snapshot, {})).map((change) => change.field), ...forceFields]);
       const fields = {};
       for (const [field, def] of TAG_FIELDS) if (differences.has(field)) fields[field] = track[def.column];
       if (track.artwork_hash && differences.has("artwork")) {
@@ -304,8 +309,8 @@ function createFileOps({ db, media, artStore, backupsRoot, logger = console }) {
    * and lets it reuse a recent backup of the same file.
    * Returns { written, failed, blocked, operationId, results: [{ trackId, ok, error? }] }.
    */
-  async function writeTagsJob({ trackIds = null, signal, progress, partOf = null, reuseBackupMs = 0 } = {}) {
-    const { writable, blocked } = previewTagWrite(trackIds);
+  async function writeTagsJob({ trackIds = null, signal, progress, partOf = null, reuseBackupMs = 0, forceFields = [] } = {}) {
+    const { writable, blocked } = previewTagWrite(trackIds, { forceFields });
     if (!writable.length) return { written: 0, failed: 0, blocked: blocked.length, operationId: null, results: [] };
 
     const files = `${writable.length} file${writable.length === 1 ? "" : "s"}`;
@@ -320,7 +325,7 @@ function createFileOps({ db, media, artStore, backupsRoot, logger = console }) {
     for (const [index, item] of writable.entries()) {
       if (signal?.aborted) break;
       progress?.({ phase: "writing", done: index, total: writable.length, current: item.title });
-      const result = await writeOne(operationId, item, backupDir, { reuseBackupMs });
+      const result = await writeOne(operationId, item, backupDir, { reuseBackupMs, forceFields });
       results.push({ trackId: item.trackId, ...result });
     }
 

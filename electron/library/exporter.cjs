@@ -84,7 +84,7 @@ function createExporter({ db, media, artStore, getSettings = () => ({}), logger 
       ? db
           .prepare(
             `SELECT t.*, COALESCE(t.artwork_hash, f.artwork_hash) AS effective_art, f.id AS file_id, f.path, f.ext, f.size, f.mtime_ms,
-                    f.codec, f.lossless, f.bitrate, f.status AS file_status
+                    f.codec, f.lossless, f.bitrate, f.audio_hash, f.status AS file_status
              FROM tracks t LEFT JOIN files f ON f.id = t.active_file_id
              WHERE t.state = 'active' AND t.id IN (${ids.map(() => "?").join(",")})
              ORDER BY t.album_artist COLLATE NOCASE, t.album COLLATE NOCASE, t.disc_no, t.track_no`,
@@ -115,8 +115,11 @@ function createExporter({ db, media, artStore, getSettings = () => ({}), logger 
       let status = "new";
       if (previous) {
         const missing = !fs.existsSync(path.join(resolved, previous.rel_path));
+        // The same audio in a rewritten file (a tag write changes its size and
+        // time) isn't a new version: only its details are refreshed.
+        const sameAudio = !!previous.audio_hash && previous.audio_hash === track.audio_hash && previous.file_id === track.file_id;
         if (missing) status = "new";
-        else if (previous.file_sig !== fileSig || previous.format !== format) status = "replace";
+        else if (previous.format !== format || (previous.file_sig !== fileSig && !sameAudio)) status = "replace";
         else if (previous.meta_sig !== sig) status = "refresh";
         else status = "unchanged";
       }
@@ -193,17 +196,26 @@ function createExporter({ db, media, artStore, getSettings = () => ({}), logger 
     const temp = siblingPath(target, "wmtmp");
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.rmSync(temp, { force: true });
-    if (item.action === "convert") await media.convertToAlac(item.sourcePath, temp, { signal });
-    else fs.copyFileSync(item.sourcePath, temp);
+
+    const fields = Object.fromEntries(TAG_FIELDS.map(([field, def]) => [field, item.track[def.column]]));
+    const art = item.track.artwork_hash
+      ? artStore.read(item.track.artwork_hash, db)
+      : item.action === "convert" && item.track.effective_art
+        ? artStore.read(item.track.effective_art, db)
+        : null;
+    if (art) fields.artwork = art;
+
+    // Only the tags or artwork changed: the earlier export already holds the
+    // right audio, so it's re-tagged instead of converted again.
+    if (item.status === "refresh" && item.action === "convert" && art && item.relPath === item.previousRelPath && fs.existsSync(target)) {
+      fs.copyFileSync(target, temp);
+    } else if (item.action === "convert") {
+      await media.convertToAlac(item.sourcePath, temp, { signal });
+    } else {
+      fs.copyFileSync(item.sourcePath, temp);
+    }
 
     if (canWriteTags(temp)) {
-      const fields = Object.fromEntries(TAG_FIELDS.map(([field, def]) => [field, item.track[def.column]]));
-      const art = item.track.artwork_hash ? artStore.read(item.track.artwork_hash, db) : null;
-      if (art) fields.artwork = art;
-      else if (item.action === "convert" && item.track.effective_art) {
-        const embedded = artStore.read(item.track.effective_art, db);
-        if (embedded) fields.artwork = embedded;
-      }
       const before = await media.audioStreamHash(temp);
       writeTags(temp, fields);
       if ((await media.audioStreamHash(temp)) !== before) throw new Error("The audio stream changed while writing tags");
@@ -219,6 +231,17 @@ function createExporter({ db, media, artStore, getSettings = () => ({}), logger 
       throw error;
     }
     if (old) fs.rmSync(old, { force: true });
+  }
+
+  /** Sets an export file aside in `.replaced/` (never deletes it). */
+  function setAside(root, relPath) {
+    const from = path.join(root, relPath);
+    if (!fs.existsSync(from)) return null;
+    let aside = path.join(root, ".replaced", relPath);
+    fs.mkdirSync(path.dirname(aside), { recursive: true });
+    if (fs.existsSync(aside)) aside = siblingPath(aside, "old");
+    fs.renameSync(from, aside);
+    return aside;
   }
 
   function writeSidecars(root, result, done, playlistIds) {
@@ -275,7 +298,27 @@ function createExporter({ db, media, artStore, getSettings = () => ({}), logger 
     const needed = work.reduce((sum, item) => sum + item.size, 0);
     if (free !== null && free < needed * 1.05) throw new Error("There isn't enough free space in the export folder.");
 
-    const done = { new: [], replace: [], refresh: [], failed: [] };
+    // A quiet run with nothing to write leaves no trace (no report, no record).
+    if (options.skipIfUnchanged && !work.length) {
+      return {
+        exportId: null,
+        root: resolved,
+        new: 0,
+        replace: 0,
+        refresh: 0,
+        unchanged: result.items.filter((item) => item.status === "unchanged").length,
+        problems: result.items.filter((item) => item.status === "problem").map((item) => ({ trackId: item.trackId, title: item.title, problems: item.problems })),
+        failed: [],
+        removed: result.removed.length,
+        playlists: [],
+        changedFiles: [],
+        regenerated: [],
+        superseded: [],
+        cancelled: false,
+      };
+    }
+
+    const done = { new: [], replace: [], refresh: [], failed: [], superseded: [] };
     for (const [index, item] of work.entries()) {
       if (signal?.aborted) break;
       progress?.({ phase: "exporting", done: index, total: work.length, current: item.title });
@@ -283,17 +326,18 @@ function createExporter({ db, media, artStore, getSettings = () => ({}), logger 
         const target = path.join(resolved, item.relPath);
         // A replaced song whose format changed gets a new name; the old
         // file is kept aside, never deleted.
-        if (item.previousRelPath && item.previousRelPath !== item.relPath && fs.existsSync(path.join(resolved, item.previousRelPath))) {
-          const aside = path.join(resolved, ".replaced", item.previousRelPath);
-          fs.mkdirSync(path.dirname(aside), { recursive: true });
-          fs.renameSync(path.join(resolved, item.previousRelPath), aside);
-        }
+        // With `keepPrevious` (Apple sync) it stays where it is until the
+        // caller has moved Apple's library over to the new file.
+        const moved = item.previousRelPath && item.previousRelPath !== item.relPath && fs.existsSync(path.join(resolved, item.previousRelPath));
+        if (moved && !options.keepPrevious) setAside(resolved, item.previousRelPath);
         await produce(item, target, { signal });
+        const audioHash = item.track.audio_hash || (await media.audioStreamHash(item.sourcePath).catch(() => null));
+        if (moved && options.keepPrevious) done.superseded.push({ trackId: item.trackId, relPath: item.previousRelPath });
         db.prepare(
-          `INSERT INTO export_state (root_key, track_id, rel_path, file_id, file_sig, meta_sig, format, exported_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO export_state (root_key, track_id, rel_path, file_id, file_sig, meta_sig, format, exported_at, audio_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(root_key, track_id) DO UPDATE SET rel_path = excluded.rel_path, file_id = excluded.file_id, file_sig = excluded.file_sig,
-             meta_sig = excluded.meta_sig, format = excluded.format, exported_at = excluded.exported_at`,
-        ).run(rootKey, item.trackId, item.relPath, item.track.file_id, item.fileSig, item.metaSig, item.format, nowIso());
+             meta_sig = excluded.meta_sig, format = excluded.format, exported_at = excluded.exported_at, audio_hash = excluded.audio_hash`,
+        ).run(rootKey, item.trackId, item.relPath, item.track.file_id, item.fileSig, item.metaSig, item.format, nowIso(), audioHash);
         done[item.status].push({ trackId: item.trackId, relPath: item.relPath, title: item.title });
       } catch (error) {
         done.failed.push({ trackId: item.trackId, title: item.title, error: error.message });
@@ -309,11 +353,13 @@ function createExporter({ db, media, artStore, getSettings = () => ({}), logger 
       replace: done.replace.length,
       refresh: done.refresh.length,
       unchanged: result.items.filter((item) => item.status === "unchanged").length,
-      problems: result.items.filter((item) => item.status === "problem").map((item) => ({ title: item.title, problems: item.problems })).slice(0, 100),
+      problems: result.items.filter((item) => item.status === "problem").map((item) => ({ trackId: item.trackId, title: item.title, problems: item.problems })).slice(0, 100),
       failed: done.failed,
+      superseded: done.superseded,
       removed: result.removed.length,
       playlists: sidecars.playlists,
       changedFiles: [...done.new, ...done.replace, ...done.refresh].map((item) => item.relPath),
+      regenerated: [...done.new, ...done.replace, ...done.refresh].map((item) => item.trackId),
       cancelled: !!signal?.aborted,
     };
     const id = Number(
@@ -386,7 +432,7 @@ function createExporter({ db, media, artStore, getSettings = () => ({}), logger 
     return { copied, failures, folder: resolved };
   }
 
-  return { checkRoot, exportJob, findAutoAddFolders, handOff, lastExport, plan, preview, scopeTrackIds };
+  return { checkRoot, exportJob, findAutoAddFolders, handOff, lastExport, metaSig, plan, preview, scopeTrackIds, setAside };
 }
 
 module.exports = { AUTO_ADD, createExporter };

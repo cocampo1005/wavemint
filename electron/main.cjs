@@ -42,8 +42,36 @@ const ALLOWED_PERMISSIONS = new Set(["fullscreen"]);
 // Development runs keep their own settings so experimenting never touches an
 // installed copy's configuration (an explicit --user-data-dir, as tests use,
 // wins). Must run before the app is ready.
-if (!app.isPackaged && !app.commandLine.hasSwitch("user-data-dir")) {
+//
+// `--wavemint-profile=installed` (npm run start:library) is the explicit
+// opt-in for a development run to open the installed copy's profile, i.e. the
+// real library. Two apps must never share one library database, so this is
+// refused while the installed WaveMint is running.
+const USE_INSTALLED_PROFILE = !app.isPackaged && app.commandLine.getSwitchValue("wavemint-profile") === "installed";
+if (USE_INSTALLED_PROFILE) {
+  if (installedAppRunning()) {
+    // Electron's dialog module works before "ready" only for this error box.
+    require("electron").dialog.showErrorBox(
+      "WaveMint is already running",
+      "Close the installed WaveMint (including from the system tray) before starting the development build with your real library. Two copies must never use the same library database.",
+    );
+    app.exit(1);
+  }
+  app.setPath("userData", path.join(app.getPath("appData"), "WaveMint"));
+} else if (!app.isPackaged && !app.commandLine.hasSwitch("user-data-dir")) {
   app.setPath("userData", path.join(app.getPath("appData"), "WaveMint-Dev"));
+}
+
+/** Whether the installed WaveMint (WaveMint.exe) is running. */
+function installedAppRunning() {
+  if (process.platform !== "win32") return false;
+  try {
+    const output = require("child_process").execFileSync("tasklist", ["/FI", "IMAGENAME eq WaveMint.exe", "/FO", "CSV", "/NH"], { encoding: "utf8", windowsHide: true, timeout: 15000 });
+    return /"WaveMint\.exe"/i.test(output);
+  } catch {
+    // If it can't be checked, assume the worst.
+    return true;
+  }
 }
 
 // Custom protocols for library audio and artwork (before the app is ready).

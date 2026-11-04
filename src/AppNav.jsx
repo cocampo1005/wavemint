@@ -53,7 +53,7 @@ const NAV_GROUPS = [
     items: [
       { id: "sources", label: "Sources", Icon: SourceIcon },
       { id: "managed", label: "WaveMint Library", Icon: FolderOpenIcon },
-      { id: "iphone", label: "Prepare for iPhone", Icon: PhoneIcon },
+      { id: "iphone", label: "Apple Library Sync", Icon: PhoneIcon },
       { id: "history", label: "History", Icon: HistoryIcon },
       { id: "storage", label: "Storage", Icon: StorageIcon },
     ],

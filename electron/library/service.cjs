@@ -3,6 +3,7 @@
 // worker. Methods receive already-validated parameters (see host.cjs).
 
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const { createArtStore } = require("./artstore.cjs");
 const { createAudioEditor } = require("./audioedit.cjs");
@@ -23,6 +24,10 @@ const { createUpgrader } = require("./upgrade.cjs");
 const { createIdentifier } = require("./identify.cjs");
 const { createImporter } = require("./importer.cjs");
 const { createExporter } = require("./exporter.cjs");
+const { createAppleMigration } = require("./applemigrate.cjs");
+const { createAppleSync } = require("./applesync.cjs");
+const { createItunesAdapter } = require("./itunes.cjs");
+const formats = require("./formats.cjs");
 const { createRemoval } = require("./removal.cjs");
 const { DEFAULT_RETENTION, createStorage } = require("./storage.cjs");
 const playlists = require("./playlists.cjs");
@@ -38,13 +43,22 @@ const SETTINGS_DEFAULTS = {
   exportRoot: "",
   convertWavAiff: true,
   appleAutoAddFolder: "",
+  // Apple synchronization (applesync.cjs): "itunes" drives classic iTunes;
+  // "files" only keeps the Apple Library folder (Apple Music for Windows).
+  appleDestination: "itunes",
+  appleAutoSync: false,
+  // What happens to an iTunes entry when its song leaves WaveMint:
+  // "confirm" (ask each time), "auto" (small batches only), "keep" (stop managing it).
+  appleRemovalPolicy: "confirm",
+  // Where converted copies of files iTunes can't play (FLAC…) are kept; empty = WaveMint's data folder.
+  appleCompatRoot: "",
   musicBrainzEnabled: false,
   // How long previous versions and tag-write backups are kept (storage.cjs).
   keepPreviousVersions: DEFAULT_RETENTION,
   autoCleanup: true,
 };
 
-function createLibraryService({ db, media, jobs, paths, logger = console, emit = () => {}, appVersion = "dev", fetchImpl }) {
+function createLibraryService({ db, media, jobs, paths, logger = console, emit = () => {}, appVersion = "dev", fetchImpl, appleAdapter = null }) {
   const scanner = createScanner({ db, probe: media?.probe, logger });
   const artStore = createArtStore(path.join(paths.dataDir, "artwork-store"));
   const fileOps = createFileOps({ db, media, artStore, backupsRoot: paths.backupsDir, logger });
@@ -180,8 +194,94 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
     };
   }
 
+  // --- Apple library synchronization ------------------------------------------------
+  // The Apple Library folder is the export folder (exporter.cjs); iTunes follows it
+  // (applesync.cjs). A change to the collection only records that sync work exists;
+  // the sync itself runs once edits settle, never in the middle of a file operation.
+  const adapter = appleAdapter || createItunesAdapter({ workDir: path.join(paths.dataDir, "apple"), logger });
+  // iTunes only ever receives the real library: never a test library in the
+  // temporary folder (WAVEMINT_ALLOW_TEMP_LIBRARY=1 overrides, for experiments),
+  // and never one whose folder isn't there.
+  function libraryRootCheck() {
+    // The folders the library's songs actually live in (the WaveMint Library and any other source).
+    const roots = db
+      .prepare(
+        `SELECT DISTINCT s.root_path FROM sources s JOIN files f ON f.source_id = s.id JOIN tracks t ON t.active_file_id = f.id
+         WHERE t.state = 'active'`,
+      )
+      .all()
+      .map((row) => row.root_path);
+    const root = consolidator.managedSource()?.root_path || roots[0] || null;
+    if (!roots.length) return { ok: false, root, roots, code: "no-library", reason: "The library has no songs to sync yet." };
+    const temp = path.resolve(os.tmpdir()).toLowerCase();
+    const inTemp = roots.find((item) => {
+      const resolved = path.resolve(item).toLowerCase();
+      return resolved === temp || resolved.startsWith(`${temp}${path.sep}`);
+    });
+    if (inTemp && process.env.WAVEMINT_ALLOW_TEMP_LIBRARY !== "1") {
+      return { ok: false, root, roots, code: "test-library", reason: `Songs of this library are in the temporary folder (${inTemp}): it looks like a test library, so it isn't synced into iTunes.` };
+    }
+    const missing = roots.find((item) => !fs.existsSync(item));
+    if (missing) return { ok: false, root, roots, code: "library-unavailable", reason: `A library folder isn't available: ${missing}` };
+    return { ok: true, root, roots };
+  }
+  function assertRealLibrary() {
+    const check = libraryRootCheck();
+    if (!check.ok) {
+      const error = new Error(check.reason);
+      error.code = check.code;
+      throw error;
+    }
+  }
+
+  const appleSync = createAppleSync({
+    assertWritable: assertRealLibrary,
+    db,
+    exporter,
+    getAdapter: () => adapter,
+    getSettings,
+    getLibraryRoot: () => consolidator.managedSource()?.root_path || getSettings().managedRoot || null,
+    defaultCacheRoot: path.join(paths.dataDir, "apple-compat"),
+    isQuiet: () => pendingWrites.size === 0 && !DEFERRING_JOBS.has(jobs.runningKind?.()),
+    logger,
+    emit,
+  });
+  const appleMigration = createAppleMigration({ db, sync: appleSync, getAdapter: () => adapter, paths, logger });
+  const APPLE_JOB_KINDS = new Set(["scan", "write-tags", "consolidate", "upgrade", "import", "audio-edit", "identify"]);
+  appleSync.start();
+
+  // Apple work is never exclusive (it must not block the user's other tasks), but
+  // only one piece of it runs at a time.
+  let appleJobs = 0;
+  function appleJob(kind, label, work) {
+    if (appleJobs > 0 || appleSync.isRunning()) {
+      const error = new Error("Wait for the current Apple sync task to finish first.");
+      error.code = "busy";
+      throw error;
+    }
+    appleJobs += 1;
+    try {
+      return jobs.start(
+        kind,
+        label,
+        async (context) => {
+          try {
+            return await work(context);
+          } finally {
+            appleJobs -= 1;
+          }
+        },
+        { exclusive: false },
+      );
+    } catch (error) {
+      appleJobs -= 1;
+      throw error;
+    }
+  }
+
   // Writes that waited for a task are made when it finishes.
-  jobs.onSettled?.(() => {
+  jobs.onSettled?.((job) => {
+    if (job?.status === "completed" && APPLE_JOB_KINDS.has(job.kind)) appleSync.touch();
     if (!pendingWrites.size || jobs.isBusy()) return;
     const ids = [...pendingWrites];
     pendingWrites.clear();
@@ -774,6 +874,72 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
       return { folder: path.resolve(folder) };
     },
 
+    // --- Apple library synchronization -------------------------------------------------
+    // What this app is working with: its profile, its library, and the iTunes bridge (never a stand-in in the app).
+    getAppleSync: () => ({ ...appleSync.status(), profileDir: path.dirname(paths.dataDir), libraryCheck: libraryRootCheck(), bridge: adapter.kind }),
+    detectApple: () => adapter.detect(),
+    // Reading iTunes can take a while: these run as background jobs.
+    previewAppleSync: () => appleJob("apple-preview", "Checking iTunes", ({ signal }) => appleSync.preview({ launch: true, signal })),
+    runAppleSync: ({ confirm = {}, trackIds }) =>
+      appleJob("apple-sync", "Syncing with iTunes", ({ signal, progress }) => appleSync.run({ mode: "manual", confirm, only: trackIds?.length ? trackIds : null, signal, progress })),
+    // A first test with a few songs (some MP3, some AAC, with artwork where possible).
+    appleTestSync: ({ count }) => {
+      assertRealLibrary();
+      // Songs whose files really are on disk, some MP3 and some AAC, with artwork where possible.
+      const pick = (codec, limit) =>
+        db
+          .prepare(
+            `SELECT t.id, f.path FROM tracks t JOIN files f ON f.id = t.active_file_id
+             WHERE t.state = 'active' AND f.status = 'ok' AND f.codec = ? AND t.tags_dirty = 0
+             ORDER BY (COALESCE(t.artwork_hash, f.artwork_hash) IS NULL), t.id LIMIT ?`,
+          )
+          .all(codec, limit * 10)
+          .filter((row) => fs.existsSync(row.path))
+          .slice(0, limit)
+          .map((row) => row.id);
+      const wanted = Math.min(Math.max(Number(count) || 5, 1), 25);
+      const aac = pick("aac", Math.floor(wanted / 2));
+      const ids = [...aac, ...pick("mp3", wanted - aac.length)];
+      if (!ids.length) throw new Error("No song in the library has its file on disk to test with. Check File Health.");
+      return appleJob("apple-sync", `Testing iTunes sync with ${ids.length} songs`, ({ signal, progress }) =>
+        appleSync.run({ mode: "manual", confirm: { baseline: true }, only: ids, signal, progress }).then((report) => ({ ...report, testTrackIds: ids })),
+      );
+    },
+    retryAppleFailures: ({ trackIds }) => appleSync.resetFailures(trackIds?.length ? trackIds : null),
+    acceptAppleDetails: ({ trackIds }) => appleSync.acceptItunesDetails(trackIds),
+    confirmAppleSetup: ({ confirmed }) => {
+      appleSync.patchMeta({ setupConfirmed: !!confirmed });
+      return { confirmed: !!confirmed };
+    },
+    backupItunes: () => appleJob("apple-backup", "Backing up the iTunes library", ({ signal }) => appleMigration.backup({ signal })),
+    analyzeAppleMigration: () => appleJob("apple-migration", "Comparing iTunes with your library", ({ signal, progress }) => appleMigration.analyze({ signal, progress })),
+    applyAppleMigration: ({ resolutions, dryRun, backupAck }) => {
+      if (dryRun === false) assertRealLibrary();
+      return appleJob("apple-migration", dryRun === false ? "Migrating to WaveMint-managed iTunes" : "Previewing the migration", ({ signal, progress }) =>
+        appleMigration.apply({ resolutions: resolutions || {}, dryRun: dryRun !== false, backupAck: !!backupAck, signal, progress }),
+      );
+    },
+    verifyAppleLibrary: () => appleJob("apple-verify", "Verifying the iTunes library", ({ signal }) => appleMigration.verify({ signal })),
+    cleanUpAppleLibrary: ({ pids, includeSuperseded, expected, backupAck }) =>
+      appleJob("apple-cleanup", "Removing old iTunes entries", ({ signal, progress }) =>
+        appleMigration.cleanup({ pids: pids || [], includeSuperseded: includeSuperseded !== false, expected, backupAck: !!backupAck, signal, progress }),
+      ),
+
+    // --- formats and missing files -----------------------------------------------------
+    getFormatStats: () => formats.formatStats(db, { convertWavAiff: getSettings().convertWavAiff !== false }),
+    listMissingFiles: () => formats.listMissingFiles(db),
+    // Stores the genre of these songs' files as text (Write Tags with the genre always rewritten).
+    storeGenresAsText: ({ trackIds }) =>
+      jobs.start("write-tags", "Storing genres as text", ({ signal, progress }) => fileOps.writeTagsJob({ trackIds, signal, progress, forceFields: ["genre"] })),
+    // Read-only: MP3s whose genre is stored as a number.
+    scanNumericGenres: () => jobs.start("genre-scan", "Checking how genres are stored", ({ signal, progress }) => formats.numericGenreScan(db, { signal, progress }), { exclusive: false }),
+    forgetMissingFile: ({ fileId }) => formats.forgetMissingFile(db, { fileId }),
+    // Host only: the file comes from a main-process dialog.
+    relinkMissingFile: ({ fileId, filePath }) => {
+      requireIdle();
+      return formats.relinkMissingFile(db, { fileId, filePath });
+    },
+
     // --- genres ------------------------------------------------------------------
     listGenreTaxonomy: () => genres.listTaxonomy(db),
     genreReport: () => genres.genreReport(db),
@@ -846,7 +1012,25 @@ function createLibraryService({ db, media, jobs, paths, logger = console, emit =
     getPaths: () => paths,
   };
 
-  return { methods, getSettings };
+  // Every change to the collection tells the Apple sync that there may be work.
+  const APPLE_TOUCH_METHODS = [
+    "saveTrack", "applyEdits", "editAlbum", "setArtworkFromPath", "copyArtwork", "clearArtwork", "undoOperation", "applyMerge",
+    "applyIdentification", "applyConfidentIdentifications", "applyAlbumIdentification", "commitStagedExtraction", "removeFromLibrary",
+    "finishFileDeletion", "createPlaylist", "updatePlaylist", "deletePlaylist", "addToPlaylist", "removeFromPlaylist", "movePlaylistTrack",
+    "importPlaylistM3U", "renameGenre", "mergeGenres", "applyGenreRules", "approveSuggestions", "setQualityStatus",
+    "forgetMissingFile", "relinkMissingFile",
+  ];
+  for (const name of APPLE_TOUCH_METHODS) {
+    const original = methods[name];
+    if (typeof original !== "function") continue;
+    methods[name] = async (...args) => {
+      const result = await original(...args);
+      appleSync.touch();
+      return result;
+    };
+  }
+
+  return { methods, getSettings, appleSync, appleMigration };
 }
 
 module.exports = { SETTINGS_DEFAULTS, createLibraryService };

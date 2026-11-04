@@ -752,8 +752,9 @@ Nothing in these steps changes your iTunes or curated folders.
    enough space), check the naming preview, then **Copy N Songs…**. Each song
    is copied once from its best source, verified, and gets your edited tags.
    Your original folders stay as a backup.
-6. **Prepare for iPhone**: choose an export folder, check what's changed,
-   prepare, then follow the in-app steps (or Send to Apple Music) and sync the
-   iPhone with the Apple Devices app.
+6. **Apple Library Sync** (formerly Prepare for iPhone): choose the Apple Library
+   folder and follow the guided migration in `docs/APPLE_SYNC.md`; from then on
+   WaveMint keeps classic iTunes in step and you sync the iPhone in iTunes.
+   (With the Apple Music app for Windows only the folder is kept up to date.)
 
 Rescan sources any time from **Sources**; songs you edited keep your edits.

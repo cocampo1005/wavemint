@@ -491,6 +491,85 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 9,
+    name: "Apple library synchronization state",
+    up(db) {
+      db.exec(`
+        -- The audio fingerprint of the source file an export was made from, so
+        -- a tag write (which changes size and time) isn't mistaken for a new
+        -- version of the audio.
+        ALTER TABLE export_state ADD COLUMN audio_hash TEXT;
+
+        -- What each iTunes library holds for each WaveMint song. WaveMint's
+        -- song ID is the identity; paths and titles only describe it. A row
+        -- exists only for entries WaveMint created or was told to adopt.
+        CREATE TABLE apple_sync_tracks (
+          library_id     TEXT NOT NULL,
+          track_id       INTEGER NOT NULL,
+          pid            TEXT,
+          location       TEXT,
+          rel_path       TEXT,
+          format         TEXT,
+          audio_hash     TEXT,
+          file_sig       TEXT,
+          meta_sig       TEXT,
+          itunes_sig     TEXT,
+          origin         TEXT NOT NULL DEFAULT 'created' CHECK (origin IN ('created', 'adopted')),
+          status         TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('synced', 'pending', 'failed', 'review', 'removed')),
+          attempts       INTEGER NOT NULL DEFAULT 0,
+          last_error     TEXT,
+          last_synced_at TEXT,
+          -- iTunes entries this song replaced, kept (not deleted) until the
+          -- guided migration's cleanup step has verified the new library.
+          legacy_pids    TEXT,
+          updated_at     TEXT NOT NULL,
+          PRIMARY KEY (library_id, track_id)
+        );
+        CREATE INDEX apple_sync_pid ON apple_sync_tracks(library_id, pid);
+
+        CREATE TABLE apple_sync_playlists (
+          library_id     TEXT NOT NULL,
+          playlist_id    INTEGER NOT NULL,
+          pid            TEXT,
+          name           TEXT,
+          items_sig      TEXT,
+          status         TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('synced', 'pending', 'failed', 'removed')),
+          last_error     TEXT,
+          last_synced_at TEXT,
+          updated_at     TEXT NOT NULL,
+          PRIMARY KEY (library_id, playlist_id)
+        );
+
+        CREATE TABLE apple_sync_runs (
+          id          INTEGER PRIMARY KEY,
+          library_id  TEXT,
+          kind        TEXT NOT NULL,
+          started_at  TEXT NOT NULL,
+          finished_at TEXT,
+          status      TEXT NOT NULL,
+          report      TEXT
+        );
+      `);
+    },
+  },
+  {
+    version: 10,
+    name: "Apple sync plays the library's own files (direct reference)",
+    up(db) {
+      db.exec(`
+        -- What iTunes should play for a song: the library's own file
+        -- (mode 'direct') or a converted copy in the compatibility cache
+        -- (mode 'converted'), and which library file it came from. Rows from
+        -- before direct reference have no target_path: the next sync points
+        -- their iTunes entries at the library files (same entry, no new copy).
+        ALTER TABLE apple_sync_tracks ADD COLUMN target_path TEXT;
+        ALTER TABLE apple_sync_tracks ADD COLUMN mode TEXT;
+        ALTER TABLE apple_sync_tracks ADD COLUMN source_file_id INTEGER;
+        CREATE INDEX apple_sync_target ON apple_sync_tracks(library_id, target_path);
+      `);
+    },
+  },
 ];
 
 module.exports = { MIGRATIONS };

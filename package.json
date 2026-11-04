@@ -17,6 +17,7 @@
     "dev": "vite",
     "electron": "electron .",
     "start": "concurrently \"npm run dev\" \"npm run electron\"",
+    "start:library": "concurrently \"npm run dev\" \"electron . --wavemint-profile=installed\"",
     "build": "vite build",
     "lint": "eslint .",
     "test": "node --test \"tests/*.test.*\"",

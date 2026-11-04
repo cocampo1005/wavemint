@@ -4171,3 +4171,123 @@ button.lib-stat:hover {
 .lib-combo__list > .lib-combo__option + .lib-combo__create { border-top: 1px solid var(--wm-border); border-radius: 0 0 6px 6px; }
 .lib-combo__empty { padding: 18px 10px; color: var(--wm-text-muted); }
 .lib-combo__hint { padding: 10px 14px; border-top: 1px solid var(--wm-border); color: var(--wm-text-muted); font-size: 11px; }
+
+/* --- Apple Library Sync ---------------------------------------------------------- */
+.lib-iphone__confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wm-space-1);
+  margin-top: var(--wm-space-3);
+  padding: var(--wm-space-3);
+  border: 1px solid var(--wm-border);
+  border-radius: var(--wm-radius-md, 8px);
+}
+
+.lib-apple-migration {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wm-space-3);
+}
+
+.lib-apple-migration__steps {
+  margin: 0;
+  padding-left: var(--wm-space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--wm-space-3);
+  list-style: none;
+  padding-left: 0;
+}
+
+.lib-iphone .lib-edit__bool select.field {
+  width: auto;
+  min-width: 320px;
+  max-width: 100%;
+}
+
+/* --- File Health: audio formats and missing files ------------------------------------- */
+.lib-formats {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wm-space-3);
+}
+
+.lib-formats__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--wm-text-sm);
+}
+
+.lib-formats__table th,
+.lib-formats__table td {
+  padding: var(--wm-space-2) var(--wm-space-3);
+  border-bottom: 1px solid var(--wm-border);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.lib-formats__table thead th {
+  color: var(--wm-text-muted);
+  font-weight: 600;
+}
+
+.lib-formats__table .is-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.lib-formats__table tr.is-on th,
+.lib-formats__table tr.is-on td {
+  background: rgba(127, 127, 127, 0.08);
+}
+
+.lib-formats__table tfoot th,
+.lib-formats__table tfoot td {
+  border-bottom: none;
+  font-weight: 600;
+}
+
+.lib-formats__share {
+  display: flex;
+  align-items: center;
+  gap: var(--wm-space-3);
+  min-width: 0;
+}
+
+.lib-formats__bar {
+  flex: 1 1 120px;
+  min-width: 80px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--wm-border);
+  overflow: hidden;
+}
+
+.lib-formats__bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--wm-gradient-progress);
+}
+
+.lib-formats__pct {
+  color: var(--wm-text-muted);
+  white-space: nowrap;
+}
+
+.lib-health-missing__path {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--wm-text-xs, 12px);
+  color: var(--wm-text-muted);
+}
+
+@media (max-width: 760px) {
+  .lib-formats__pct {
+    display: none;
+  }
+}

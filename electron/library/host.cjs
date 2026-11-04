@@ -11,7 +11,7 @@ const { Readable } = require("stream");
 const { readMediaBytes } = require("./mediaBytes.cjs");
 const { Worker } = require("worker_threads");
 const { CATEGORY_IDS, isInsideRoots } = require("./storage.cjs");
-const { v, validate } = require("./validate.cjs");
+const { ValidationError, v, validate } = require("./validate.cjs");
 
 const MEDIA_SCHEME = "wavemint-media";
 const ART_SCHEME = "wavemint-art";
@@ -126,6 +126,21 @@ const exportScope = v.obj(
   },
   { optional: false },
 );
+// A confirmation for Apple sync: everything of that kind, or only these songs.
+const flagOrIds = () => (value, name) => {
+  if (value === undefined || value === null || value === false) return undefined;
+  if (value === true) return true;
+  return v.array(id(), { max: 5000 })(value, name);
+};
+const appleConfirm = v.obj({
+  removals: flagOrIds(),
+  recreate: flagOrIds(),
+  conflicts: flagOrIds(),
+  bulk: v.bool(),
+  retry: v.bool(),
+  newLibrary: v.bool(),
+  baseline: v.bool(),
+});
 const extractionToken = (options = {}) => v.str({ max: 32, allowEmpty: false, ...options });
 const MAX_LENGTH_MS = 24 * 3600 * 1000;
 const audioEdits = (options = {}) =>
@@ -232,6 +247,9 @@ const WORKER_METHODS = {
         autoCleanup: v.bool(),
         preferOriginalReleases: v.bool(),
         convertWavAiff: v.bool(),
+        appleDestination: v.oneOf(["itunes", "files"]),
+        appleAutoSync: v.bool(),
+        appleRemovalPolicy: v.oneOf(["confirm", "auto", "keep"]),
       },
       { optional: false },
     ),
@@ -363,6 +381,47 @@ const WORKER_METHODS = {
   exportForIphone: { scope: exportScope, allPlaylists: v.bool() },
   handOffToApple: { exportId: id(), folder: v.str({ max: 1000, optional: false }) },
 
+  // Apple library synchronization (the Apple Library folder is chosen with chooseExportRoot).
+  getAppleSync: {},
+  detectApple: {},
+  previewAppleSync: {},
+  runAppleSync: { confirm: appleConfirm, trackIds: trackIdList() },
+  appleTestSync: { count: v.int({ min: 1, max: 25, optional: true }) },
+  retryAppleFailures: { trackIds: trackIdList() },
+  acceptAppleDetails: { trackIds: trackIdList({ optional: false }) },
+  confirmAppleSetup: { confirmed: v.bool({ optional: false }) },
+  backupItunes: {},
+  analyzeAppleMigration: {},
+  applyAppleMigration: {
+    // A song's ID mapped to an iTunes persistent ID (hex) or "new".
+    resolutions: (value, name) => {
+      if (value === undefined || value === null) return undefined;
+      if (typeof value !== "object" || Array.isArray(value) || Object.keys(value).length > 20000) throw new ValidationError(`${name} is invalid`);
+      return Object.fromEntries(
+        Object.entries(value).map(([key, choice]) => {
+          if (!/^[0-9]{1,12}$/.test(key) || !(choice === "new" || (typeof choice === "string" && /^[0-9A-Fa-f]{16}$/.test(choice)))) throw new ValidationError(`${name} is invalid`);
+          return [key, choice === "new" ? choice : choice.toUpperCase()];
+        }),
+      );
+    },
+    dryRun: v.bool(),
+    backupAck: v.bool(),
+  },
+  verifyAppleLibrary: {},
+
+  // Library formats and missing files (relinking a file is the host method locateMissingFile).
+  getFormatStats: {},
+  listMissingFiles: {},
+  scanNumericGenres: {},
+  storeGenresAsText: { trackIds: trackIdList({ optional: false }) },
+  forgetMissingFile: { fileId: id() },
+  cleanUpAppleLibrary: {
+    pids: v.array(v.str({ max: 16, optional: false }), { max: 20000 }),
+    includeSuperseded: v.bool(),
+    expected: v.int({ min: 0, max: 100000, optional: true }),
+    backupAck: v.bool(),
+  },
+
   applyUpgrade: {
     candidateId: id(),
     // The final, edited metadata written into the new file (preferred) …
@@ -406,6 +465,7 @@ const HOST_METHOD_SCHEMAS = {
   deleteTrackFiles: { trackIds: trackIdList({ optional: false }) },
   cleanUpStorage: { categories: v.array(v.oneOf(CATEGORY_IDS, { optional: false }), { max: CATEGORY_IDS.length }) },
   showFileInFolder: { fileId: id() },
+  locateMissingFile: { fileId: id() },
 };
 const HOST_METHOD_NAMES = Object.keys(HOST_METHOD_SCHEMAS);
 
@@ -668,6 +728,11 @@ function createLibraryHost({ app, ipcMain, dialog, shell, BrowserWindow, protoco
       });
       if (result.canceled || !result.filePath) return null;
       return call("exportPlaylistM3U8", { id: params.id, filePath: result.filePath, relative: !!params.relative });
+    },
+    // Find a missing file: the user points at it; the library checks it's a fitting file in a library folder.
+    locateMissingFile: async (sender, params) => {
+      const filePath = await chooseFile(sender, "Find the missing file", { name: "Audio files", extensions: ["mp3", "m4a", "m4b", "mp4", "flac", "wav", "aif", "aiff", "aac"] });
+      return filePath ? call("relinkMissingFile", { fileId: params.fileId, filePath }) : null;
     },
     importPlaylistFile: async (sender) => {
       const filePath = await chooseFile(sender, "Import a playlist", { name: "Playlists", extensions: ["m3u8", "m3u"] });

@@ -23,6 +23,7 @@ import {
   PlaylistIcon,
   PlusIcon,
   QueueIcon,
+  RefreshIcon,
   TrashIcon,
   WaveformIcon,
 } from "./icons";
@@ -37,7 +38,7 @@ import { StorageView } from "./StorageView";
 import { TrackMenu } from "./TrackMenu";
 import { UpgradeDialog } from "./UpgradeDialog";
 import { ScanProgress, SourcesView } from "./SourcesView";
-import { errorMessage, libraryApi } from "./useLibrary";
+import { errorMessage, libraryApi, useJobRunner } from "./useLibrary";
 import "./library.css";
 
 const TITLES = {
@@ -54,7 +55,7 @@ const TITLES = {
   identify: "Identify",
   managed: "WaveMint Library",
   playlists: "Playlists",
-  iphone: "Prepare for iPhone",
+  iphone: "Apple Library Sync",
   sources: "Library sources",
   history: "History",
   storage: "Storage",
@@ -72,6 +73,12 @@ const JOB_LABELS = {
   import: "import",
   export: "export",
   "audio-edit": "audio-edit",
+  "apple-sync": "apple-sync",
+  "apple-preview": "apple-preview",
+  "apple-migration": "apple-migration",
+  "apple-backup": "apple-backup",
+  "apple-verify": "apple-verify",
+  "apple-cleanup": "apple-cleanup",
 };
 
 /**
@@ -96,7 +103,8 @@ export function LibraryView({ route, onNavigate: navigate, jobsState, status, on
 
   const scanJob = running.find((job) => job.kind === "scan");
   const otherJob = running.find((job) => job.kind !== "scan" && JOB_LABELS[job.kind]);
-  const busy = running.length > 0;
+  // Syncing with Apple runs beside other work: it doesn't lock the rest of the library.
+  const busy = running.some((job) => !job.kind.startsWith("apple-"));
   const lastJob = (kind) => jobs.filter((job) => job.kind === kind).at(-1) || null;
   const failedAnalysis = lastJob("merge-analysis");
 
@@ -114,6 +122,36 @@ export function LibraryView({ route, onNavigate: navigate, jobsState, status, on
 
   const cancelJob = (id) => libraryApi.cancelJob({ id }).catch(() => {});
   const fail = (fallback) => (err) => setError(errorMessage(err, fallback));
+  const runJob = useJobRunner();
+
+  /**
+   * Sync to iTunes for chosen songs only: adds them, sends their saved changes,
+   * relinks moved files (removals still need the Apple Library Sync screen).
+   * Nothing else in the library is touched.
+   */
+  const syncToItunes = async (ids) => {
+    try {
+      const job = await runJob(libraryApi.runAppleSync({ trackIds: ids }));
+      if (job.status !== "completed") return setError(job.error || "The sync didn't complete.");
+      const report = job.result || {};
+      const done = (report.added || 0) + (report.adopted || 0) + (report.updated || 0) + (report.relinked || 0) + (report.recreated || 0) + (report.removed || 0);
+      const problems = [...(report.failed || []).map((item) => item.error), ...(report.skipped || []).map((item) => item.reason)];
+      if (["waiting", "blocked", "stopped"].includes(report.status)) return notify({ tone: "warning", text: report.reason });
+      if (report.status === "nothing" && !problems.length && !report.review) return notify({ text: `Already up to date in iTunes (${pluralize(ids.length, "song")}).` });
+      notify({
+        tone: problems.length || report.review ? "warning" : "success",
+        text: [
+          done ? `Synced ${pluralize(done, "song")} to iTunes: ${report.added || 0} added, ${report.updated || 0} updated, ${report.relinked || 0} relinked.` : "Nothing was synced.",
+          problems.length ? `${pluralize(problems.length, "problem")}: ${problems[0]}` : "",
+          report.review ? `${pluralize(report.review, "change")} need a decision in Apple Library Sync.` : "",
+        ]
+          .filter(Boolean)
+          .join(" "),
+      });
+    } catch (err) {
+      setError(errorMessage(err, "The sync couldn't start."));
+    }
+  };
 
   const editAudioFor = (trackId) => {
     player.pause();
@@ -224,6 +262,7 @@ export function LibraryView({ route, onNavigate: navigate, jobsState, status, on
         ...(single && row.file_id
           ? [{ label: "Show in Explorer", icon: <FolderOpenIcon size={14} />, onSelect: () => libraryApi.showFileInFolder({ fileId: row.file_id }).catch(fail("The file couldn't be shown")) }]
           : []),
+        { label: "Sync to iTunes", icon: <RefreshIcon size={14} />, hint: single ? "this song only" : "these songs only", onSelect: () => syncToItunes(ids) },
         "separator",
         { label: "Remove from Library", icon: <CloseIcon size={14} />, hint: "keeps the file", onSelect: () => removeFromLibrary(ids, rows) },
         { label: "Delete File…", icon: <TrashIcon size={14} />, danger: true, onSelect: () => setDeleteRequest(ids) },
@@ -442,7 +481,7 @@ export function LibraryView({ route, onNavigate: navigate, jobsState, status, on
   } else if (view === "playlists") {
     content = <PlaylistsView revision={revision} playing={playing} onOpenTrack={openTrack} onTrackMenu={openTrackMenu} onChanged={bump} onError={setError} />;
   } else if (view === "iphone") {
-    content = <IphoneView revision={revision} exporting={running.some((job) => job.kind === "export")} onChanged={bump} onError={setError} />;
+    content = <IphoneView revision={revision} exporting={running.some((job) => job.kind === "export")} running={running} onChanged={bump} onError={setError} />;
   } else if (view === "managed") {
     content = <ManagedView revision={revision} busy={busy} lastJob={lastJob("consolidate")} onChanged={bump} onError={setError} />;
   } else if (view === "history") {
@@ -450,7 +489,7 @@ export function LibraryView({ route, onNavigate: navigate, jobsState, status, on
   } else if (view === "storage") {
     content = <StorageView revision={revision} onError={setError} />;
   } else if (view === "sources") {
-    content = <SourcesView revision={revision} busy={busy} scanJob={scanJob} onCancelJob={cancelJob} onAddSource={addSource} onError={setError} />;
+    content = <SourcesView revision={revision} busy={busy} scanJob={scanJob} onCancelJob={cancelJob} onAddSource={addSource} onError={setError} onNavigate={navigate} />;
   }
 
   return (

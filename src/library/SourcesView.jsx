@@ -46,7 +46,7 @@ export function ScanProgress({ job, onCancel }) {
   );
 }
 
-function SourceCard({ source, busy, onChanged, onError }) {
+function SourceCard({ source, busy, onChanged, onError, onNavigate }) {
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [confirmWritable, setConfirmWritable] = useState(false);
   const stats = source.last_scan_stats;
@@ -87,8 +87,11 @@ function SourceCard({ source, busy, onChanged, onError }) {
       <div className="lib-source__stats">
         <span>{formatNumber(source.file_count)} files</span>
         <span>{formatBytes(source.total_size)}</span>
-        {source.missing_count > 0 && <span className="is-warn">{formatNumber(source.missing_count)} missing</span>}
-        {source.unreadable_count > 0 && <span className="is-warn">{formatNumber(source.unreadable_count)} unreadable</span>}
+        {(source.missing_count > 0 || source.unreadable_count > 0) && (
+          <button type="button" className="btn btn--link is-warn" onClick={() => onNavigate?.("health")} title="Show which files and why, in File Health">
+            {[source.missing_count > 0 && `${formatNumber(source.missing_count)} missing`, source.unreadable_count > 0 && `${formatNumber(source.unreadable_count)} unreadable`].filter(Boolean).join(", ")}
+          </button>
+        )}
         <span>
           {source.last_scan_completed_at ? `Scanned ${formatDate(source.last_scan_completed_at)}` : "Not scanned yet"}
           {stats?.added ? ` · ${formatNumber(stats.added)} new` : ""}
@@ -220,7 +223,7 @@ function SourceCard({ source, busy, onChanged, onError }) {
   );
 }
 
-export function SourcesView({ revision, busy, scanJob, onCancelJob, onAddSource, onError }) {
+export function SourcesView({ revision, busy, scanJob, onCancelJob, onAddSource, onError, onNavigate }) {
   const { data: sources, error, reload } = useLoader(() => libraryApi.listSources(), [revision]);
 
   return (
@@ -259,7 +262,7 @@ export function SourcesView({ revision, busy, scanJob, onCancelJob, onAddSource,
 
       <div className="lib-source-list">
         {sources?.map((source) => (
-          <SourceCard key={source.id} source={source} busy={busy} onChanged={reload} onError={onError} />
+          <SourceCard key={source.id} source={source} busy={busy} onChanged={reload} onError={onError} onNavigate={onNavigate} />
         ))}
         {sources && !sources.length && <p className="lib-empty-note">No folders added yet.</p>}
       </div>

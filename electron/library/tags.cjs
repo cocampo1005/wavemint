@@ -189,6 +189,9 @@ function writeTags(filePath, fields) {
   }
 
   Id3v2Settings.defaultVersion = 3;
+  // Genres are written as text ("Anime"), never as ID3v1 numeric codes
+  // ("(145)"): iTunes only names codes 0–125 and shows the rest as numbers.
+  Id3v2Settings.useNumericGenres = false;
   // Preserve the on-disk version while parsing and saving existing frames.
   // Forcing v2.3 before opening a v2.4 tag misreads its frame lengths.
   Id3v2Settings.forceDefaultVersion = false;
@@ -225,8 +228,14 @@ function writeTags(filePath, fields) {
         const picture = Picture.fromData(ByteVector.fromByteArray(new Uint8Array(fields.artwork.data)));
         picture.type = PictureType.FrontCover;
         picture.mimeType = fields.artwork.mime || picture.mimeType || "image/jpeg";
-        // Other picture types (back cover, artist…) are kept.
-        const others = (tag.pictures || []).filter((item) => item.type !== PictureType.FrontCover);
+        // The picture that was the song's cover is replaced: its front cover,
+        // or (like readTags) the first picture when none is marked as the front
+        // cover (some taggers store the cover as "Other"). Other pictures (back
+        // cover, artist…) are kept, except copies of the new cover itself.
+        const existing = tag.pictures || [];
+        const cover = existing.some((item) => item.type === PictureType.FrontCover) ? null : existing[0];
+        const same = (item) => Buffer.from(item.data.toByteArray()).equals(Buffer.from(fields.artwork.data));
+        const others = existing.filter((item) => item.type !== PictureType.FrontCover && item !== cover && !same(item));
         tag.pictures = [picture, ...others];
       } else {
         tag.pictures = [];
